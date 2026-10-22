@@ -225,7 +225,7 @@
     <string name="settings_data_footer">%1$s · %2$s · Enregistré pendant la saisie.</string>
     <string name="settings_delete_all">Supprimer toutes les notes</string>
     <string name="settings_delete_all_sub">Toutes, y compris les notes archivées</string>
-    <string name="button_delete_all">Tout supprimer…</string>
+    <string name="button_delete_all">Tout supprimer</string>
     <string name="dialog_delete_all_title">Supprimer toutes les notes ?</string>
     <plurals name="dialog_delete_all_text">
         <item quantity="one">%d note sera supprimée, y compris les notes archivées. Vous pourrez encore annuler juste après.</item>

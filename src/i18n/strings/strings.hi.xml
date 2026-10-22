@@ -225,7 +225,7 @@
     <string name="settings_data_footer">%1$s · %2$s · लिखते समय सहेजा जाता है।</string>
     <string name="settings_delete_all">सभी नोट्स हटाएँ</string>
     <string name="settings_delete_all_sub">हर नोट, संग्रहित नोट्स भी</string>
-    <string name="button_delete_all">सभी हटाएँ…</string>
+    <string name="button_delete_all">सभी हटाएँ</string>
     <string name="dialog_delete_all_title">सभी नोट्स हटाएँ?</string>
     <plurals name="dialog_delete_all_text">
         <item quantity="one">इससे %d नोट हट जाएगा, संग्रहित नोट्स भी। इसके तुरंत बाद आप इसे पूर्ववत कर सकते हैं।</item>
