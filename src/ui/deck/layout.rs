@@ -102,15 +102,31 @@ pub(super) fn sync(d: &mut Deck) {
             t.fitted = None;
         }
     }
-    // Measured, not estimated, so the card is exactly as tall as its preview (up to
-    // PREVIEW_MAX, past which the body fades out).
-    let s = g.s;
-    let bf = super::draw::font(d, 2, 13.0, FW_NORMAL as i32);
-    let w = ((CARD_W - SPINE_W - 2.0 * 14.0) * s) as i32;
+    // Text, scale or typography may have changed: measure again when next pulled out,
+    // and right away for a card that is out now.
     for t in d.tabs.iter_mut() {
-        t.body_h = if t.body.is_empty() { 0.0 } else { crate::ui::body_height(&t.body, &bf, w, s) as f32 };
+        t.body_h = None;
+    }
+    for i in 0..d.tabs.len() {
+        if d.tabs[i].pull.target > 0.0 || d.tabs[i].pull.value > 0.0 {
+            measure_body(d, i);
+        }
     }
     anim::wake(Client::Deck);
+}
+
+/// Measure card `i`'s preview (not estimate it), so the card is exactly as tall as its
+/// text, up to PREVIEW_MAX, past which the text fades out. Done only when a card is about
+/// to be pulled out: laying text out loads DirectWrite, which an untouched deck never needs.
+pub(super) fn measure_body(d: &mut Deck, i: usize) {
+    if d.tabs.get(i).is_none_or(|t| t.body_h.is_some()) {
+        return;
+    }
+    let s = d.geo.s;
+    let bf = super::draw::font(d, 2, 13.0, FW_NORMAL as i32);
+    let w = ((CARD_W - SPINE_W - 2.0 * 14.0) * s) as i32;
+    let t = &mut d.tabs[i];
+    t.body_h = Some(if t.body.is_empty() { 0.0 } else { crate::ui::body_height(&t.body, &bf, w, s) as f32 });
 }
 
 pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
@@ -254,7 +270,7 @@ pub(super) fn footer_drop(d: &Deck) -> f32 {
 pub(super) fn preview_height(d: &Deck, i: usize) -> f32 {
     let s = d.geo.s;
     // Title band above the body, padding below it (as `draw_card` lays them out).
-    let h = 40.0 * s + d.tabs[i].body_h + 14.0 * s;
+    let h = 40.0 * s + d.tabs[i].body_h.unwrap_or(0.0) + 14.0 * s;
     h.clamp(d.geo.tab_h, PREVIEW_MAX * s)
 }
 

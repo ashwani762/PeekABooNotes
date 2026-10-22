@@ -84,8 +84,9 @@ struct Tab {
     pull: Spring, // 0 = tucked, 1 = pulled out (preview)
     /// Cached spine label layout: (max length, fitted text, text length, cell height).
     fitted: Option<(i32, String, i32, i32)>,
-    /// The preview body's laid-out height at the current scale and typography.
-    body_h: f32,
+    /// The preview body's laid-out height at the current scale and typography, measured
+    /// the first time the card is pulled out (see `begin_preview`).
+    body_h: Option<f32>,
 }
 
 impl Tab {
@@ -106,7 +107,7 @@ impl Tab {
             press: Spring::unit(1.0, motion::SNAPPY),
             pull: Spring::unit(0.0, motion::DEFAULT),
             fitted: None,
-            body_h: 0.0,
+            body_h: None,
             slot: 0,
         }
     }
@@ -453,6 +454,7 @@ enum Action {
 }
 
 fn begin_preview(d: &mut Deck, i: usize) {
+    measure_body(d, i);
     for (j, t) in d.tabs.iter_mut().enumerate() {
         t.pull.to(if j == i { 1.0 } else { 0.0 });
     }

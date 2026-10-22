@@ -76,6 +76,7 @@ enum Key {
     Folder,
     Import,
     Export,
+    DeleteAll,
 }
 
 enum Ctl {
@@ -128,6 +129,8 @@ struct Pal {
     field: (u32, f32),
     pill: u32,
     hover: (u32, f32),
+    /// Destructive buttons, and their text at rest (deeper red in light mode, for contrast).
+    danger: (u32, u32),
 }
 
 fn pal(dark: bool) -> Pal {
@@ -144,6 +147,7 @@ fn pal(dark: bool) -> Pal {
             field: (0x767680, 0.24),
             pill: 0x636366,
             hover: (0xFFFFFF, 0.06),
+            danger: (0xFF453A, 0xFF453A),
         }
     } else {
         Pal {
@@ -158,6 +162,7 @@ fn pal(dark: bool) -> Pal {
             field: (0x767680, 0.12),
             pill: 0xFFFFFF,
             hover: (0x000000, 0.045),
+            danger: (0xFF3B30, 0xD70015),
         }
     }
 }
@@ -371,6 +376,7 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         Key::Folder => app::open_notes_folder(),
         Key::Import => show_result(hwnd, k, app::import(hwnd), "result_imported"),
         Key::Export => show_result(hwnd, k, app::export_all(hwnd), "result_exported"),
+        Key::DeleteAll => app::delete_all(hwnd),
     }
 }
 

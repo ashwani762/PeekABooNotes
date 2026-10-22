@@ -223,4 +223,13 @@
         <item quantity="other">%d archivadas</item>
     </plurals>
     <string name="settings_data_footer">%1$s · %2$s · Se guarda mientras escribes.</string>
+    <string name="settings_delete_all">Eliminar todas las notas</string>
+    <string name="settings_delete_all_sub">Todas, también las archivadas</string>
+    <string name="button_delete_all">Eliminar todo…</string>
+    <string name="dialog_delete_all_title">¿Eliminar todas las notas?</string>
+    <plurals name="dialog_delete_all_text">
+        <item quantity="one">Se eliminará %d nota, incluidas las archivadas. Justo después aún podrás deshacerlo.</item>
+        <item quantity="other">Se eliminarán las %d notas, incluidas las archivadas. Justo después aún podrás deshacerlo.</item>
+    </plurals>
+    <string name="dialog_delete_all_ok">Eliminar todo</string>
 </resources>

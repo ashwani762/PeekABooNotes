@@ -76,15 +76,23 @@ pub(super) fn page(i: usize) -> Vec<Group> {
         ],
         _ => {
             let (n, archived) = app::store(|s| (s.d.notes.iter().filter(|n| !n.archived).count(), s.d.notes.iter().filter(|n| n.archived).count()));
-            vec![Group {
-                header: None,
-                rows: vec![
-                    row_sub(Key::Folder, t!("settings_notes_folder"), &data_dir().to_string_lossy(), Ctl::Button(t!("button_open"))),
-                    row_sub(Key::Import, t!("settings_import"), t!("settings_import_sub"), Ctl::Button(t!("button_import"))),
-                    row_sub(Key::Export, t!("settings_export_all"), t!("settings_export_sub"), Ctl::Button(t!("button_export"))),
-                ],
-                footer: Some(t!("settings_data_footer", tn!("notes_count", n), tn!("data_archived", archived))),
-            }]
+            vec![
+                Group {
+                    header: None,
+                    rows: vec![
+                        row_sub(Key::Folder, t!("settings_notes_folder"), &data_dir().to_string_lossy(), Ctl::Button(t!("button_open"))),
+                        row_sub(Key::Import, t!("settings_import"), t!("settings_import_sub"), Ctl::Button(t!("button_import"))),
+                        row_sub(Key::Export, t!("settings_export_all"), t!("settings_export_sub"), Ctl::Button(t!("button_export"))),
+                    ],
+                    footer: Some(t!("settings_data_footer", tn!("notes_count", n), tn!("data_archived", archived))),
+                },
+                // Destructive, so on its own at the end.
+                Group {
+                    header: None,
+                    rows: vec![row_sub(Key::DeleteAll, t!("settings_delete_all"), t!("settings_delete_all_sub"), Ctl::Button(t!("button_delete_all")))],
+                    footer: None,
+                },
+            ]
         }
     }
 }

@@ -214,4 +214,12 @@
         <item quantity="other">アーカイブ %d 件</item>
     </plurals>
     <string name="settings_data_footer">%1$s · %2$s · 入力中に自動で保存されます。</string>
+    <string name="settings_delete_all">すべてのメモを削除</string>
+    <string name="settings_delete_all_sub">アーカイブ済みのメモも含みます</string>
+    <string name="button_delete_all">すべて削除…</string>
+    <string name="dialog_delete_all_title">すべてのメモを削除しますか？</string>
+    <plurals name="dialog_delete_all_text">
+        <item quantity="other">アーカイブ済みを含む %d 件のメモをすべて削除します。削除の直後なら取り消せます。</item>
+    </plurals>
+    <string name="dialog_delete_all_ok">すべて削除</string>
 </resources>

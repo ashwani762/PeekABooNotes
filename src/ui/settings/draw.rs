@@ -208,16 +208,26 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
                 sh.x -= grow;
                 sh.w += grow;
             }
-            c.shape(&sh, p.field.0, p.field.1 * k, 1.0, 0.0);
+            // Delete All is red: tinted at rest, solid when aimed at, and dimmed with
+            // nothing left to delete.
+            let danger = row.key == Some(Key::DeleteAll);
+            let empty = danger && app::store(|s| s.d.notes.is_empty());
+            let (fill, fa, ink) = match (danger, empty) {
+                (true, true) => (p.field.0, p.field.1, p.sub),
+                (true, false) if hovered(0) => (p.danger.0, if pressed(0) { 0.82 } else { 1.0 }, 0xFFFFFF),
+                (true, false) => (p.danger.0, 0.10, p.danger.1),
+                _ => (p.field.0, p.field.1 * k, p.text),
+            };
+            c.shape(&sh, fill, fa, 1.0, 0.0);
             // Cross-fade by mixing toward the button's own colour (the canvas is opaque).
-            let face = mix(p.group, p.field.0, (p.field.1 * k).min(1.0));
+            let face = mix(p.group, fill, fa.min(1.0));
             // One after the other, never overlapping: the label is gone by the time the
             // result appears (and the result is gone before the label returns), so no
             // text ever spills past the pill while it resizes.
             let t = result.map_or(0.0, |r| r.2);
             let label_t = clamp01(1.0 - t / 0.4);
             if label_t > 0.001 {
-                c.line_ct(label, &f.button, sh.x as i32, mid + f.button.cap / 2, sh.w as i32, None, mix(face, p.text, label_t), DT_CENTER);
+                c.line_ct(label, &f.button, sh.x as i32, mid + f.button.cap / 2, sh.w as i32, None, mix(face, ink, label_t), DT_CENTER);
             }
             if let Some((ok, text, t)) = result.map(|(ok, text, t)| (ok, text, clamp01((t - 0.6) / 0.4))).filter(|r| r.2 > 0.001) {
                 let tw = f.button.measure(text).0 as f32;

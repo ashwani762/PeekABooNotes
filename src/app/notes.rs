@@ -194,6 +194,43 @@ pub fn delete(ids: Vec<u64>) {
     toast::show(count);
 }
 
+/// Delete every note, archived ones too, once the user has said yes. The usual Undo toast
+/// follows, so even a confirmed slip can be taken back.
+pub fn delete_all(owner: HWND) {
+    let ids: Vec<u64> = store(|s| s.d.notes.iter().map(|n| n.id).collect());
+    if !ids.is_empty() && confirm_delete_all(owner, ids.len()) {
+        delete(ids);
+    }
+}
+
+/// "Delete all notes?" with the count, as a system task dialog. Cancel is the default
+/// button, so Enter or Esc never deletes anything.
+fn confirm_delete_all(owner: HWND, n: usize) -> bool {
+    use windows_sys::Win32::UI::Controls::{
+        TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TD_WARNING_ICON, TDCBF_CANCEL_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION, TDF_POSITION_RELATIVE_TO_WINDOW,
+        TaskDialogIndirect,
+    };
+    const ID_DELETE: i32 = 100;
+    let (title, heading, text, ok) =
+        (wide(t!("app_name")), wide(t!("dialog_delete_all_title")), wide(&tn!("dialog_delete_all_text", n)), wide(t!("dialog_delete_all_ok")));
+    let buttons = [TASKDIALOG_BUTTON { nButtonID: ID_DELETE, pszButtonText: ok.as_ptr() }];
+    let mut cfg: TASKDIALOGCONFIG = unsafe { std::mem::zeroed() };
+    cfg.cbSize = size_of::<TASKDIALOGCONFIG>() as u32;
+    cfg.hwndParent = owner;
+    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    cfg.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    cfg.pszWindowTitle = title.as_ptr();
+    cfg.Anonymous1.pszMainIcon = TD_WARNING_ICON;
+    cfg.pszMainInstruction = heading.as_ptr();
+    cfg.pszContent = text.as_ptr();
+    cfg.cButtons = buttons.len() as u32;
+    cfg.pButtons = buttons.as_ptr();
+    cfg.nDefaultButton = IDCANCEL;
+    let mut chosen = 0;
+    let hr = unsafe { TaskDialogIndirect(&cfg, &mut chosen, null_mut(), null_mut()) };
+    hr >= 0 && chosen == ID_DELETE
+}
+
 pub fn undo_delete() {
     let mut pending = ui(|u| std::mem::take(&mut u.pending));
     toast::hide();

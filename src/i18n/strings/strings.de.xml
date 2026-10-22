@@ -223,4 +223,13 @@
         <item quantity="other">%d archiviert</item>
     </plurals>
     <string name="settings_data_footer">%1$s · %2$s · Wird beim Tippen gespeichert.</string>
+    <string name="settings_delete_all">Alle Notizen löschen</string>
+    <string name="settings_delete_all_sub">Jede Notiz, auch archivierte</string>
+    <string name="button_delete_all">Alle löschen…</string>
+    <string name="dialog_delete_all_title">Alle Notizen löschen?</string>
+    <plurals name="dialog_delete_all_text">
+        <item quantity="one">Dadurch wird %d Notiz gelöscht, auch archivierte. Direkt danach lässt sich das noch rückgängig machen.</item>
+        <item quantity="other">Dadurch werden alle %d Notizen gelöscht, auch archivierte. Direkt danach lässt sich das noch rückgängig machen.</item>
+    </plurals>
+    <string name="dialog_delete_all_ok">Alle löschen</string>
 </resources>

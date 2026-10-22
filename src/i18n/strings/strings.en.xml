@@ -233,4 +233,13 @@
         <item quantity="other">%d archived</item>
     </plurals>
     <string name="settings_data_footer">%1$s · %2$s · Saved as you type.</string>
+    <string name="settings_delete_all">Delete all notes</string>
+    <string name="settings_delete_all_sub">Every note, archived ones too</string>
+    <string name="button_delete_all">Delete All…</string>
+    <string name="dialog_delete_all_title">Delete all notes?</string>
+    <plurals name="dialog_delete_all_text">
+        <item quantity="one">This deletes %d note, archived ones included. You can still undo it right afterwards.</item>
+        <item quantity="other">This deletes all %d notes, archived ones included. You can still undo it right afterwards.</item>
+    </plurals>
+    <string name="dialog_delete_all_ok">Delete All</string>
 </resources>
