@@ -181,6 +181,13 @@ fn render(g: &mut Ghost) {
     c.present(g.hwnd, g.origin.0, g.origin.1);
 }
 
+/// Drop every card still in flight (quitting).
+pub fn clear() {
+    for g in GHOSTS.with(|gs| std::mem::take(&mut *gs.borrow_mut())) {
+        unsafe { DestroyWindow(g.hwnd) };
+    }
+}
+
 pub fn frame(dt: f32) -> bool {
     let mut arrivals: Vec<Box<dyn FnOnce()>> = Vec::new();
     let alive = GHOSTS.with(|gs| {

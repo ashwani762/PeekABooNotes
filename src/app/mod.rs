@@ -208,10 +208,14 @@ pub fn quit() {
             unsafe { DestroyWindow(w) };
         }
     }
-    toast::hide();
+    toast::close();
+    crate::ui::ghost::clear();
     deck::shutdown();
     tray(false);
     save();
+    // Release Direct2D/DirectWrite while the process is fully alive: left to the exit-time
+    // thread-local teardown, Direct2D faults inside the loader's shutdown and the exit stalls.
+    crate::render::dw::trim();
     unsafe { PostQuitMessage(0) };
 }
 

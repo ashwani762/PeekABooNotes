@@ -21,9 +21,13 @@ pub(super) fn compute_geo(n_items: usize) -> Geo {
     g.top = 14.0 * s;
     let stack = g.top + g.n as f32 * g.step - gap + if g.more > 0 { 36.0 * s } else { 0.0 } + 8.0 * s + 34.0 * s + 16.0 * s;
     g.centre = work.top + (pos.clamp(0.05, 0.95) * wh) as i32;
-    g.eh = stack.round() as i32;
+    // With only a few cards the stack is short, but a pulled-out card can be as tall as
+    // its preview: the window always has room for the tallest one, or it gets cut off.
+    g.eh = stack.max((PREVIEW_MAX + 16.0) * s).min(wh).round() as i32;
     g.ew = ((CARD_W + PULL_GAP + 28.0) * s).round() as i32;
     g.ey = (g.centre - g.eh / 2).clamp(work.top, (work.bottom - g.eh).max(work.top));
+    // The stack stays centred on the pill within the taller window.
+    g.top += ((g.centre - g.ey) as f32 - stack / 2.0).clamp(0.0, (g.eh as f32 - stack).max(0.0));
     g.ex = if left { work.left } else { work.right - g.ew };
     g.cw = ((PILL_W + PILL_INSET + 12.0) * s).round() as i32;
     g.ch = (g.pill_h() + 36.0 * s).round() as i32;
@@ -229,7 +233,7 @@ pub(super) fn preview_height(d: &Deck, i: usize) -> f32 {
     let lines = t.body.lines().count().min(9) as f32;
     let wrapped_extra = t.body.lines().map(|l| (l.chars().count() / 34) as f32).sum::<f32>().min(4.0);
     let h = (66.0 + (lines + wrapped_extra) * 19.0) * s;
-    h.clamp(d.geo.tab_h, 300.0 * s)
+    h.clamp(d.geo.tab_h, PREVIEW_MAX * s)
 }
 
 pub(super) fn hit_test(d: &Deck, x: i32, y: i32) -> Hit {

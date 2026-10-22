@@ -90,6 +90,13 @@ pub fn hide() {
     anim::wake(Client::Toast);
 }
 
+/// Gone at once, without the slide out (quitting).
+pub fn close() {
+    if let Some(t) = TOAST.with(|t| t.borrow_mut().take()) {
+        unsafe { DestroyWindow(t.hwnd) };
+    }
+}
+
 pub fn frame(dt: f32) -> bool {
     let mut expire = false;
     let keep = TOAST.with(|cell| {

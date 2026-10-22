@@ -51,6 +51,7 @@ const TAB_W: f32 = 46.0; // visible depth of a tucked card
 const SPINE_W: f32 = 34.0;
 const CARD_W: f32 = 304.0;
 const CARD_R: f32 = 14.0;
+const PREVIEW_MAX: f32 = 300.0; // tallest a pulled-out card grows for its preview
 const BULGE: f32 = 14.0;
 const LEAN: f32 = -0.022; // radians; cards lean very slightly, like a deck of index cards
 const PULL_GAP: f32 = 18.0; // gap between the screen edge and a pulled-out card
@@ -262,12 +263,14 @@ pub fn create() {
 }
 
 pub fn shutdown() {
-    if let Some(h) = with(|d| d.hwnd) {
+    // Taken out first, so no frame still in flight draws it back; its canvas and fonts go with it.
+    if let Some(d) = DECK.with(|d| d.borrow_mut().take()) {
         unsafe {
             let mut abd: APPBARDATA = std::mem::zeroed();
             abd.cbSize = size_of::<APPBARDATA>() as u32;
-            abd.hWnd = h;
+            abd.hWnd = d.hwnd;
             SHAppBarMessage(ABM_REMOVE, &mut abd);
+            DestroyWindow(d.hwnd);
         }
     }
 }

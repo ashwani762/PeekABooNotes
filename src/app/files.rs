@@ -56,13 +56,11 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
 
 /// The system folder picker, opening in `start` when that folder still exists.
 fn pick_folder(owner: HWND, title: &str, start: &str) -> Option<std::path::PathBuf> {
-    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree};
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize};
     use windows::Win32::UI::Shell::{
         FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
     };
-    unsafe {
-        // Already initialised on this thread is fine.
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    let pick = || unsafe {
         let d: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
         d.SetOptions(d.GetOptions().ok()? | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
         d.SetTitle(&windows::core::HSTRING::from(title)).ok()?;
@@ -78,7 +76,15 @@ fn pick_folder(owner: HWND, title: &str, start: &str) -> Option<std::path::PathB
         let s = path.to_string().ok();
         CoTaskMemFree(Some(path.0 as _));
         s.map(Into::into)
+    };
+    // COM only for the dialog's lifetime: uninitialising unloads the shell extensions it
+    // pulled in now, rather than leaving them to tear down at exit.
+    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let path = pick();
+    if com.is_ok() {
+        unsafe { CoUninitialize() };
     }
+    path
 }
 
 pub fn import(owner: HWND) -> Outcome {
