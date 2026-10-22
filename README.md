@@ -153,7 +153,9 @@ cargo build --release
 target\release\peekaboo-notes.exe
 ```
 
-**Installer:** `powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1` builds an MSIX package in `target\msix\` (pass `-CertPath`/`-Password` or `-Thumbprint` to sign it). An installed copy starts with Windows through the package's startup task, and uninstalling it from Settings > Apps leaves your notes in Documents.
+**Installers**
+- **Setup wizard (Inno Setup):** `powershell -ExecutionPolicy Bypass -File packaging\inno\build-setup.ps1` builds `target\setup\PeekABooNotes-Setup-<version>.exe` (add `-NoBuild` to reuse `target\release`). It installs per user without admin, offers a desktop shortcut and starting with Windows, and its uninstaller asks whether to delete your notes too. Needs Inno Setup 6 (`winget install JRSoftware.InnoSetup`).
+- **MSIX:** `powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1` builds a package in `target\msix\` (pass `-CertPath`/`-Password` or `-Thumbprint` to sign it). An installed copy starts with Windows through the package's startup task, and uninstalling it from Settings > Apps leaves your notes in Documents.
 
 Needs Rust (edition 2024) and runs on Windows 10 or 11.
 - `cargo test` runs the unit tests (string files, plural rules, the Markdown parser).
