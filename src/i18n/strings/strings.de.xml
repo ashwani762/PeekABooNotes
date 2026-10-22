@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Peekaboo Notes interface text: German. See strings.en.xml for how translations work. -->
+<resources>
+    <!-- About -->
+    <string name="app_name">Peekaboo Notes</string>
+    <string name="language_name">Deutsch</string>
+    <string name="tray_tooltip">%1$s — Notizen am Bildschirmrand</string>
+    <string name="window_all_notes">Alle Notizen — %1$s</string>
+    <string name="window_settings">%1$s – Einstellungen</string>
+    <string name="window_undo">Löschen widerrufen</string>
+    <string name="settings_version">Version %1$s</string>
+
+    <!-- Keys -->
+    <string name="key_ctrl">Strg</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Umschalt</string>
+    <string name="key_enter">Eingabe</string>
+    <string name="key_del">Entf</string>
+    <string name="key_esc">Esc</string>
+    <string name="key_tab">Tab</string>
+
+    <!-- Menus -->
+    <string name="menu_new_note">Neue Notiz</string>
+    <string name="menu_all_notes">Alle Notizen</string>
+    <string name="menu_archive">Archiv</string>
+    <string name="menu_reopen_last">Letzte Notiz wieder öffnen</string>
+    <string name="menu_undo_delete">Löschen widerrufen</string>
+    <string name="menu_show_deck">Stapel anzeigen</string>
+    <string name="menu_move_deck">Stapel an den anderen Rand</string>
+    <string name="menu_settings">Einstellungen…</string>
+    <string name="menu_quit">%1$s beenden</string>
+    <string name="menu_open">Öffnen</string>
+    <string name="menu_keep_on_top">Immer im Vordergrund</string>
+    <string name="menu_show_in_deck">Im Stapel zeigen</string>
+    <string name="menu_restore">Aus dem Archiv holen</string>
+    <string name="menu_delete">Löschen</string>
+    <string name="menu_previous_note">Vorherige Notiz</string>
+    <string name="menu_next_note">Nächste Notiz</string>
+    <string name="menu_cut">Ausschneiden</string>
+    <string name="menu_copy">Kopieren</string>
+    <string name="menu_paste">Einfügen</string>
+    <string name="menu_select_all">Alles auswählen</string>
+
+    <!-- Notes -->
+    <string name="note_untitled">Neue Notiz</string>
+    <string name="note_edited">Bearbeitet %1$s</string>
+    <string name="file_untitled">Ohne Titel</string>
+
+    <!-- Times -->
+    <string name="time_just_now">gerade eben</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">vor %d Min.</item>
+        <item quantity="other">vor %d Min.</item>
+    </plurals>
+    <string name="time_yesterday">Gestern</string>
+    <string name="time_today_at">Heute um %1$s</string>
+    <string name="time_yesterday_at">Gestern um %1$s</string>
+    <string name="time_date_at">%1$s um %2$s</string>
+
+    <!-- Undo toast -->
+    <plurals name="toast_deleted">
+        <item quantity="one">Notiz gelöscht</item>
+        <item quantity="other">%d Notizen gelöscht</item>
+    </plurals>
+    <string name="toast_undo">Widerrufen</string>
+
+    <!-- All Notes -->
+    <string name="library_title_notes">Notizen</string>
+    <string name="library_title_archive">Archiv</string>
+    <string name="library_title_all">Alle Notizen</string>
+    <string name="segment_notes">Notizen</string>
+    <string name="segment_archive">Archiv</string>
+    <string name="segment_all">Alle</string>
+    <plurals name="notes_count">
+        <item quantity="one">%d Notiz</item>
+        <item quantity="other">%d Notizen</item>
+    </plurals>
+    <string name="search_placeholder">Suchen</string>
+    <string name="empty_search_title">Keine Treffer für „%1$s“</string>
+    <string name="empty_search_body">Prüfe die Schreibweise oder versuche ein anderes Wort.</string>
+    <string name="empty_archive_title">Nichts archiviert</string>
+    <string name="empty_archive_body">Archivierte Notizen verlassen den Stapel, bleiben hier aber durchsuchbar.</string>
+    <string name="empty_notes_title">Noch keine Notizen</string>
+    <string name="empty_notes_body">Drücke %1$s oder klicke oben auf +, um eine zu schreiben.</string>
+    <string name="state_in_deck">Aktiv · Im Stapel</string>
+    <string name="state_off_deck">Aktiv · Nicht im Stapel</string>
+    <string name="state_archived">Archiviert</string>
+    <plurals name="state_selected">
+        <item quantity="one">%d ausgewählt</item>
+        <item quantity="other">%d ausgewählt</item>
+    </plurals>
+    <plurals name="notes_selected">
+        <item quantity="one">%d Notiz ausgewählt</item>
+        <item quantity="other">%d Notizen ausgewählt</item>
+    </plurals>
+    <string name="row_archived">%1$s · Archiviert</string>
+    <string name="row_off_deck">%1$s · Nicht im Stapel</string>
+    <string name="card_no_text">Kein weiterer Text</string>
+    <string name="card_meta">Bearbeitet %1$s  ·  Erstellt %2$s</string>
+    <string name="button_open">Öffnen</string>
+    <string name="button_archive">Archivieren</string>
+    <string name="button_restore">Zurückholen</string>
+    <plurals name="result_imported">
+        <item quantity="one">%d importiert</item>
+        <item quantity="other">%d importiert</item>
+    </plurals>
+    <plurals name="result_exported">
+        <item quantity="one">%d exportiert</item>
+        <item quantity="other">%d exportiert</item>
+    </plurals>
+    <string name="result_failed">Fehlgeschlagen</string>
+    <string name="button_export">Exportieren</string>
+    <string name="button_delete">Löschen</string>
+    <string name="button_open_here">Hier öffnen</string>
+    <string name="button_import">Importieren</string>
+
+    <!-- Deck -->
+    <string name="deck_more">+%1$d</string>
+
+    <!-- Import dialog -->
+    <plurals name="dialog_export_title">
+        <item quantity="one">%d Notiz in einen Ordner exportieren</item>
+        <item quantity="other">%d Notizen in einen Ordner exportieren</item>
+    </plurals>
+    <string name="dialog_export_ok">Hier exportieren</string>
+    <string name="dialog_import_title">Dateien zum Importieren wählen</string>
+    <string name="dialog_filter_text">Text und Markdown</string>
+    <string name="dialog_filter_all">Alle Dateien</string>
+
+    <!-- Settings: pages -->
+    <string name="settings_title">Einstellungen</string>
+    <string name="settings_page_general">Allgemein</string>
+    <string name="settings_page_notes">Notizen</string>
+    <string name="settings_page_deck">Stapel</string>
+    <string name="settings_page_shortcuts">Tastenkürzel</string>
+    <string name="settings_page_data">Daten</string>
+
+    <!-- Settings: General -->
+    <string name="settings_start_with_windows">Mit Windows starten</string>
+    <string name="settings_group_appearance">Darstellung</string>
+    <string name="settings_theme">Design</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Hell</string>
+    <string name="theme_dark">Dunkel</string>
+    <string name="settings_language">Sprache</string>
+    <string name="language_follow_windows">Wie Windows</string>
+    <string name="settings_group_motion">Bewegung</string>
+    <string name="settings_reduce_motion">Bewegung reduzieren</string>
+    <string name="settings_reduce_motion_sub">Überblenden statt Gleiten und Federn</string>
+    <string name="settings_motion_footer">%1$s folgt auch der Windows-Einstellung für Animationseffekte.</string>
+
+    <!-- Settings: Notes -->
+    <string name="settings_font">Schrift</string>
+    <string name="font_system">System</string>
+    <string name="font_serif">Serif</string>
+    <string name="font_mono">Mono</string>
+    <string name="font_hand">Hand</string>
+    <string name="settings_text_size">Textgröße</string>
+    <string name="size_small">Klein</string>
+    <string name="size_medium">Mittel</string>
+    <string name="size_large">Groß</string>
+    <string name="settings_new_color">Farbe neuer Notizen</string>
+    <string name="color_automatic">Automatisch</string>
+    <string name="settings_color_footer">Automatisch gibt jeder neuen Notiz die nächste Farbe der Reihe.</string>
+    <string name="settings_group_preview">Vorschau</string>
+    <string name="preview_title">Wochenendplan</string>
+    <string name="preview_line">Auf dem Heimweg Blumen holen</string>
+    <string name="preview_task">Tisch für acht reservieren</string>
+    <string name="color_yellow">Gelb</string>
+    <string name="color_peach">Pfirsich</string>
+    <string name="color_pink">Rosa</string>
+    <string name="color_lilac">Flieder</string>
+    <string name="color_blue">Blau</string>
+    <string name="color_mint">Mint</string>
+    <string name="color_lime">Limette</string>
+    <string name="color_graphite">Graphit</string>
+    <string name="color_coral">Koralle</string>
+    <string name="color_sky">Himmel</string>
+    <string name="color_teal">Petrol</string>
+    <string name="color_sand">Sand</string>
+
+    <!-- Settings: Deck -->
+    <string name="settings_show_deck">Stapel anzeigen</string>
+    <string name="settings_show_deck_sub">Deine Notizen als Reiter am Bildschirmrand</string>
+    <string name="settings_screen_edge">Bildschirmrand</string>
+    <string name="edge_left">Links</string>
+    <string name="edge_right">Rechts</string>
+    <string name="edge_top">Oben</string>
+    <string name="edge_bottom">Unten</string>
+    <string name="settings_cards">Karten im Stapel</string>
+    <string name="settings_cards_sub">Der Rest liegt in Alle Notizen</string>
+    <string name="settings_new_notes">Neue Notizen</string>
+    <string name="settings_new_notes_sub">In Alle Notizen per Ziehen umsortieren</string>
+    <string name="new_notes_top">Oben</string>
+    <string name="new_notes_bottom">Unten</string>
+    <string name="settings_fullscreen">Über Vollbild-Apps zeigen</string>
+    <string name="settings_fullscreen_sub">Stapel auch bei Videos und Spielen im Vollbild</string>
+    <string name="settings_deck_footer">Rechtsklick auf eine Notiz und „Im Stapel zeigen“ aus, um sie vom Rand fernzuhalten.</string>
+
+    <!-- Settings: Shortcuts -->
+    <string name="settings_group_anywhere">Überall</string>
+    <string name="settings_group_in_note">In einer Notiz</string>
+    <string name="shortcut_new_note">Neue Notiz</string>
+    <string name="shortcut_all_notes">Alle Notizen</string>
+    <string name="shortcut_archive">Archiv</string>
+    <string name="shortcut_reopen">Letzte Notiz wieder öffnen</string>
+    <string name="shortcut_toggle_deck">Stapel ein- oder ausblenden</string>
+    <string name="shortcut_move_deck">Stapel an den anderen Rand</string>
+    <string name="shortcut_checklist">Checkliste</string>
+    <string name="shortcut_tick">Abhaken oder zurücksetzen</string>
+    <string name="shortcut_nest">Listeneintrag ein- oder ausrücken</string>
+    <string name="shortcut_prev_next">Vorherige oder nächste Notiz</string>
+    <string name="shortcut_next_color">Nächste Farbe</string>
+
+    <!-- Settings: Data -->
+    <string name="settings_notes_folder">Notizordner</string>
+    <string name="settings_import">Notizen importieren</string>
+    <string name="settings_import_sub">Markdown- und Textdateien</string>
+    <string name="settings_export_all">Alle Notizen exportieren</string>
+    <string name="settings_export_sub">Eine Markdown-Datei pro Notiz</string>
+    <plurals name="data_archived">
+        <item quantity="one">%d archiviert</item>
+        <item quantity="other">%d archiviert</item>
+    </plurals>
+    <string name="settings_data_footer">%1$s · %2$s · Wird beim Tippen gespeichert.</string>
+</resources>

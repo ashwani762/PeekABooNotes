@@ -1,0 +1,295 @@
+//! The note database: one ordinary JSON file, written atomically.
+
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::platform::util::now;
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct Note {
+    pub id: u64,
+    /// Rich content as RTF, as produced by the RichEdit control.
+    #[serde(default)]
+    pub rtf: String,
+    /// Plain text with light Markdown list markers; used for titles, search, previews and export.
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub color: u8,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub pinned: bool,
+    /// Kept out of the edge deck (still active, still in All Notes).
+    #[serde(default)]
+    pub off_deck: bool,
+    #[serde(default)]
+    pub created: i64,
+    #[serde(default)]
+    pub updated: i64,
+    #[serde(default)]
+    pub order: i64,
+    /// Last window rectangle (screen coordinates), so notes reopen where you left them.
+    #[serde(default)]
+    pub rect: Option<[i32; 4]>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Settings {
+    #[serde(default)]
+    pub edge_left: bool,
+    #[serde(default)]
+    pub deck_hidden: bool,
+    #[serde(default)]
+    pub over_fullscreen: bool,
+    /// Vertical centre of the deck as a fraction of the work area height.
+    #[serde(default = "default_pos")]
+    pub deck_pos: f32,
+    /// 0 follows Windows, 1 light, 2 dark.
+    #[serde(default)]
+    pub theme: u8,
+    #[serde(default)]
+    pub reduce_motion: bool,
+    /// Most cards the deck shows; the rest are a click away in All Notes.
+    #[serde(default = "default_deck_max")]
+    pub deck_max: u8,
+    /// Colour for new notes; None cycles through every colour.
+    #[serde(default)]
+    pub new_color: Option<u8>,
+    /// New notes join the top of the deck instead of the bottom.
+    #[serde(default)]
+    pub new_on_top: bool,
+    /// Note typeface: 0 system, 1 serif, 2 mono, 3 handwriting.
+    #[serde(default)]
+    pub note_font: u8,
+    /// Note text size: 0 small, 1 medium, 2 large.
+    #[serde(default = "default_note_size")]
+    pub note_size: u8,
+    /// Interface language tag ("de", "pt-BR"); empty follows Windows.
+    #[serde(default)]
+    pub language: String,
+    /// The note last worked on, for "Reopen Last Note" (also after a restart).
+    #[serde(default)]
+    pub last_note: Option<u64>,
+    /// Where the last export went; the folder picker starts there.
+    #[serde(default)]
+    pub export_dir: String,
+}
+
+fn default_note_size() -> u8 {
+    1
+}
+
+fn default_pos() -> f32 {
+    0.5
+}
+
+fn default_deck_max() -> u8 {
+    8
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            edge_left: false,
+            deck_hidden: false,
+            over_fullscreen: false,
+            deck_pos: default_pos(),
+            theme: 0,
+            reduce_motion: false,
+            deck_max: default_deck_max(),
+            new_color: None,
+            new_on_top: false,
+            note_font: 0,
+            note_size: default_note_size(),
+            language: String::new(),
+            last_note: None,
+            export_dir: String::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Data {
+    #[serde(default)]
+    pub next_id: u64,
+    #[serde(default)]
+    pub notes: Vec<Note>,
+    #[serde(default)]
+    pub settings: Settings,
+}
+
+pub struct Store {
+    pub path: PathBuf,
+    pub d: Data,
+}
+
+impl Store {
+    pub fn load(dir: PathBuf) -> Store {
+        let path = dir.join("notes.json");
+        let d = match std::fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice::<Data>(&bytes) {
+                Ok(d) => {
+                    // A copy of the last good file from the previous session.
+                    let _ = std::fs::write(dir.join("notes.backup.json"), &bytes);
+                    d
+                }
+                Err(_) => {
+                    // Never overwrite a file we failed to understand.
+                    let _ = std::fs::rename(&path, dir.join(format!("notes.unreadable-{}.json", now())));
+                    Data::default()
+                }
+            },
+            Err(_) => Data::default(),
+        };
+        let mut s = Store { path, d };
+        let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
+        s.d.next_id = s.d.next_id.max(max);
+        // Early builds stored the deck at 42% height; the deck is now centred by default.
+        if (s.d.settings.deck_pos - 0.42).abs() < 0.001 {
+            s.d.settings.deck_pos = 0.5;
+        }
+        s
+    }
+
+    pub fn save(&self) {
+        if let Ok(json) = serde_json::to_vec_pretty(&self.d) {
+            let tmp = self.path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.path);
+            }
+        }
+    }
+
+    pub fn note(&self, id: u64) -> Option<&Note> {
+        self.d.notes.iter().find(|n| n.id == id)
+    }
+
+    pub fn note_mut(&mut self, id: u64) -> Option<&mut Note> {
+        self.d.notes.iter_mut().find(|n| n.id == id)
+    }
+
+    /// Active (not archived) notes in deck order.
+    pub fn active_ids(&self) -> Vec<u64> {
+        let mut v: Vec<&Note> = self.d.notes.iter().filter(|n| !n.archived).collect();
+        v.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
+        v.into_iter().map(|n| n.id).collect()
+    }
+
+    pub fn create(&mut self, text: &str, rtf: &str) -> u64 {
+        self.d.next_id += 1;
+        let id = self.d.next_id;
+        let t = now();
+        let active = self.d.notes.iter().filter(|n| !n.archived).map(|n| n.order);
+        let order = if self.d.settings.new_on_top { active.min().unwrap_or(0) - 1 } else { active.max().unwrap_or(0) + 1 };
+        let hues = crate::theme::ORDER;
+        let color = self.d.settings.new_color.unwrap_or(hues[self.d.notes.len() % hues.len()]);
+        self.d.notes.push(Note {
+            id,
+            rtf: rtf.into(),
+            text: text.into(),
+            color,
+            created: t,
+            updated: t,
+            order,
+            ..Default::default()
+        });
+        id
+    }
+
+    pub fn remove(&mut self, id: u64) -> Option<(usize, Note)> {
+        let i = self.d.notes.iter().position(|n| n.id == id)?;
+        Some((i, self.d.notes.remove(i)))
+    }
+
+    pub fn insert_at(&mut self, i: usize, n: Note) {
+        let i = i.min(self.d.notes.len());
+        self.d.notes.insert(i, n);
+    }
+
+    pub fn reorder(&mut self, ids: &[u64]) {
+        for (i, id) in ids.iter().enumerate() {
+            if let Some(n) = self.note_mut(*id) {
+                n.order = i as i64;
+            }
+        }
+    }
+}
+
+const MARKERS: [&str; 6] = ["[ ] ", "[x] ", "- [ ] ", "- [x] ", "- ", "* "];
+
+/// Strip a leading list marker ("- ", "1. ", "[ ] " ...) from a line.
+pub fn strip_marker(line: &str) -> &str {
+    let l = line.trim_start();
+    for m in MARKERS {
+        if let Some(rest) = l.strip_prefix(m) {
+            return rest;
+        }
+    }
+    let digits = l.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0
+        && let Some(rest) = l[digits..].strip_prefix(". ") {
+            return rest;
+        }
+    l
+}
+
+pub fn title_of(text: &str) -> String {
+    let line = text.lines().map(|l| strip_marker(l).trim()).find(|l| !l.is_empty()).unwrap_or("");
+    if line.is_empty() {
+        return crate::t!("note_untitled").into();
+    }
+    let mut t: String = line.chars().take(80).collect();
+    if line.chars().count() > 80 {
+        t.push('…');
+    }
+    t
+}
+
+/// Everything after the title line, with markers turned into glyphs for previews.
+/// Nested items keep two leading spaces per level (see `ui::draw_body`).
+pub fn body_of(text: &str) -> String {
+    let mut lines = text.lines().skip_while(|l| strip_marker(l).trim().is_empty());
+    lines.next();
+    let mut out = String::new();
+    for l in lines {
+        let t = l.trim_start();
+        let level = ((l.len() - t.len()) / 2).min(5);
+        let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
+        let pretty = if let Some(r) = t.strip_prefix("[ ] ") {
+            format!("○  {r}")
+        } else if let Some(r) = t.strip_prefix("[x] ") {
+            format!("●  {r}")
+        } else if let Some(r) = t.strip_prefix("- ") {
+            format!("•  {r}")
+        } else if let Some(r) = t[digits..].strip_prefix(". ").filter(|_| digits > 0) {
+            format!("{}. {r}", list_number(t[..digits].parse().unwrap_or(1), level))
+        } else {
+            t.to_string()
+        };
+        out.push_str(&"  ".repeat(level));
+        out.push_str(&pretty);
+        out.push('\n');
+    }
+    out.trim_end().to_string()
+}
+
+/// Item `n` of a numbered list at nesting `level`, styled like the editor: 1. a. i.
+fn list_number(n: usize, level: usize) -> String {
+    match level % 3 {
+        0 => n.to_string(),
+        1 => char::from(b'a' + ((n.max(1) - 1) % 26) as u8).to_string(),
+        _ => {
+            const R: [(usize, &str); 7] = [(50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")];
+            let (mut n, mut out) = (n.clamp(1, 89), String::new());
+            for (v, r) in R {
+                while n >= v {
+                    out.push_str(r);
+                    n -= v;
+                }
+            }
+            out
+        }
+    }
+}

@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Peekaboo Notes interface text: Japanese. See strings.en.xml for how translations work. -->
+<resources>
+    <!-- About -->
+    <string name="app_name">Peekaboo Notes</string>
+    <string name="language_name">日本語</string>
+    <string name="tray_tooltip">%1$s — 画面の端のメモ</string>
+    <string name="window_all_notes">すべてのメモ — %1$s</string>
+    <string name="window_settings">%1$s の設定</string>
+    <string name="window_undo">削除の取り消し</string>
+    <string name="settings_version">バージョン %1$s</string>
+
+    <!-- Keys -->
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Shift</string>
+    <string name="key_enter">Enter</string>
+    <string name="key_del">Del</string>
+    <string name="key_esc">Esc</string>
+    <string name="key_tab">Tab</string>
+
+    <!-- Menus -->
+    <string name="menu_new_note">新規メモ</string>
+    <string name="menu_all_notes">すべてのメモ</string>
+    <string name="menu_archive">アーカイブ</string>
+    <string name="menu_reopen_last">最後のメモを再び開く</string>
+    <string name="menu_undo_delete">削除を取り消す</string>
+    <string name="menu_show_deck">デッキを表示</string>
+    <string name="menu_move_deck">デッキを反対の端へ移動</string>
+    <string name="menu_settings">設定…</string>
+    <string name="menu_quit">%1$s を終了</string>
+    <string name="menu_open">開く</string>
+    <string name="menu_keep_on_top">常に手前に表示</string>
+    <string name="menu_show_in_deck">デッキに表示</string>
+    <string name="menu_restore">アーカイブから戻す</string>
+    <string name="menu_delete">削除</string>
+    <string name="menu_previous_note">前のメモ</string>
+    <string name="menu_next_note">次のメモ</string>
+    <string name="menu_cut">切り取り</string>
+    <string name="menu_copy">コピー</string>
+    <string name="menu_paste">貼り付け</string>
+    <string name="menu_select_all">すべて選択</string>
+
+    <!-- Notes -->
+    <string name="note_untitled">新規メモ</string>
+    <string name="note_edited">%1$s に編集</string>
+    <string name="file_untitled">無題</string>
+
+    <!-- Times -->
+    <string name="time_just_now">たった今</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="other">%d 分前</item>
+    </plurals>
+    <string name="time_yesterday">昨日</string>
+    <string name="time_today_at">今日 %1$s</string>
+    <string name="time_yesterday_at">昨日 %1$s</string>
+    <string name="time_date_at">%1$s %2$s</string>
+
+    <!-- Undo toast -->
+    <plurals name="toast_deleted">
+        <item quantity="other">%d 件のメモを削除しました</item>
+    </plurals>
+    <string name="toast_undo">取り消す</string>
+
+    <!-- All Notes -->
+    <string name="library_title_notes">メモ</string>
+    <string name="library_title_archive">アーカイブ</string>
+    <string name="library_title_all">すべてのメモ</string>
+    <string name="segment_notes">メモ</string>
+    <string name="segment_archive">アーカイブ</string>
+    <string name="segment_all">すべて</string>
+    <plurals name="notes_count">
+        <item quantity="other">%d 件</item>
+    </plurals>
+    <string name="search_placeholder">検索</string>
+    <string name="empty_search_title">「%1$s」に一致するメモはありません</string>
+    <string name="empty_search_body">つづりを確認するか、別の言葉で検索してください。</string>
+    <string name="empty_archive_title">アーカイブは空です</string>
+    <string name="empty_archive_body">アーカイブしたメモはデッキから外れますが、ここで検索できます。</string>
+    <string name="empty_notes_title">メモはまだありません</string>
+    <string name="empty_notes_body">%1$s を押すか、上の + をクリックして書き始めましょう。</string>
+    <string name="state_in_deck">使用中 · デッキにあり</string>
+    <string name="state_off_deck">使用中 · デッキになし</string>
+    <string name="state_archived">アーカイブ済み</string>
+    <plurals name="state_selected">
+        <item quantity="other">%d 件を選択中</item>
+    </plurals>
+    <plurals name="notes_selected">
+        <item quantity="other">%d 件のメモを選択中</item>
+    </plurals>
+    <string name="row_archived">%1$s · アーカイブ済み</string>
+    <string name="row_off_deck">%1$s · デッキになし</string>
+    <string name="card_no_text">ほかにテキストはありません</string>
+    <string name="card_meta">編集 %1$s  ·  作成 %2$s</string>
+    <string name="button_open">開く</string>
+    <string name="button_archive">アーカイブ</string>
+    <string name="button_restore">戻す</string>
+    <plurals name="result_imported">
+        <item quantity="other">%d 件読み込み</item>
+    </plurals>
+    <plurals name="result_exported">
+        <item quantity="other">%d 件書き出し</item>
+    </plurals>
+    <string name="result_failed">失敗</string>
+    <string name="button_export">書き出す</string>
+    <string name="button_delete">削除</string>
+    <string name="button_open_here">ここで開く</string>
+    <string name="button_import">読み込む</string>
+
+    <!-- Deck -->
+    <string name="deck_more">+%1$d</string>
+
+    <!-- Import dialog -->
+    <plurals name="dialog_export_title">
+        <item quantity="other">%d 件のメモをフォルダーに書き出す</item>
+    </plurals>
+    <string name="dialog_export_ok">ここに書き出す</string>
+    <string name="dialog_import_title">読み込むファイルを選択</string>
+    <string name="dialog_filter_text">テキストと Markdown</string>
+    <string name="dialog_filter_all">すべてのファイル</string>
+
+    <!-- Settings: pages -->
+    <string name="settings_title">設定</string>
+    <string name="settings_page_general">一般</string>
+    <string name="settings_page_notes">メモ</string>
+    <string name="settings_page_deck">デッキ</string>
+    <string name="settings_page_shortcuts">ショートカット</string>
+    <string name="settings_page_data">データ</string>
+
+    <!-- Settings: General -->
+    <string name="settings_start_with_windows">Windows の起動時に開始</string>
+    <string name="settings_group_appearance">外観</string>
+    <string name="settings_theme">テーマ</string>
+    <string name="theme_system">システム</string>
+    <string name="theme_light">ライト</string>
+    <string name="theme_dark">ダーク</string>
+    <string name="settings_language">言語</string>
+    <string name="language_follow_windows">Windows と同じ</string>
+    <string name="settings_group_motion">動き</string>
+    <string name="settings_reduce_motion">動きを減らす</string>
+    <string name="settings_reduce_motion_sub">スライドや弾む動きの代わりにフェードを使う</string>
+    <string name="settings_motion_footer">%1$s は Windows のアニメーション効果の設定にも従います。</string>
+
+    <!-- Settings: Notes -->
+    <string name="settings_font">フォント</string>
+    <string name="font_system">システム</string>
+    <string name="font_serif">明朝風</string>
+    <string name="font_mono">等幅</string>
+    <string name="font_hand">手書き</string>
+    <string name="settings_text_size">文字の大きさ</string>
+    <string name="size_small">小</string>
+    <string name="size_medium">中</string>
+    <string name="size_large">大</string>
+    <string name="settings_new_color">新規メモの色</string>
+    <string name="color_automatic">自動</string>
+    <string name="settings_color_footer">自動では、新しいメモごとに次の色が順番に付きます。</string>
+    <string name="settings_group_preview">プレビュー</string>
+    <string name="preview_title">週末の予定</string>
+    <string name="preview_line">帰りに花を買う</string>
+    <string name="preview_task">8 人分の席を予約</string>
+    <string name="color_yellow">イエロー</string>
+    <string name="color_peach">ピーチ</string>
+    <string name="color_pink">ピンク</string>
+    <string name="color_lilac">ライラック</string>
+    <string name="color_blue">ブルー</string>
+    <string name="color_mint">ミント</string>
+    <string name="color_lime">ライム</string>
+    <string name="color_graphite">グラファイト</string>
+    <string name="color_coral">コーラル</string>
+    <string name="color_sky">スカイ</string>
+    <string name="color_teal">ティール</string>
+    <string name="color_sand">サンド</string>
+
+    <!-- Settings: Deck -->
+    <string name="settings_show_deck">デッキを表示</string>
+    <string name="settings_show_deck_sub">メモを画面の端のタブとして表示</string>
+    <string name="settings_screen_edge">画面の端</string>
+    <string name="edge_left">左</string>
+    <string name="edge_right">右</string>
+    <string name="edge_top">上</string>
+    <string name="edge_bottom">下</string>
+    <string name="settings_cards">デッキのカード数</string>
+    <string name="settings_cards_sub">残りは「すべてのメモ」からすぐに開けます</string>
+    <string name="settings_new_notes">新規メモの位置</string>
+    <string name="settings_new_notes_sub">「すべてのメモ」でドラッグして並べ替え</string>
+    <string name="new_notes_top">上</string>
+    <string name="new_notes_bottom">下</string>
+    <string name="settings_fullscreen">全画面アプリの上にも表示</string>
+    <string name="settings_fullscreen_sub">動画やゲームが全画面のときもデッキを表示</string>
+    <string name="settings_deck_footer">メモを右クリックして「デッキに表示」をオフにすると、端から外せます。</string>
+
+    <!-- Settings: Shortcuts -->
+    <string name="settings_group_anywhere">どこでも</string>
+    <string name="settings_group_in_note">メモの中で</string>
+    <string name="shortcut_new_note">新規メモ</string>
+    <string name="shortcut_all_notes">すべてのメモ</string>
+    <string name="shortcut_archive">アーカイブ</string>
+    <string name="shortcut_reopen">最後のメモを再び開く</string>
+    <string name="shortcut_toggle_deck">デッキの表示/非表示</string>
+    <string name="shortcut_move_deck">デッキを反対の端へ移動</string>
+    <string name="shortcut_checklist">チェックリスト</string>
+    <string name="shortcut_tick">チェックを付ける/外す</string>
+    <string name="shortcut_nest">リスト項目の字下げ/戻す</string>
+    <string name="shortcut_prev_next">前のメモ/次のメモ</string>
+    <string name="shortcut_next_color">次の色</string>
+
+    <!-- Settings: Data -->
+    <string name="settings_notes_folder">メモのフォルダ</string>
+    <string name="settings_import">メモを読み込む</string>
+    <string name="settings_import_sub">Markdown とテキストのファイル</string>
+    <string name="settings_export_all">すべてのメモを書き出す</string>
+    <string name="settings_export_sub">メモごとに Markdown ファイルを 1 つ</string>
+    <plurals name="data_archived">
+        <item quantity="other">アーカイブ %d 件</item>
+    </plurals>
+    <string name="settings_data_footer">%1$s · %2$s · 入力中に自動で保存されます。</string>
+</resources>

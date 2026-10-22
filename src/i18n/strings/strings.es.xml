@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Peekaboo Notes interface text: Spanish. See strings.en.xml for how translations work. -->
+<resources>
+    <!-- About -->
+    <string name="app_name">Peekaboo Notes</string>
+    <string name="language_name">Español</string>
+    <string name="tray_tooltip">%1$s — notas en el borde de la pantalla</string>
+    <string name="window_all_notes">Todas las notas — %1$s</string>
+    <string name="window_settings">Ajustes de %1$s</string>
+    <string name="window_undo">Deshacer eliminación</string>
+    <string name="settings_version">Versión %1$s</string>
+
+    <!-- Keys -->
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Mayús</string>
+    <string name="key_enter">Intro</string>
+    <string name="key_del">Supr</string>
+    <string name="key_esc">Esc</string>
+    <string name="key_tab">Tab</string>
+
+    <!-- Menus -->
+    <string name="menu_new_note">Nueva nota</string>
+    <string name="menu_all_notes">Todas las notas</string>
+    <string name="menu_archive">Archivo</string>
+    <string name="menu_reopen_last">Reabrir la última nota</string>
+    <string name="menu_undo_delete">Deshacer eliminación</string>
+    <string name="menu_show_deck">Mostrar el mazo</string>
+    <string name="menu_move_deck">Mover el mazo al otro borde</string>
+    <string name="menu_settings">Ajustes…</string>
+    <string name="menu_quit">Salir de %1$s</string>
+    <string name="menu_open">Abrir</string>
+    <string name="menu_keep_on_top">Siempre visible</string>
+    <string name="menu_show_in_deck">Mostrar en el mazo</string>
+    <string name="menu_restore">Restaurar del archivo</string>
+    <string name="menu_delete">Eliminar</string>
+    <string name="menu_previous_note">Nota anterior</string>
+    <string name="menu_next_note">Nota siguiente</string>
+    <string name="menu_cut">Cortar</string>
+    <string name="menu_copy">Copiar</string>
+    <string name="menu_paste">Pegar</string>
+    <string name="menu_select_all">Seleccionar todo</string>
+
+    <!-- Notes -->
+    <string name="note_untitled">Nueva nota</string>
+    <string name="note_edited">Editada %1$s</string>
+    <string name="file_untitled">Sin título</string>
+
+    <!-- Times -->
+    <string name="time_just_now">ahora mismo</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">hace %d min</item>
+        <item quantity="other">hace %d min</item>
+    </plurals>
+    <string name="time_yesterday">Ayer</string>
+    <string name="time_today_at">Hoy a las %1$s</string>
+    <string name="time_yesterday_at">Ayer a las %1$s</string>
+    <string name="time_date_at">%1$s a las %2$s</string>
+
+    <!-- Undo toast -->
+    <plurals name="toast_deleted">
+        <item quantity="one">Nota eliminada</item>
+        <item quantity="other">%d notas eliminadas</item>
+    </plurals>
+    <string name="toast_undo">Deshacer</string>
+
+    <!-- All Notes -->
+    <string name="library_title_notes">Notas</string>
+    <string name="library_title_archive">Archivo</string>
+    <string name="library_title_all">Todas las notas</string>
+    <string name="segment_notes">Notas</string>
+    <string name="segment_archive">Archivo</string>
+    <string name="segment_all">Todas</string>
+    <plurals name="notes_count">
+        <item quantity="one">%d nota</item>
+        <item quantity="other">%d notas</item>
+    </plurals>
+    <string name="search_placeholder">Buscar</string>
+    <string name="empty_search_title">Sin resultados para «%1$s»</string>
+    <string name="empty_search_body">Revisa la ortografía o prueba otra palabra.</string>
+    <string name="empty_archive_title">Nada archivado</string>
+    <string name="empty_archive_body">Las notas archivadas salen del mazo pero siguen apareciendo en las búsquedas.</string>
+    <string name="empty_notes_title">Aún no hay notas</string>
+    <string name="empty_notes_body">Pulsa %1$s o haz clic en + arriba para escribir una.</string>
+    <string name="state_in_deck">Activa · En el mazo</string>
+    <string name="state_off_deck">Activa · Fuera del mazo</string>
+    <string name="state_archived">Archivada</string>
+    <plurals name="state_selected">
+        <item quantity="one">%d seleccionada</item>
+        <item quantity="other">%d seleccionadas</item>
+    </plurals>
+    <plurals name="notes_selected">
+        <item quantity="one">%d nota seleccionada</item>
+        <item quantity="other">%d notas seleccionadas</item>
+    </plurals>
+    <string name="row_archived">%1$s · Archivada</string>
+    <string name="row_off_deck">%1$s · Fuera del mazo</string>
+    <string name="card_no_text">Sin más texto</string>
+    <string name="card_meta">Editada %1$s  ·  Creada %2$s</string>
+    <string name="button_open">Abrir</string>
+    <string name="button_archive">Archivar</string>
+    <string name="button_restore">Restaurar</string>
+    <plurals name="result_imported">
+        <item quantity="one">%d importada</item>
+        <item quantity="other">%d importadas</item>
+    </plurals>
+    <plurals name="result_exported">
+        <item quantity="one">%d exportada</item>
+        <item quantity="other">%d exportadas</item>
+    </plurals>
+    <string name="result_failed">Error</string>
+    <string name="button_export">Exportar</string>
+    <string name="button_delete">Eliminar</string>
+    <string name="button_open_here">Abrir aquí</string>
+    <string name="button_import">Importar</string>
+
+    <!-- Deck -->
+    <string name="deck_more">+%1$d</string>
+
+    <!-- Import dialog -->
+    <plurals name="dialog_export_title">
+        <item quantity="one">Exportar %d nota a una carpeta</item>
+        <item quantity="other">Exportar %d notas a una carpeta</item>
+    </plurals>
+    <string name="dialog_export_ok">Exportar aquí</string>
+    <string name="dialog_import_title">Elige archivos para importar</string>
+    <string name="dialog_filter_text">Texto y Markdown</string>
+    <string name="dialog_filter_all">Todos los archivos</string>
+
+    <!-- Settings: pages -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_page_general">General</string>
+    <string name="settings_page_notes">Notas</string>
+    <string name="settings_page_deck">Mazo</string>
+    <string name="settings_page_shortcuts">Atajos</string>
+    <string name="settings_page_data">Datos</string>
+
+    <!-- Settings: General -->
+    <string name="settings_start_with_windows">Iniciar con Windows</string>
+    <string name="settings_group_appearance">Apariencia</string>
+    <string name="settings_theme">Tema</string>
+    <string name="theme_system">Sistema</string>
+    <string name="theme_light">Claro</string>
+    <string name="theme_dark">Oscuro</string>
+    <string name="settings_language">Idioma</string>
+    <string name="language_follow_windows">Igual que Windows</string>
+    <string name="settings_group_motion">Movimiento</string>
+    <string name="settings_reduce_motion">Reducir movimiento</string>
+    <string name="settings_reduce_motion_sub">Fundidos en lugar de deslizamientos y rebotes</string>
+    <string name="settings_motion_footer">%1$s también sigue el ajuste Efectos de animación de Windows.</string>
+
+    <!-- Settings: Notes -->
+    <string name="settings_font">Fuente</string>
+    <string name="font_system">Sistema</string>
+    <string name="font_serif">Serif</string>
+    <string name="font_mono">Mono</string>
+    <string name="font_hand">Mano</string>
+    <string name="settings_text_size">Tamaño del texto</string>
+    <string name="size_small">Pequeño</string>
+    <string name="size_medium">Mediano</string>
+    <string name="size_large">Grande</string>
+    <string name="settings_new_color">Color inicial</string>
+    <string name="color_automatic">Automático</string>
+    <string name="settings_color_footer">Automático da a cada nota nueva el siguiente color.</string>
+    <string name="settings_group_preview">Vista previa</string>
+    <string name="preview_title">Plan del fin de semana</string>
+    <string name="preview_line">Comprar flores de camino a casa</string>
+    <string name="preview_task">Reservar mesa para ocho</string>
+    <string name="color_yellow">Amarillo</string>
+    <string name="color_peach">Melocotón</string>
+    <string name="color_pink">Rosa</string>
+    <string name="color_lilac">Lila</string>
+    <string name="color_blue">Azul</string>
+    <string name="color_mint">Menta</string>
+    <string name="color_lime">Lima</string>
+    <string name="color_graphite">Grafito</string>
+    <string name="color_coral">Coral</string>
+    <string name="color_sky">Cielo</string>
+    <string name="color_teal">Verde azulado</string>
+    <string name="color_sand">Arena</string>
+
+    <!-- Settings: Deck -->
+    <string name="settings_show_deck">Mostrar el mazo</string>
+    <string name="settings_show_deck_sub">Tus notas como pestañas en el borde de la pantalla</string>
+    <string name="settings_screen_edge">Borde de la pantalla</string>
+    <string name="edge_left">Izquierda</string>
+    <string name="edge_right">Derecha</string>
+    <string name="edge_top">Arriba</string>
+    <string name="edge_bottom">Abajo</string>
+    <string name="settings_cards">Tarjetas en el mazo</string>
+    <string name="settings_cards_sub">El resto, en Todas las notas</string>
+    <string name="settings_new_notes">Notas nuevas</string>
+    <string name="settings_new_notes_sub">Arrastra en Todas las notas para reordenar</string>
+    <string name="new_notes_top">Arriba</string>
+    <string name="new_notes_bottom">Abajo</string>
+    <string name="settings_fullscreen">Mostrar sobre apps a pantalla completa</string>
+    <string name="settings_fullscreen_sub">Mantener el mazo sobre vídeos y juegos</string>
+    <string name="settings_deck_footer">Haz clic derecho en una nota y desactiva Mostrar en el mazo para quitarla del borde.</string>
+
+    <!-- Settings: Shortcuts -->
+    <string name="settings_group_anywhere">En cualquier lugar</string>
+    <string name="settings_group_in_note">En una nota</string>
+    <string name="shortcut_new_note">Nueva nota</string>
+    <string name="shortcut_all_notes">Todas las notas</string>
+    <string name="shortcut_archive">Archivo</string>
+    <string name="shortcut_reopen">Reabrir la última nota</string>
+    <string name="shortcut_toggle_deck">Mostrar u ocultar el mazo</string>
+    <string name="shortcut_move_deck">Mover el mazo al otro borde</string>
+    <string name="shortcut_checklist">Lista de tareas</string>
+    <string name="shortcut_tick">Marcar o desmarcar</string>
+    <string name="shortcut_nest">Sangrar o quitar sangría</string>
+    <string name="shortcut_prev_next">Nota anterior o siguiente</string>
+    <string name="shortcut_next_color">Color siguiente</string>
+
+    <!-- Settings: Data -->
+    <string name="settings_notes_folder">Carpeta de notas</string>
+    <string name="settings_import">Importar notas</string>
+    <string name="settings_import_sub">Archivos Markdown y de texto</string>
+    <string name="settings_export_all">Exportar todas las notas</string>
+    <string name="settings_export_sub">Un archivo Markdown por nota</string>
+    <plurals name="data_archived">
+        <item quantity="one">%d archivada</item>
+        <item quantity="other">%d archivadas</item>
+    </plurals>
+    <string name="settings_data_footer">%1$s · %2$s · Se guarda mientras escribes.</string>
+</resources>

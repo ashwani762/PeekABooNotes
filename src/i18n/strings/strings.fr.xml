@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Peekaboo Notes interface text: French. See strings.en.xml for how translations work. -->
+<resources>
+    <!-- About -->
+    <string name="app_name">Peekaboo Notes</string>
+    <string name="language_name">Français</string>
+    <string name="tray_tooltip">%1$s — des notes au bord de l’écran</string>
+    <string name="window_all_notes">Toutes les notes — %1$s</string>
+    <string name="window_settings">Réglages de %1$s</string>
+    <string name="window_undo">Annuler la suppression</string>
+    <string name="settings_version">Version %1$s</string>
+
+    <!-- Keys -->
+    <string name="key_ctrl">Ctrl</string>
+    <string name="key_alt">Alt</string>
+    <string name="key_shift">Maj</string>
+    <string name="key_enter">Entrée</string>
+    <string name="key_del">Suppr</string>
+    <string name="key_esc">Échap</string>
+    <string name="key_tab">Tab</string>
+
+    <!-- Menus -->
+    <string name="menu_new_note">Nouvelle note</string>
+    <string name="menu_all_notes">Toutes les notes</string>
+    <string name="menu_archive">Archives</string>
+    <string name="menu_reopen_last">Rouvrir la dernière note</string>
+    <string name="menu_undo_delete">Annuler la suppression</string>
+    <string name="menu_show_deck">Afficher la pile</string>
+    <string name="menu_move_deck">Déplacer la pile sur l’autre bord</string>
+    <string name="menu_settings">Réglages…</string>
+    <string name="menu_quit">Quitter %1$s</string>
+    <string name="menu_open">Ouvrir</string>
+    <string name="menu_keep_on_top">Toujours au premier plan</string>
+    <string name="menu_show_in_deck">Afficher dans la pile</string>
+    <string name="menu_restore">Restaurer depuis les archives</string>
+    <string name="menu_delete">Supprimer</string>
+    <string name="menu_previous_note">Note précédente</string>
+    <string name="menu_next_note">Note suivante</string>
+    <string name="menu_cut">Couper</string>
+    <string name="menu_copy">Copier</string>
+    <string name="menu_paste">Coller</string>
+    <string name="menu_select_all">Tout sélectionner</string>
+
+    <!-- Notes -->
+    <string name="note_untitled">Nouvelle note</string>
+    <string name="note_edited">Modifiée %1$s</string>
+    <string name="file_untitled">Sans titre</string>
+
+    <!-- Times -->
+    <string name="time_just_now">à l’instant</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">il y a %d min</item>
+        <item quantity="other">il y a %d min</item>
+    </plurals>
+    <string name="time_yesterday">Hier</string>
+    <string name="time_today_at">Aujourd’hui à %1$s</string>
+    <string name="time_yesterday_at">Hier à %1$s</string>
+    <string name="time_date_at">%1$s à %2$s</string>
+
+    <!-- Undo toast -->
+    <plurals name="toast_deleted">
+        <item quantity="one">Note supprimée</item>
+        <item quantity="other">%d notes supprimées</item>
+    </plurals>
+    <string name="toast_undo">Annuler</string>
+
+    <!-- All Notes -->
+    <string name="library_title_notes">Notes</string>
+    <string name="library_title_archive">Archives</string>
+    <string name="library_title_all">Toutes les notes</string>
+    <string name="segment_notes">Notes</string>
+    <string name="segment_archive">Archives</string>
+    <string name="segment_all">Toutes</string>
+    <plurals name="notes_count">
+        <item quantity="one">%d note</item>
+        <item quantity="other">%d notes</item>
+    </plurals>
+    <string name="search_placeholder">Rechercher</string>
+    <string name="empty_search_title">Aucun résultat pour « %1$s »</string>
+    <string name="empty_search_body">Vérifiez l’orthographe ou essayez un autre mot.</string>
+    <string name="empty_archive_title">Aucune archive</string>
+    <string name="empty_archive_body">Les notes archivées quittent la pile mais restent consultables ici.</string>
+    <string name="empty_notes_title">Pas encore de notes</string>
+    <string name="empty_notes_body">Appuyez sur %1$s ou cliquez sur + ci-dessus pour en écrire une.</string>
+    <string name="state_in_deck">Active · Dans la pile</string>
+    <string name="state_off_deck">Active · Hors de la pile</string>
+    <string name="state_archived">Archivée</string>
+    <plurals name="state_selected">
+        <item quantity="one">%d sélectionnée</item>
+        <item quantity="other">%d sélectionnées</item>
+    </plurals>
+    <plurals name="notes_selected">
+        <item quantity="one">%d note sélectionnée</item>
+        <item quantity="other">%d notes sélectionnées</item>
+    </plurals>
+    <string name="row_archived">%1$s · Archivée</string>
+    <string name="row_off_deck">%1$s · Hors de la pile</string>
+    <string name="card_no_text">Aucun autre texte</string>
+    <string name="card_meta">Modifiée %1$s  ·  Créée %2$s</string>
+    <string name="button_open">Ouvrir</string>
+    <string name="button_archive">Archiver</string>
+    <string name="button_restore">Restaurer</string>
+    <plurals name="result_imported">
+        <item quantity="one">%d importée</item>
+        <item quantity="other">%d importées</item>
+    </plurals>
+    <plurals name="result_exported">
+        <item quantity="one">%d exportée</item>
+        <item quantity="other">%d exportées</item>
+    </plurals>
+    <string name="result_failed">Échec</string>
+    <string name="button_export">Exporter</string>
+    <string name="button_delete">Supprimer</string>
+    <string name="button_open_here">Ouvrir ici</string>
+    <string name="button_import">Importer</string>
+
+    <!-- Deck -->
+    <string name="deck_more">+%1$d</string>
+
+    <!-- Import dialog -->
+    <plurals name="dialog_export_title">
+        <item quantity="one">Exporter %d note dans un dossier</item>
+        <item quantity="other">Exporter %d notes dans un dossier</item>
+    </plurals>
+    <string name="dialog_export_ok">Exporter ici</string>
+    <string name="dialog_import_title">Choisir les fichiers à importer</string>
+    <string name="dialog_filter_text">Texte et Markdown</string>
+    <string name="dialog_filter_all">Tous les fichiers</string>
+
+    <!-- Settings: pages -->
+    <string name="settings_title">Réglages</string>
+    <string name="settings_page_general">Général</string>
+    <string name="settings_page_notes">Notes</string>
+    <string name="settings_page_deck">Pile</string>
+    <string name="settings_page_shortcuts">Raccourcis</string>
+    <string name="settings_page_data">Données</string>
+
+    <!-- Settings: General -->
+    <string name="settings_start_with_windows">Lancer avec Windows</string>
+    <string name="settings_group_appearance">Apparence</string>
+    <string name="settings_theme">Thème</string>
+    <string name="theme_system">Système</string>
+    <string name="theme_light">Clair</string>
+    <string name="theme_dark">Sombre</string>
+    <string name="settings_language">Langue</string>
+    <string name="language_follow_windows">Comme Windows</string>
+    <string name="settings_group_motion">Mouvement</string>
+    <string name="settings_reduce_motion">Réduire les animations</string>
+    <string name="settings_reduce_motion_sub">Fondus au lieu de glissements et de rebonds</string>
+    <string name="settings_motion_footer">%1$s suit aussi le réglage Effets d’animation de Windows.</string>
+
+    <!-- Settings: Notes -->
+    <string name="settings_font">Police</string>
+    <string name="font_system">Système</string>
+    <string name="font_serif">Serif</string>
+    <string name="font_mono">Mono</string>
+    <string name="font_hand">Manuscrite</string>
+    <string name="settings_text_size">Taille du texte</string>
+    <string name="size_small">Petite</string>
+    <string name="size_medium">Moyenne</string>
+    <string name="size_large">Grande</string>
+    <string name="settings_new_color">Couleur initiale</string>
+    <string name="color_automatic">Automatique</string>
+    <string name="settings_color_footer">Automatique donne à chaque nouvelle note la couleur suivante.</string>
+    <string name="settings_group_preview">Aperçu</string>
+    <string name="preview_title">Programme du week-end</string>
+    <string name="preview_line">Prendre des fleurs en rentrant</string>
+    <string name="preview_task">Réserver une table pour huit</string>
+    <string name="color_yellow">Jaune</string>
+    <string name="color_peach">Pêche</string>
+    <string name="color_pink">Rose</string>
+    <string name="color_lilac">Lilas</string>
+    <string name="color_blue">Bleu</string>
+    <string name="color_mint">Menthe</string>
+    <string name="color_lime">Citron vert</string>
+    <string name="color_graphite">Graphite</string>
+    <string name="color_coral">Corail</string>
+    <string name="color_sky">Ciel</string>
+    <string name="color_teal">Sarcelle</string>
+    <string name="color_sand">Sable</string>
+
+    <!-- Settings: Deck -->
+    <string name="settings_show_deck">Afficher la pile</string>
+    <string name="settings_show_deck_sub">Vos notes en onglets au bord de l’écran</string>
+    <string name="settings_screen_edge">Bord de l’écran</string>
+    <string name="edge_left">Gauche</string>
+    <string name="edge_right">Droite</string>
+    <string name="edge_top">Haut</string>
+    <string name="edge_bottom">Bas</string>
+    <string name="settings_cards">Cartes dans la pile</string>
+    <string name="settings_cards_sub">Les autres sont dans Toutes les notes</string>
+    <string name="settings_new_notes">Nouvelles notes</string>
+    <string name="settings_new_notes_sub">Glissez dans Toutes les notes pour trier</string>
+    <string name="new_notes_top">En haut</string>
+    <string name="new_notes_bottom">En bas</string>
+    <string name="settings_fullscreen">Afficher sur les apps en plein écran</string>
+    <string name="settings_fullscreen_sub">Garder la pile pendant les vidéos et les jeux</string>
+    <string name="settings_deck_footer">Clic droit sur une note, puis désactivez Afficher dans la pile pour la retirer du bord.</string>
+
+    <!-- Settings: Shortcuts -->
+    <string name="settings_group_anywhere">Partout</string>
+    <string name="settings_group_in_note">Dans une note</string>
+    <string name="shortcut_new_note">Nouvelle note</string>
+    <string name="shortcut_all_notes">Toutes les notes</string>
+    <string name="shortcut_archive">Archives</string>
+    <string name="shortcut_reopen">Rouvrir la dernière note</string>
+    <string name="shortcut_toggle_deck">Afficher ou masquer la pile</string>
+    <string name="shortcut_move_deck">Déplacer la pile sur l’autre bord</string>
+    <string name="shortcut_checklist">Liste de tâches</string>
+    <string name="shortcut_tick">Cocher ou décocher</string>
+    <string name="shortcut_nest">Indenter ou désindenter un élément</string>
+    <string name="shortcut_prev_next">Note précédente ou suivante</string>
+    <string name="shortcut_next_color">Couleur suivante</string>
+
+    <!-- Settings: Data -->
+    <string name="settings_notes_folder">Dossier des notes</string>
+    <string name="settings_import">Importer des notes</string>
+    <string name="settings_import_sub">Fichiers Markdown et texte brut</string>
+    <string name="settings_export_all">Exporter toutes les notes</string>
+    <string name="settings_export_sub">Un fichier Markdown par note</string>
+    <plurals name="data_archived">
+        <item quantity="one">%d archivée</item>
+        <item quantity="other">%d archivées</item>
+    </plurals>
+    <string name="settings_data_footer">%1$s · %2$s · Enregistré pendant la saisie.</string>
+</resources>
