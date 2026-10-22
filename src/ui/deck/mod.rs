@@ -39,7 +39,7 @@ mod draw;
 use layout::*;
 use draw::*;
 
-const CLASS: &str = "PeekabooDeck";
+const CLASS: &str = "PeekABooDeck";
 const T_PREVIEW: usize = 2;
 const T_COLLAPSE: usize = 3;
 const WM_APPBAR: u32 = WM_APP + 20;

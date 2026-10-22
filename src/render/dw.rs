@@ -230,7 +230,7 @@ impl Font {
     }
 
     /// A path shortened in the middle to fit `max` px, keeping its root and its end
-    /// (the folder that matters): `C:\Users\…\Peekaboo Notes`.
+    /// (the folder that matters): `C:\Users\…\PeekABoo Notes`.
     pub fn fit_path(&self, s: &str, max: i32) -> String {
         if self.measure(s).0 <= max {
             return s.to_string();

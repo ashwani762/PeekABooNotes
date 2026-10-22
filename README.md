@@ -1,4 +1,4 @@
-<h1 align="center">Peekaboo Notes</h1>
+<h1 align="center">PeekABoo Notes</h1>
 
 <p align="center">
   Sticky notes that live on the edge of your screen, for Windows 10 and 11.<br>
@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/hero.png" alt="Peekaboo Notes: two notes on the desktop and the edge deck fanned out, previewing a checklist. Light and dark appearance, split diagonally." width="100%">
+  <img src="docs/screenshots/hero.png" alt="PeekABoo Notes: two notes on the desktop and the edge deck fanned out, previewing a checklist. Light and dark appearance, split diagonally." width="100%">
 </p>
 
 A slim pill sits on the screen edge, one colour capsule per note. Point at it and your notes fan out as tabs. Rest on a tab and the card slides out to preview the note; click and it opens as its own floating window. Everything moves on springs, follows the Windows light or dark appearance, and speaks your language.
@@ -14,13 +14,14 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 ## Features
 
 **The edge deck**
-- A pill of colour capsules that fans out into tabs. The tab under the pointer bulges, and resting on it slides the card out as a preview. Long titles scroll along the tab.
+- A pill of colour capsules that fans out into tabs. The tab under the pointer bulges, and resting on it slides the card out as a preview; a long note fades out at the bottom of its card. Long titles scroll along the tab.
 - Drag tabs to reorder them. Show 5, 8 or 12 cards; a "+N" chip opens the rest.
 - Right-click a card for its menu; the card stays out beside the menu.
 - **Show in Deck** keeps any note active but off the edge.
 
 **Notes**
-- Borderless paper cards that reopen where you left them, with the caret at the end, ready to carry on. Pin one to keep it on top.
+- Borderless paper cards that reopen where you left them: same place on screen, same scroll, caret where you stopped. Pin one to keep it on top.
+- Long notes get a slim scroll bar that shows while you scroll; drag it, click the track, or use the wheel anywhere on the note.
 - Bold, italic, underline and strikethrough. The first line is the title, and links are clickable.
 - Bullets, numbers and checklists:
   - Typing `- `, `* `, `1. ` or `[] ` at the start of a line converts it; Backspace right after reverts.
@@ -36,7 +37,7 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 </p>
 
 - Search, and switch between Notes, Archive and All.
-- Multi-select, drag to reorder, and edit inline.
+- Multi-select, drag to reorder, and edit inline. The + here adds a note right in the list, ready to type.
 - A note already open in its own window shows **Open Here** to bring it back.
 - Archive instead of deleting. Delete comes with a 10-second Undo that waits while you point at it.
 
@@ -49,7 +50,7 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 - **General:** theme, language, Reduce Motion and start with Windows.
 - **Notes:** typeface and size with a live preview, plus the new-note colour.
 - **Deck:** screen edge, cards in the deck, where new notes go, and behaviour over full-screen apps.
-- **Data:** import and export Markdown. Each button answers with a ✓ and a count, or a ✗ if it failed.
+- **Data:** where your notes are kept (and whether this copy is portable), import and export Markdown (each button answers with a ✓ and a count, or a ✗), and Delete All Notes, which asks first and can still be undone.
 
 ## Light and dark
 
@@ -59,29 +60,9 @@ Every window follows the Windows appearance, or you can pick one in Settings. Th
 
 Native **Rust on raw Win32**: no web view, no runtime, no background service. Windows' own RichEdit does the editing and DirectWrite draws the text.
 
-| | |
-|---|---|
-| Download | **0.95 MB**, a single exe |
-| Waiting on the edge | **2.8 MB** private memory, **16.5 MB** working set, **0.00% CPU** |
-| All Notes and a note open | 21 MB private, 42 MB working set, 0% CPU when idle |
-| Back to just the deck | 10 MB private, **12 MB** working set (memory is handed back to Windows 3 s after the last window closes) |
-| While the deck animates | about a quarter of one core (1.2% of the whole CPU), 1–5 ms per frame, only while something moves |
-
-Measured on an Intel Core i5-14500 with Windows 11, a 2560×1080 display at 100% scale, and nine notes. Memory figures are from Task Manager's counters (private bytes and working set), and CPU was sampled over 15–30 seconds.
-
-Nothing runs while the app waits:
-- The frame clock runs only while something moves, paced by the compositor.
-- Hover comes from the windows' own mouse messages.
-- Full-screen detection uses the shell's app-bar notification instead of polling.
-
-For comparison, typical idle memory for the same kind of app on other stacks:
-
-| Stack | Typical idle memory |
-|---|---|
-| Electron | 100–200 MB |
-| Tauri / WebView2 | 40–80 MB, across several processes |
-| WPF / WinUI 3 | 30–60 MB |
-| **Rust + Win32 (Peekaboo Notes)** | **~3 MB private, ~16 MB working set** |
+- About **1 MB** to download, a single exe.
+- About **3 MB** of memory and **0% CPU** while it waits on the edge.
+- Nothing runs while it waits: it only draws frames while something moves.
 
 ## Shortcuts
 
@@ -96,7 +77,7 @@ For comparison, typical idle memory for the same kind of app on other stacks:
 | Ctrl+Alt+H | Show or hide the deck |
 | Ctrl+Alt+E | Move the deck to the other edge |
 
-If another app already uses one of these, Peekaboo Notes goes without it.
+If another app already uses one of these, PeekABoo Notes goes without it.
 
 **In a note**
 
@@ -120,7 +101,7 @@ Paste is always plain text, so notes keep a consistent look.
 
 ## Languages
 
-English, German, Spanish, French, Hindi and Japanese are built in. By default Peekaboo Notes follows Windows' preferred display languages: the exact tag, then the base language, then English. Settings › General › Language overrides that. Dates and times are formatted by Windows for the chosen locale.
+English, German, Spanish, French, Hindi and Japanese are built in. By default PeekABoo Notes follows Windows' preferred display languages: the exact tag, then the base language, then English. Settings › General › Language overrides that. Dates and times are formatted by Windows for the chosen locale.
 
 Interface text lives in Android-style resource files, one per language: `src/i18n/strings/strings.<tag>.xml`.
 
@@ -154,7 +135,7 @@ A round trip keeps nesting, emphasis and ticked items intact.
 
 ## Your data
 
-Notes are stored in one readable file, `Documents\Peekaboo Notes\notes.json`:
+Notes are stored in one readable file, `Documents\PeekABoo Notes\notes.json`:
 - each note keeps its RTF and a plain-text Markdown copy;
 - writes are atomic (temp file, then rename);
 - `notes.backup.json` holds the last good copy from the previous launch. If `notes.json` can't be read (locked by another program, or damaged), the app opens the backup instead and never writes over the original.
@@ -163,7 +144,7 @@ There is no network access and no telemetry.
 
 `logs\peekaboo.log` in the same folder records what happened (start and exit, load and save errors, import and export counts), never what your notes say. It rotates at 512 KB, keeping one older file (`peekaboo.1.log`). If something goes wrong, attaching it to a bug report helps.
 
-**Portable mode:** create an empty file named `portable` next to `peekaboo-notes.exe`. Notes then live in `PeekabooData\` beside the exe, so you can carry them on a USB stick.
+**Portable mode:** create an empty file named `portable` next to `peekaboo-notes.exe`. Notes then live in `PeekABooData\` beside the exe, so you can carry them on a USB stick.
 
 ## Build
 
@@ -171,6 +152,8 @@ There is no network access and no telemetry.
 cargo build --release
 target\release\peekaboo-notes.exe
 ```
+
+**Installer:** `powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1` builds an MSIX package in `target\msix\` (pass `-CertPath`/`-Password` or `-Thumbprint` to sign it). An installed copy starts with Windows through the package's startup task, and uninstalling it from Settings > Apps leaves your notes in Documents.
 
 Needs Rust (edition 2024) and runs on Windows 10 or 11.
 - `cargo test` runs the unit tests (string files, plural rules, the Markdown parser).
@@ -204,6 +187,6 @@ A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three 
 
 Copyright (C) 2026 Ashwani Kumar Bachchan
 
-Peekaboo Notes is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but without any warranty; see the [LICENSE](LICENSE) file for the full text.
+PeekABoo Notes is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but without any warranty; see the [LICENSE](LICENSE) file for the full text.
 
 Every source file carries the same notice as `SPDX-License-Identifier: GPL-3.0-or-later`.

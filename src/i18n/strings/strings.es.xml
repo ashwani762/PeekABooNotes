@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Peekaboo Notes interface text: Spanish. See strings.en.xml for how translations work. -->
+<!-- PeekABoo Notes interface text: Spanish. See strings.en.xml for how translations work. -->
 <resources>
     <!-- About -->
-    <string name="app_name">Peekaboo Notes</string>
+    <string name="app_name">PeekABoo Notes</string>
     <string name="language_name">Español</string>
     <string name="tray_tooltip">%1$s — notas en el borde de la pantalla</string>
     <string name="window_all_notes">Todas las notas — %1$s</string>

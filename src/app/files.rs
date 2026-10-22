@@ -169,7 +169,7 @@ pub fn import(owner: HWND) -> Outcome {
 }
 
 /// The startup task declared in the MSIX manifest (`packaging/msix/AppxManifest.xml`).
-const STARTUP_TASK: &str = "PeekabooNotesStartup";
+const STARTUP_TASK: &str = "PeekABooNotesStartup";
 
 /// Installed from an MSIX package. There the Run key is virtualised per package (Windows
 /// never reads it), so start-with-Windows goes through the manifest's startup task.

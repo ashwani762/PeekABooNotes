@@ -3,7 +3,7 @@
 
 //! Popover menus: the app's own context and tray menus.
 //!
-//! Drawn in the same material and type as the rest of Peekaboo Notes (native Win32 menus can't be
+//! Drawn in the same material and type as the rest of PeekABoo Notes (native Win32 menus can't be
 //! styled to match). Opens with a 120 ms fade-and-settle from the pointer, highlights on
 //! hover instantly, confirms a choice with a quick blink and fades out.
 //! `show` runs a nested message loop, like `TrackPopupMenu`, and returns the command id
@@ -33,7 +33,7 @@ use crate::render::gfx::{Canvas, Font, Shape};
 use crate::theme;
 use crate::platform::util::{WM_MOUSELEAVE, mix, rect, wide, x_of, y_of};
 
-const CLASS: &str = "PeekabooMenu";
+const CLASS: &str = "PeekABooMenu";
 
 #[derive(Clone, Copy)]
 pub enum ToolStyle {

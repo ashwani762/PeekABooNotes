@@ -33,7 +33,7 @@ use pages::*;
 use layout::*;
 use draw::*;
 
-const CLASS: &str = "PeekabooSettings";
+const CLASS: &str = "PeekABooSettings";
 const W: f32 = 720.0;
 const H: f32 = 600.0;
 const SIDE_W: f32 = 212.0;

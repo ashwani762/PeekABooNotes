@@ -40,7 +40,7 @@ use list::*;
 use layout::*;
 use draw::*;
 
-const CLASS: &str = "PeekabooLibrary";
+const CLASS: &str = "PeekABooLibrary";
 const ID_SEARCH: usize = 10;
 /// The filter segments: Notes, Archive, All.
 fn segments() -> [&'static str; 3] {

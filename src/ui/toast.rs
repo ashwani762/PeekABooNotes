@@ -18,7 +18,7 @@ use crate::render::gfx::{Canvas, Font, Shape};
 use crate::theme;
 use crate::platform::util::{rect, wide};
 
-const CLASS: &str = "PeekabooToast";
+const CLASS: &str = "PeekABooToast";
 const SECONDS: f32 = 10.0;
 
 struct Toast {

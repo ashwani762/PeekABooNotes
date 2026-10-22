@@ -37,7 +37,7 @@ fn main() {
     if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
         // Common Controls v6 (visual styles, cue banners), per-monitor v2 DPI, UTF-8 code page.
         embed_manifest(
-            new_manifest("Peekaboo.Notes")
+            new_manifest("PeekABoo.Notes")
                 .dpi_awareness(DpiAwareness::PerMonitorV2)
                 .active_code_page(ActiveCodePage::Utf8)
                 .long_path_aware(Setting::Enabled),

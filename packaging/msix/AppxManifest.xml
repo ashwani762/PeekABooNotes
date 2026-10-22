@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  MSIX manifest for Peekaboo Notes. build-msix.ps1 stages this beside the exe, lang\ and
+  MSIX manifest for PeekABoo Notes. build-msix.ps1 stages this beside the exe, lang\ and
   Assets\ and fills in the version. Publisher must equal the signing certificate's subject.
 -->
 <Package
@@ -11,14 +11,14 @@
   IgnorableNamespaces="uap desktop rescap">
 
   <Identity
-    Name="PeekabooNotes"
-    Publisher="CN=Peekaboo Notes Dev"
+    Name="PeekABooNotes"
+    Publisher="CN=PeekABoo Notes Dev"
     Version="0.1.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>Peekaboo Notes</DisplayName>
-    <PublisherDisplayName>Peekaboo Notes</PublisherDisplayName>
+    <DisplayName>PeekABoo Notes</DisplayName>
+    <PublisherDisplayName>PeekABoo Notes</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Edge-docked sticky notes for Windows with a tiny memory footprint</Description>
   </Properties>
@@ -32,9 +32,9 @@
   </Resources>
 
   <Applications>
-    <Application Id="PeekabooNotes" Executable="peekaboo-notes.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="PeekABooNotes" Executable="peekaboo-notes.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="Peekaboo Notes"
+        DisplayName="PeekABoo Notes"
         Description="Edge-docked sticky notes"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
@@ -42,7 +42,7 @@
       <Extensions>
         <!-- Start with Windows (Settings toggle -> StartupTask API in src/app/files.rs). -->
         <desktop:Extension Category="windows.startupTask" Executable="peekaboo-notes.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="PeekabooNotesStartup" Enabled="false" DisplayName="Peekaboo Notes" />
+          <desktop:StartupTask TaskId="PeekABooNotesStartup" Enabled="false" DisplayName="PeekABoo Notes" />
         </desktop:Extension>
       </Extensions>
     </Application>

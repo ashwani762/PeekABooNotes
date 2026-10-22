@@ -89,7 +89,7 @@ fn append(path: &Path, text: &str, cap: u64) -> std::io::Result<()> {
 pub fn startup() {
     START.get_or_init(Instant::now);
     info(&format!(
-        "start: Peekaboo Notes {}, {}, {}, scale {}%, data {}",
+        "start: PeekABoo Notes {}, {}, {}, scale {}%, data {}",
         env!("CARGO_PKG_VERSION"),
         windows_version(),
         if portable() { "portable" } else { "installed" },

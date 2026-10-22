@@ -70,12 +70,12 @@ const CMD_UNDO: u32 = 14;
 const CMD_QUIT: u32 = 15;
 const CMD_SETTINGS: u32 = 16;
 
-const MAIN_CLASS: &str = "PeekabooMain";
+const MAIN_CLASS: &str = "PeekABooMain";
 const WM_TRAY: u32 = WM_APP + 1;
 pub const WM_ACTIVATE_OTHER: u32 = WM_APP + 2;
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 /// The startup entry (shown in Task Manager).
-const RUN_VALUE: &str = "Peekaboo Notes";
+const RUN_VALUE: &str = "PeekABoo Notes";
 
 pub struct Ui {
     pub hinst: HINSTANCE,
@@ -288,7 +288,7 @@ fn trim_memory() {
 pub fn run() -> i32 {
     unsafe {
         // One instance only: a second launch just brings up All Notes.
-        let mutex = CreateMutexW(std::ptr::null(), 1, wide("Local\\PeekabooNotes.Singleton").as_ptr());
+        let mutex = CreateMutexW(std::ptr::null(), 1, wide("Local\\PeekABooNotes.Singleton").as_ptr());
         if windows_sys::Win32::Foundation::GetLastError() == windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS {
             let other = FindWindowW(wide(MAIN_CLASS).as_ptr(), std::ptr::null());
             if !other.is_null() {

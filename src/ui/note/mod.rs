@@ -33,7 +33,7 @@ use commands::*;
 use lists::*;
 use input::*;
 
-const CLASS: &str = "PeekabooNote";
+const CLASS: &str = "PeekABooNote";
 const T_SAVE: usize = 1;
 const SAVE_DELAY_MS: u32 = 250;
 pub const WM_NOTE_CMD: u32 = WM_APP + 40;

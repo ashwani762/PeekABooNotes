@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Peekaboo Notes interface text: German. See strings.en.xml for how translations work. -->
+<!-- PeekABoo Notes interface text: German. See strings.en.xml for how translations work. -->
 <resources>
     <!-- About -->
-    <string name="app_name">Peekaboo Notes</string>
+    <string name="app_name">PeekABoo Notes</string>
     <string name="language_name">Deutsch</string>
     <string name="tray_tooltip">%1$s — Notizen am Bildschirmrand</string>
     <string name="window_all_notes">Alle Notizen — %1$s</string>

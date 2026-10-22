@@ -23,7 +23,7 @@ use crate::render::gfx::{Canvas, Font, Shape};
 use crate::theme;
 use crate::platform::util::{rect, wide};
 
-const CLASS: &str = "PeekabooGhost";
+const CLASS: &str = "PeekABooGhost";
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {

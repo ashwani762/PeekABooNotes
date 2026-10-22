@@ -75,14 +75,14 @@ pub fn exe_path() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("peekaboo-notes.exe"))
 }
 
-/// Notes live in `Documents\Peekaboo Notes`, unless a file named `portable` sits next to the
-/// exe, in which case everything stays beside it in `PeekabooData` (carry it on a USB
+/// Notes live in `Documents\PeekABoo Notes`, unless a file named `portable` sits next to the
+/// exe, in which case everything stays beside it in `PeekABooData` (carry it on a USB
 /// stick).
 pub fn data_dir() -> PathBuf {
     // Worked out (and created) once; it's asked for on every save and some paints.
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
-        let dir = if portable() { exe_dir().join("PeekabooData") } else { documents_dir().join("Peekaboo Notes") };
+        let dir = if portable() { exe_dir().join("PeekABooData") } else { documents_dir().join("PeekABoo Notes") };
         let _ = std::fs::create_dir_all(&dir);
         dir
     })

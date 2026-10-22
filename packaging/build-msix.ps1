@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-  Builds Peekaboo Notes and packs it as an MSIX (target\msix\PeekabooNotes_<ver>_x64.msix),
+  Builds PeekABoo Notes and packs it as an MSIX (target\msix\PeekABooNotes_<ver>_x64.msix),
   optionally signed.
 
 .DESCRIPTION
@@ -16,14 +16,14 @@
   Steps: cargo build --release; stage the exe, lang\, Assets\ and AppxManifest.xml (version
   taken from Cargo.toml) in target\msix\layout; index the logos into resources.pri
   (makepri); makeappx pack; sign when a certificate is given. The certificate's subject
-  must equal the manifest's Publisher (default "CN=Peekaboo Notes Dev", see -Publisher).
+  must equal the manifest's Publisher (default "CN=PeekABoo Notes Dev", see -Publisher).
 
   Windows only installs signed packages from a trusted publisher. Without a certificate,
   install the staged layout instead (Developer Mode on):
     Add-AppxPackage -Register target\msix\layout\AppxManifest.xml
 
   Never stage a `portable` file: the package folder is read-only, notes must go to
-  Documents\Peekaboo Notes.
+  Documents\PeekABoo Notes.
 
 .PARAMETER NoBuild
   Skip cargo build and package the exe already in -ExeDir.
@@ -36,7 +36,7 @@
 param(
     [switch]$NoBuild,
     [string]$ExeDir,
-    [string]$Publisher = 'CN=Peekaboo Notes Dev',
+    [string]$Publisher = 'CN=PeekABoo Notes Dev',
     [string]$CertPath,
     [string]$Password,
     [string]$Thumbprint,
@@ -118,7 +118,7 @@ Run $makepri @('new', '/pr', $priSrc, '/cf', $priCfg, '/mn', (Join-Path $priSrc 
 Remove-Item $priSrc -Recurse -Force
 
 # Pack.
-$msix = Join-Path $out "PeekabooNotes_${version}_x64.msix"
+$msix = Join-Path $out "PeekABooNotes_${version}_x64.msix"
 Run $makeappx @('pack', '/d', $layout, '/p', $msix, '/o')
 
 # Sign (optional).

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Peekaboo Notes interface text: English (the reference language).
+  PeekABoo Notes interface text: English (the reference language).
 
   To translate: copy this file to strings.<language-tag>.xml (strings.it.xml,
   strings.pt-BR.xml, ...), translate the text between the tags and keep every
@@ -12,7 +12,7 @@
 -->
 <resources>
     <!-- About -->
-    <string name="app_name">Peekaboo Notes</string>
+    <string name="app_name">PeekABoo Notes</string>
     <string name="language_name">English</string>
     <string name="tray_tooltip">%1$s — notes on the edge of your screen</string>
     <string name="window_all_notes">All Notes — %1$s</string>
