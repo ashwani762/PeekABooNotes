@@ -27,7 +27,7 @@
     <string name="menu_undo_delete">Annuler la suppression</string>
     <string name="menu_show_deck">Afficher la pile</string>
     <string name="menu_move_deck">Déplacer la pile sur l’autre bord</string>
-    <string name="menu_settings">Réglages…</string>
+    <string name="menu_settings">Réglages</string>
     <string name="menu_quit">Quitter %1$s</string>
     <string name="menu_open">Ouvrir</string>
     <string name="menu_keep_on_top">Toujours au premier plan</string>

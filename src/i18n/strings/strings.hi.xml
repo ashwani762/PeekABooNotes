@@ -27,7 +27,7 @@
     <string name="menu_undo_delete">हटाना पूर्ववत करें</string>
     <string name="menu_show_deck">डेक दिखाएँ</string>
     <string name="menu_move_deck">डेक को दूसरे किनारे पर ले जाएँ</string>
-    <string name="menu_settings">सेटिंग्स…</string>
+    <string name="menu_settings">सेटिंग्स</string>
     <string name="menu_quit">%1$s बंद करें</string>
     <string name="menu_open">खोलें</string>
     <string name="menu_keep_on_top">हमेशा ऊपर रखें</string>

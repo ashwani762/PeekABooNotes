@@ -27,7 +27,7 @@
     <string name="menu_undo_delete">Löschen widerrufen</string>
     <string name="menu_show_deck">Stapel anzeigen</string>
     <string name="menu_move_deck">Stapel an den anderen Rand</string>
-    <string name="menu_settings">Einstellungen…</string>
+    <string name="menu_settings">Einstellungen</string>
     <string name="menu_quit">%1$s beenden</string>
     <string name="menu_open">Öffnen</string>
     <string name="menu_keep_on_top">Immer im Vordergrund</string>

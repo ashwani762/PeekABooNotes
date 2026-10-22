@@ -37,7 +37,7 @@
     <string name="menu_undo_delete">Undo Delete</string>
     <string name="menu_show_deck">Show Deck</string>
     <string name="menu_move_deck">Move Deck to Other Edge</string>
-    <string name="menu_settings">Settings…</string>
+    <string name="menu_settings">Settings</string>
     <string name="menu_quit">Quit %1$s</string>
     <string name="menu_open">Open</string>
     <string name="menu_keep_on_top">Keep on Top</string>
