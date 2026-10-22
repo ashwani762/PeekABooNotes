@@ -161,6 +161,8 @@ Notes are stored in one readable file, `Documents\Peekaboo Notes\notes.json`:
 
 There is no network access and no telemetry.
 
+`logs\peekaboo.log` in the same folder records what happened (start and exit, load and save errors, import and export counts), never what your notes say. It rotates at 512 KB, keeping one older file (`peekaboo.1.log`). If something goes wrong, attaching it to a bug report helps.
+
 **Portable mode:** create an empty file named `portable` next to `peekaboo-notes.exe`. Notes then live in `PeekabooData\` beside the exe, so you can carry them on a USB stick.
 
 ## Build
@@ -176,9 +178,10 @@ Needs Rust (edition 2024) and runs on Windows 10 or 11.
 **Developer switches**
 - `PEEKABOO_THEME=light|dark` forces an appearance.
 - `PEEKABOO_PERF=1` logs frame times, and which parts asked for the frames, to `%TEMP%\peekaboo-perf.txt`.
-- `PEEKABOO_TRACE=1` logs menu events to `%TEMP%\peekaboo-trace.txt`.
+- `PEEKABOO_TRACE=1` adds DEBUG lines (menu events and the like) to `logs\peekaboo.log`, and symbolized stacks to panic reports.
+- `PEEKABOO_CRASH=panic|fault|overflow` crashes on purpose right after startup, to test crash reporting.
 
-Crashes are written to `crash.log` in the notes folder.
+A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three are kept), and its report, with raw `module+offset` stack addresses, to the log and to `crash.log` in the notes folder. Open the dump in Visual Studio or WinDbg next to the matching build's `.pdb`.
 
 ## Code map
 
@@ -194,5 +197,5 @@ Crashes are written to `crash.log` in the notes folder.
 | `src/editor/` | RichEdit wrapper (`rich/`: FFI, `format.rs`, `lists.rs`, `markdown.rs`) and the checklist overlay (`checks.rs`) |
 | `src/render/` | Software canvas (`gfx.rs`), DirectWrite text (`dw.rs`), springs and the frame clock (`anim.rs`) |
 | `src/i18n/` | String resources (`mod.rs`, `xml.rs`), locale-aware times (`time.rs`), the language files (`strings/`) |
-| `src/platform/` | Crash logging (`crash.rs`), paths and small helpers (`util.rs`) |
+| `src/platform/` | Crash reports and dumps (`crash.rs`), the app log (`log.rs`), paths and small helpers (`util.rs`) |
 | `src/store.rs`, `src/theme.rs` | The JSON note store; colours, materials and motion presets |

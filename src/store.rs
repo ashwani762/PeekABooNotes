@@ -1,9 +1,11 @@
 //! The note database: one ordinary JSON file, written atomically.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+use crate::platform::log;
 use crate::platform::util::now;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -136,17 +138,39 @@ impl Store {
         let d = match std::fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice::<Data>(&bytes) {
                 Ok(d) => {
+                    log::info(&format!("loaded {} notes ({} KB)", d.notes.len(), bytes.len().div_ceil(1024)));
                     // A copy of the last good file from the previous session.
-                    let _ = std::fs::write(dir.join("notes.backup.json"), &bytes);
+                    if let Err(e) = std::fs::write(dir.join("notes.backup.json"), &bytes) {
+                        log::warn(&format!("couldn't write notes.backup.json: {e}"));
+                    }
                     d
                 }
-                Err(_) => {
+                Err(e) => {
                     // Never overwrite a file we failed to understand.
-                    let _ = std::fs::rename(&path, dir.join(format!("notes.unreadable-{}.json", now())));
+                    let aside = format!("notes.unreadable-{}.json", now());
+                    let moved = std::fs::rename(&path, dir.join(&aside));
+                    // Category and position only: serde's message can quote note text.
+                    log::error(&format!(
+                        "notes.json is unreadable ({:?} error at line {}, column {}); {}; starting empty (notes.backup.json has the last good copy)",
+                        e.classify(),
+                        e.line(),
+                        e.column(),
+                        match moved {
+                            Ok(()) => format!("moved aside as {aside}"),
+                            Err(e) => format!("moving it aside failed: {e}"),
+                        }
+                    ));
                     Data::default()
                 }
             },
-            Err(_) => Data::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                log::info("no notes.json yet, starting fresh");
+                Data::default()
+            }
+            Err(e) => {
+                log::error(&format!("couldn't read notes.json: {e}; starting empty"));
+                Data::default()
+            }
         };
         let mut s = Store { path, d };
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
@@ -159,11 +183,17 @@ impl Store {
     }
 
     pub fn save(&self) {
-        if let Ok(json) = serde_json::to_vec_pretty(&self.d) {
+        let saved = serde_json::to_vec_pretty(&self.d).map_err(std::io::Error::other).and_then(|json| {
             let tmp = self.path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, &self.path);
-            }
+            std::fs::write(&tmp, json)?;
+            std::fs::rename(&tmp, &self.path)
+        });
+        // Saves follow every edit: log when they start and stop failing, not each one.
+        static FAILING: AtomicBool = AtomicBool::new(false);
+        match saved {
+            Err(e) if !FAILING.swap(true, Ordering::Relaxed) => log::error(&format!("saving notes.json failed: {e}")),
+            Ok(()) if FAILING.swap(false, Ordering::Relaxed) => log::info("saving notes.json works again"),
+            _ => {}
         }
     }
 

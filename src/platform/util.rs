@@ -79,12 +79,20 @@ pub fn data_dir() -> PathBuf {
     // Worked out (and created) once; it's asked for on every save and some paints.
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
-        let exe_dir = exe_path().parent().map(PathBuf::from).unwrap_or_default();
-        let dir = if exe_dir.join("portable").exists() { exe_dir.join("PeekabooData") } else { documents_dir().join("Peekaboo Notes") };
+        let dir = if portable() { exe_dir().join("PeekabooData") } else { documents_dir().join("Peekaboo Notes") };
         let _ = std::fs::create_dir_all(&dir);
         dir
     })
     .clone()
+}
+
+fn exe_dir() -> PathBuf {
+    exe_path().parent().map(PathBuf::from).unwrap_or_default()
+}
+
+/// A file named `portable` beside the exe keeps the data beside it too.
+pub fn portable() -> bool {
+    exe_dir().join("portable").exists()
 }
 
 /// A Unix timestamp as local wall-clock time.

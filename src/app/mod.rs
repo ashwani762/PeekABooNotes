@@ -18,6 +18,7 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::store::{Note, Store, title_of};
+use crate::platform::log;
 use crate::platform::util::{data_dir, exe_path, file_safe, wide};
 use crate::{ui::{allnotes, deck, menu, note, settings, toast}, render::gfx, editor::rich, theme};
 
@@ -200,6 +201,8 @@ const HOTKEYS: [(u32, u8); 6] = [
 
 pub fn quit() {
     let wins: Vec<HWND> = ui(|u| u.notes.values().copied().collect());
+    // Before the teardown, so a quit that stalls or crashes on the way out shows up.
+    log::info(&format!("quitting, {} note windows open", wins.len()));
     for h in wins {
         unsafe { DestroyWindow(h) }; // flushes in WM_DESTROY
     }
@@ -246,6 +249,7 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
                 note::flush(w);
             }
             save();
+            log::shutdown("Windows is signing out or shutting down");
         }
         _ if msg == tb && tb != 0 => tray(true),
         _ => return unsafe { DefWindowProcW(h, msg, wp, lp) },
@@ -290,6 +294,7 @@ pub fn run() -> i32 {
             return 0;
         }
         let _ = mutex;
+        log::startup();
 
         LoadLibraryW(wide("Msftedit.dll").as_ptr());
         let icc = INITCOMMONCONTROLSEX { dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES };
@@ -298,6 +303,8 @@ pub fn run() -> i32 {
 
         STORE.with(|s| *s.borrow_mut() = Some(Store::load(data_dir())));
         crate::i18n::init(&store(|s| s.d.settings.language.clone()));
+        log::info(&format!("language {}", crate::i18n::tag()));
+        crate::platform::crash::test_from_env();
         apply_motion();
         let (font, size) = store(|s| (s.d.settings.note_font, s.d.settings.note_size));
         rich::set_typography(font, size);
@@ -348,6 +355,7 @@ pub fn run() -> i32 {
         }
 
         while pump_once() {}
+        log::shutdown("quit");
         0
     }
 }

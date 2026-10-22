@@ -34,7 +34,8 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
     }
     let notes: Vec<(String, String)> = store(|s| ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.rtf.clone(), n.text.clone())).collect());
     let mut used = HashSet::new();
-    let mut written = 0;
+    let (mut written, mut failed) = (0, None);
+    let total = notes.len();
     for (rtf, text) in notes {
         let md = if rtf.is_empty() { text.clone() } else { rtf_to_markdown(&rtf) };
         let base = file_safe(&title_of(&text));
@@ -45,7 +46,14 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
             name = format!("{base} ({k}).md");
             k += 1;
         }
-        written += std::fs::write(dir.join(name), md + "\n").is_ok() as usize;
+        match std::fs::write(dir.join(name), md + "\n") {
+            Ok(()) => written += 1,
+            Err(e) => failed = Some(e),
+        }
+    }
+    match &failed {
+        Some(e) => log::warn(&format!("export: wrote {written} of {total} notes; last error: {e}")),
+        None => log::info(&format!("export: wrote {written} notes")),
     }
     if written == 0 {
         return Some(Err(()));
@@ -60,27 +68,35 @@ fn pick_folder(owner: HWND, title: &str, start: &str) -> Option<std::path::PathB
     use windows::Win32::UI::Shell::{
         FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
     };
-    let pick = || unsafe {
-        let d: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
-        d.SetOptions(d.GetOptions().ok()? | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM).ok()?;
-        d.SetTitle(&windows::core::HSTRING::from(title)).ok()?;
-        d.SetOkButtonLabel(&windows::core::HSTRING::from(t!("dialog_export_ok"))).ok()?;
-        if !start.is_empty()
-            && std::path::Path::new(start).is_dir()
-            && let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&windows::core::HSTRING::from(start), None)
-        {
-            let _ = d.SetFolder(&item);
+    let pick = || -> windows::core::Result<Option<std::path::PathBuf>> {
+        unsafe {
+            let d: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            d.SetOptions(d.GetOptions()? | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)?;
+            d.SetTitle(&windows::core::HSTRING::from(title))?;
+            d.SetOkButtonLabel(&windows::core::HSTRING::from(t!("dialog_export_ok")))?;
+            if !start.is_empty()
+                && std::path::Path::new(start).is_dir()
+                && let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&windows::core::HSTRING::from(start), None)
+            {
+                let _ = d.SetFolder(&item);
+            }
+            d.Show(Some(windows::Win32::Foundation::HWND(owner)))?;
+            let path = d.GetResult()?.GetDisplayName(SIGDN_FILESYSPATH)?;
+            let s = path.to_string().ok();
+            CoTaskMemFree(Some(path.0 as _));
+            Ok(s.map(Into::into))
         }
-        d.Show(Some(windows::Win32::Foundation::HWND(owner))).ok()?;
-        let path = d.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
-        let s = path.to_string().ok();
-        CoTaskMemFree(Some(path.0 as _));
-        s.map(Into::into)
     };
     // COM only for the dialog's lifetime: uninitialising unloads the shell extensions it
     // pulled in now, rather than leaving them to tear down at exit.
     let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-    let path = pick();
+    let path = pick().unwrap_or_else(|e| {
+        // Cancel arrives as an error too; only real failures are worth a line.
+        if e.code() != windows::core::HRESULT::from_win32(windows_sys::Win32::Foundation::ERROR_CANCELLED) {
+            log::warn(&format!("folder picker failed: {:#010x} {}", e.code().0, e.message()));
+        }
+        None
+    });
     if com.is_ok() {
         unsafe { CoUninitialize() };
     }
@@ -100,6 +116,11 @@ pub fn import(owner: HWND) -> Outcome {
     ofn.lpstrTitle = title.as_ptr();
     ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
     if unsafe { GetOpenFileNameW(&mut ofn) } == 0 {
+        // 0 is a plain cancel; anything else failed (such as too many files for the buffer).
+        let err = unsafe { CommDlgExtendedError() };
+        if err != 0 {
+            log::warn(&format!("import: file dialog failed ({err:#x})"));
+        }
         return None;
     }
     let parts: Vec<String> = buf.split(|&c| c == 0).take_while(|p| !p.is_empty()).map(String::from_utf16_lossy).collect();
@@ -109,12 +130,20 @@ pub fn import(owner: HWND) -> Outcome {
         [dir, names @ ..] => names.iter().map(|n| std::path::Path::new(dir).join(n)).collect(),
     };
     let w = ui(|u| u.worker);
-    let mut added = 0;
+    let (mut added, mut empty, mut failed) = (0, 0, None);
+    let total = files.len();
     for f in files {
-        let Ok(bytes) = std::fs::read(&f) else { continue };
+        let bytes = match std::fs::read(&f) {
+            Ok(b) => b,
+            Err(e) => {
+                failed = Some(e);
+                continue;
+            }
+        };
         let text = String::from_utf8_lossy(&bytes);
         let text = text.trim_start_matches('\u{FEFF}');
         if text.trim().is_empty() {
+            empty += 1;
             continue;
         }
         rich::load_markdown(w, text);
@@ -122,6 +151,11 @@ pub fn import(owner: HWND) -> Outcome {
         let plain = rich::to_markdown(w, false);
         store_mut(|s| s.create(&plain, &rtf));
         added += 1;
+    }
+    let skipped = if empty > 0 { format!(", {empty} empty skipped") } else { String::new() };
+    match &failed {
+        Some(e) => log::warn(&format!("import: added {added} of {total} files{skipped}; last read error: {e}")),
+        None => log::info(&format!("import: added {added} of {total} files{skipped}")),
     }
     if added == 0 {
         return Some(Err(()));
