@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Geometry: where everything sits, and what the pointer is over.
 
 use super::*;

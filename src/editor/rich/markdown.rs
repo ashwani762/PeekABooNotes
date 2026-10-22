@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plain-text Markdown in and out (titles, search, previews, export, import).
 
 use super::*;

@@ -199,3 +199,11 @@ A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three 
 | `src/i18n/` | String resources (`mod.rs`, `xml.rs`), locale-aware times (`time.rs`), the language files (`strings/`) |
 | `src/platform/` | Crash reports and dumps (`crash.rs`), the app log (`log.rs`), paths and small helpers (`util.rs`) |
 | `src/store.rs`, `src/theme.rs` | The JSON note store; colours, materials and motion presets |
+
+## License
+
+Copyright (C) 2026 Ashwani Kumar Bachchan
+
+Peekaboo Notes is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but without any warranty; see the [LICENSE](LICENSE) file for the full text.
+
+Every source file carries the same notice as `SPDX-License-Identifier: GPL-3.0-or-later`.

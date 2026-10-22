@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Undo HUD: a dark capsule that rises from the bottom of the screen with a countdown
 //! ring. Click it within ten seconds to restore what was deleted. The countdown waits
 //! while the pointer is on the toast, so reaching for Undo never races the clock.

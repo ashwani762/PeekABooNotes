@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Dates and times in the interface language, formatted by Windows for that locale
 //! ("3:42 PM" / "15:42", "October 18" / "18. Oktober").
 

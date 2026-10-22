@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Popover menus: the app's own context and tray menus.
 //!
 //! Drawn in the same material and type as the rest of Peekaboo Notes (native Win32 menus can't be

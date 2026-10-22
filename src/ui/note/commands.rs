@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Note commands (menus, toolbar, shortcuts) and the keyboard map.
 
 use super::*;

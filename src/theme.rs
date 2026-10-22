@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The design system: paper colours, chrome materials, type, shape and motion tokens.
 //!
 //! Notes are paper: they keep their pastel colour in both themes

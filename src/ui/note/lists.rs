@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Lists and checklists while typing: auto-lists, Enter, ticking, nesting.
 
 use super::*;

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! DirectWrite text, the same engine WinUI and Edge use: proper gamma, optical sizes of
 //! Segoe UI Variable, real rotation. Text is rendered by a Direct2D DC render target into a
 //! cleared scratch region bound to exactly the text's bounds, then composited with

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Application state, the hidden main window (tray icon + global hotkeys) and commands.
 
 use std::cell::RefCell;

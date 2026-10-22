@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Settings: a small System Settings-style window.
 //!
 //! A sidebar of coloured icon tiles picks a page; each page is a column of inset groups

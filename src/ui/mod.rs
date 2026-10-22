@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Windows and surfaces: the edge deck, note windows, All Notes, Settings, menus, toasts.
 
 pub mod allnotes;

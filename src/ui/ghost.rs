@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Ghost transitions: the card that travels between the deck and a note window.
 //!
 //! Opening, the note's card grows from where it was (its tab, the plus button, the pill)

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Interface text in every language: Android-style string resources.
 //!
 //! Each language is one `strings.<tag>.xml` file (`strings.en.xml`, `strings.de.xml`,

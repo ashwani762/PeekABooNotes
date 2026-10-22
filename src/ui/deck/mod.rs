@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The edge deck.
 //!
 //! Physical model: every note is a paper card tucked into the screen edge; its *spine*

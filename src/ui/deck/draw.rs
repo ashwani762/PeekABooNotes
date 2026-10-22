@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Painting the deck: the pill, the cards and their spines, the + and "+N" buttons.
 
 use super::*;

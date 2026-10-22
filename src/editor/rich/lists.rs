@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Paragraph lists: bullets, numbers, checklist indents and nesting levels.
 
 use super::*;

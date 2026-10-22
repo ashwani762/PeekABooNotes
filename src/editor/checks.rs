@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Checklist boxes, drawn over RichEdit.
 //!
 //! The ☐ / ☑ characters stay in the text — they carry the state, the caret, undo and the

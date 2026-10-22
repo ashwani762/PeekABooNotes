@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Note lifecycle: open, create, step, colour, pin, archive, delete and undo.
 
 use super::*;

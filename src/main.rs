@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Peekaboo Notes — notes that live on the edge of your screen, for Windows.
 //!
 //! Pure Win32 + RichEdit, no web view and no runtime: the whole app is one small exe

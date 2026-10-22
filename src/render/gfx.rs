@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A tiny software canvas for per-pixel-alpha layered windows.
 //!
 //! Shapes are rasterised with an anti-aliased rounded-rectangle SDF straight into a

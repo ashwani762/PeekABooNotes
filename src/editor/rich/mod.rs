@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! RichEdit (msftedit.dll) bindings and helpers.
 //!
 //! windows-sys no longer ships the RichEdit headers, so the handful of messages and

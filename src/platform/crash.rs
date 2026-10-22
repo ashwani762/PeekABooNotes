@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Crash reporting: a panic or native fault leaves a minidump in `logs\` (what a debugger
 //! needs), the report in the app log, and `crash.log` in the data folder, instead of the
 //! process silently disappearing.

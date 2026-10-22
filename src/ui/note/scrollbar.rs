@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The note's scroll bar: a slim thumb in the right margin, as on macOS. It shows up while
 //! the text scrolls (and briefly when a long note opens), widens under the pointer, can be
 //! dragged or clicked to jump, and isn't there at all when everything fits.

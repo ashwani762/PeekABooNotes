@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! All Notes: a custom-drawn library window.
 //!
 //! Left: large title, search field, a segmented filter whose selection pill glides, and a

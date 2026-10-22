@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The note window's own chrome: header buttons, footer, painting and hit testing.
 
 use super::*;

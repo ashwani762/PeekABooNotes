@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Ashwani Kumar Bachchan
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Render the MSIX logos (packaging/msix/Assets) from the same geometry as the in-code
 app icon (`gfx::app_icon` in src/render/gfx.rs): a gold rounded square with three lines,
 on a 32-unit grid. Needs Pillow only. Run: python packaging/msix/make-assets.py

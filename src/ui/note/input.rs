@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The editor control's subclass: keys, clicks and the checklist overlay hooks.
 
 use super::*;

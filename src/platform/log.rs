@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The app log: `logs\peekaboo.log` in the data folder, one timestamped line per event.
 //!
 //! Only what helps with a bug report goes in: ids, counts, sizes, timings and errors.

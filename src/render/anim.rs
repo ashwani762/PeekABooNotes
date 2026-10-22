@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Springs and a display-synced frame clock.
 //!
 //! Springs are set by damping ratio and response time, and always move

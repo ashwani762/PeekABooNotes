@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Just enough XML for Android-style string resources: `<string name="...">` and
 //! `<plurals name="..."><item quantity="...">`, with comments, CDATA, the standard
 //! entities, numeric character references and Android's backslash escapes.

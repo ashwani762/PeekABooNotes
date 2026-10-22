@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Ashwani Kumar Bachchan
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The note list: rows, ordering, selection, scrolling and drag-to-reorder.
 
 use super::*;

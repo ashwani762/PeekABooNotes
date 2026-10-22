@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Ashwani Kumar Bachchan
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 <#
 .SYNOPSIS
   Builds Peekaboo Notes and packs it as an MSIX (target\msix\PeekabooNotes_<ver>_x64.msix),

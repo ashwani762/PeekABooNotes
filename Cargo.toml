@@ -3,6 +3,9 @@ name = "peekaboo-notes"
 version = "0.1.0"
 edition = "2024"
 description = "Edge-docked sticky notes for Windows with a tiny memory footprint"
+authors = ["Ashwani Kumar Bachchan"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ashwani762/PeekABooNotes"
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
