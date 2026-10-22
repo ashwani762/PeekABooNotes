@@ -8,6 +8,35 @@ use serde::{Deserialize, Serialize};
 use crate::platform::log;
 use crate::platform::util::now;
 
+/// notes.json, retrying briefly: a sync client or a virus scanner can hold it open for a
+/// moment, and that must not look like an unreadable (let alone missing) file.
+fn read_patiently(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let mut tries = 0;
+    loop {
+        match std::fs::read(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound && tries < 10 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            r => return r,
+        }
+    }
+}
+
+/// The copy of the last good notes.json, for when notes.json itself won't do.
+fn from_backup(backup: &std::path::Path) -> Data {
+    match std::fs::read(backup).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<Data>(&b).map_err(|e| format!("{:?} error", e.classify()))) {
+        Ok(d) => {
+            log::warn(&format!("restored {} notes from notes.backup.json", d.notes.len()));
+            d
+        }
+        Err(e) => {
+            log::error(&format!("notes.backup.json didn't help either ({e}); starting empty"));
+            Data::default()
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Note {
     pub id: u64,
@@ -130,12 +159,17 @@ pub struct Data {
 pub struct Store {
     pub path: PathBuf,
     pub d: Data,
+    /// notes.json was there but couldn't be read (or put aside): this session never
+    /// writes it, so whatever is in it survives for the next start to try again.
+    frozen: bool,
 }
 
 impl Store {
     pub fn load(dir: PathBuf) -> Store {
         let path = dir.join("notes.json");
-        let d = match std::fs::read(&path) {
+        let backup = dir.join("notes.backup.json");
+        let mut frozen = false;
+        let d = match read_patiently(&path) {
             Ok(bytes) => match serde_json::from_slice::<Data>(&bytes) {
                 Ok(d) => {
                     log::info(&format!("loaded {} notes ({} KB)", d.notes.len(), bytes.len().div_ceil(1024)));
@@ -151,16 +185,17 @@ impl Store {
                     let moved = std::fs::rename(&path, dir.join(&aside));
                     // Category and position only: serde's message can quote note text.
                     log::error(&format!(
-                        "notes.json is unreadable ({:?} error at line {}, column {}); {}; starting empty (notes.backup.json has the last good copy)",
+                        "notes.json is unreadable ({:?} error at line {}, column {}); {}",
                         e.classify(),
                         e.line(),
                         e.column(),
-                        match moved {
+                        match &moved {
                             Ok(()) => format!("moved aside as {aside}"),
-                            Err(e) => format!("moving it aside failed: {e}"),
+                            Err(e) => format!("moving it aside failed ({e}), so it won't be written this session"),
                         }
                     ));
-                    Data::default()
+                    frozen = moved.is_err();
+                    from_backup(&backup)
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -168,11 +203,12 @@ impl Store {
                 Data::default()
             }
             Err(e) => {
-                log::error(&format!("couldn't read notes.json: {e}; starting empty"));
-                Data::default()
+                log::error(&format!("couldn't read notes.json ({e}), so it won't be written this session"));
+                frozen = true;
+                from_backup(&backup)
             }
         };
-        let mut s = Store { path, d };
+        let mut s = Store { path, d, frozen };
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
         s.d.next_id = s.d.next_id.max(max);
         // Early builds stored the deck at 42% height; the deck is now centred by default.
@@ -183,6 +219,9 @@ impl Store {
     }
 
     pub fn save(&self) {
+        if self.frozen {
+            return; // see `frozen`; logged once, at load
+        }
         let saved = serde_json::to_vec_pretty(&self.d).map_err(std::io::Error::other).and_then(|json| {
             let tmp = self.path.with_extension("json.tmp");
             std::fs::write(&tmp, json)?;

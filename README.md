@@ -157,7 +157,7 @@ A round trip keeps nesting, emphasis and ticked items intact.
 Notes are stored in one readable file, `Documents\Peekaboo Notes\notes.json`:
 - each note keeps its RTF and a plain-text Markdown copy;
 - writes are atomic (temp file, then rename);
-- `notes.backup.json` holds the last good copy from the previous launch.
+- `notes.backup.json` holds the last good copy from the previous launch. If `notes.json` can't be read (locked by another program, or damaged), the app opens the backup instead and never writes over the original.
 
 There is no network access and no telemetry.
 
