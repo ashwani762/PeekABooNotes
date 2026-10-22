@@ -232,4 +232,6 @@
         <item quantity="other">Dadurch werden alle %d Notizen gelöscht, auch archivierte. Direkt danach lässt sich das noch rückgängig machen.</item>
     </plurals>
     <string name="dialog_delete_all_ok">Alle löschen</string>
+    <string name="settings_notes_folder_portable">Notizordner · Portabel</string>
+    <string name="settings_portable_note">Diese Kopie ist portabel: Die Notizen liegen neben der App, nicht unter „Dokumente“.</string>
 </resources>

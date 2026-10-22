@@ -222,4 +222,6 @@
         <item quantity="other">アーカイブ済みを含む %d 件のメモをすべて削除します。削除の直後なら取り消せます。</item>
     </plurals>
     <string name="dialog_delete_all_ok">すべて削除</string>
+    <string name="settings_notes_folder_portable">メモのフォルダ · ポータブル</string>
+    <string name="settings_portable_note">このコピーはポータブル版です。メモは「ドキュメント」ではなく、アプリと同じ場所に保存されます。</string>
 </resources>

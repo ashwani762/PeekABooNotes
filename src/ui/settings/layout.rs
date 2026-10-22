@@ -53,7 +53,10 @@ pub(super) fn place<'a>(w: &Win, groups: &'a [Group]) -> Vec<Item<'a>> {
         }
         if let Some(f) = &g.footer {
             out.push(Item::Footer(f, (y + 19.0 * s) as i32));
-            y += FOOTER_H * s;
+            // Longer footers wrap: each extra line adds its height.
+            let line = w.fonts.sub.ascent + w.fonts.sub.descent;
+            let extra = (w.fonts.sub.wrapped_height(f, (cw - 4.0 * s) as i32) - line).max(0);
+            y += FOOTER_H * s + extra as f32;
         }
         y += GROUP_GAP * s;
     }

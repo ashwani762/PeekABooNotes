@@ -232,4 +232,6 @@
         <item quantity="other">Les %d notes seront supprimées, y compris les notes archivées. Vous pourrez encore annuler juste après.</item>
     </plurals>
     <string name="dialog_delete_all_ok">Tout supprimer</string>
+    <string name="settings_notes_folder_portable">Dossier des notes · Portable</string>
+    <string name="settings_portable_note">Cette copie est portable : les notes restent à côté de l’app, pas dans Documents.</string>
 </resources>

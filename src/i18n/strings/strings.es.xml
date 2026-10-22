@@ -232,4 +232,6 @@
         <item quantity="other">Se eliminarán las %d notas, incluidas las archivadas. Justo después aún podrás deshacerlo.</item>
     </plurals>
     <string name="dialog_delete_all_ok">Eliminar todo</string>
+    <string name="settings_notes_folder_portable">Carpeta de notas · Portátil</string>
+    <string name="settings_portable_note">Esta copia es portátil: las notas se guardan junto a la app, no en Documentos.</string>
 </resources>

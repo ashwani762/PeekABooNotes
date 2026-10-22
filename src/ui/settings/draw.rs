@@ -44,7 +44,9 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
             }
             Item::Footer(t, base) => {
                 let (_, cwid) = content_x(w);
-                c.line_ct(t, &f.sub, (x0 + 2.0 * s) as i32, base + rise as i32, cwid as i32, None, p.sub, DT_LEFT);
+                let (x, top, wid) = ((x0 + 2.0 * s) as i32, base + rise as i32 - f.sub.ascent, cwid as i32 - (4.0 * s) as i32);
+                let h = f.sub.wrapped_height(t, wid);
+                c.text_ct(t, &f.sub, rect(x, top, wid, h), None, p.sub, DT_LEFT | DT_WORDBREAK);
             }
             Item::Box(mut sh) => {
                 sh.y += rise;

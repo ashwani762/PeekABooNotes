@@ -232,4 +232,6 @@
         <item quantity="other">इससे सभी %d नोट्स हट जाएँगे, संग्रहित नोट्स भी। इसके तुरंत बाद आप इसे पूर्ववत कर सकते हैं।</item>
     </plurals>
     <string name="dialog_delete_all_ok">सभी हटाएँ</string>
+    <string name="settings_notes_folder_portable">नोट्स फ़ोल्डर · पोर्टेबल</string>
+    <string name="settings_portable_note">यह कॉपी पोर्टेबल है: नोट्स ऐप के पास ही रहते हैं, Documents में नहीं।</string>
 </resources>

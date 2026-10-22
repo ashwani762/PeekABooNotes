@@ -242,4 +242,6 @@
         <item quantity="other">This deletes all %d notes, archived ones included. You can still undo it right afterwards.</item>
     </plurals>
     <string name="dialog_delete_all_ok">Delete All</string>
+    <string name="settings_notes_folder_portable">Notes folder · Portable</string>
+    <string name="settings_portable_note">This copy is portable: its notes stay beside the app, not in Documents.</string>
 </resources>
