@@ -271,7 +271,6 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         let down = hot && l.pressed == hit;
         let sh = Shape::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32, TOOLBAR_H * s / 2.0);
         let (fill, fa, ink) = match hit {
-            Hit::Open => (p.primary.0, if down { 0.82 } else { 1.0 }, p.primary.1),
             // Tinted at rest (deeper red text in light mode for contrast), solid when aimed at.
             Hit::Delete if hot => (p.danger, if down { 0.82 } else { 1.0 }, 0xFFFFFF),
             Hit::Delete => (p.danger, 0.10, if dark { p.danger } else { 0xD70015 }),

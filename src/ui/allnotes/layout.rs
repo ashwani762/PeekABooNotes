@@ -41,8 +41,8 @@ pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 4] {
 pub(super) fn detail_buttons(l: &Lib, lay: &Layout) -> Vec<(Hit, RECT, &'static str)> {
     let s = l.s;
     let archived = l.rows.iter().filter(|r| l.sel.contains(&r.id)).all(|r| r.archived);
-    let labels: [(Hit, &'static str); 4] =
-        [(Hit::Open, t!("button_open")), (Hit::Archive, if archived { t!("button_restore") } else { t!("button_archive") }), (Hit::ExportSel, t!("button_export")), (Hit::Delete, t!("button_delete"))];
+    let labels: [(Hit, &'static str); 3] =
+        [(Hit::Archive, if archived { t!("button_restore") } else { t!("button_archive") }), (Hit::ExportSel, t!("button_export")), (Hit::Delete, t!("button_delete"))];
     let mut out = Vec::new();
     let mut x = lay.w - (28.0 * s) as i32;
     for (hit, label) in labels.iter().rev() {

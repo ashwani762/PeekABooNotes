@@ -260,7 +260,7 @@ pub(super) fn click(l: &mut Lib, hit: Hit) -> Action {
         Hit::Import => Action::Import,
         Hit::Settings => Action::Settings,
         Hit::Export => Action::Export(l.rows.iter().map(|r| r.id).collect()),
-        Hit::Open | Hit::Card => open_selected(l),
+        Hit::Card => open_selected(l),
         Hit::OpenHere => in_window(l).map_or(Action::None, Action::OpenHere),
         Hit::Archive => {
             let all_archived = l.rows.iter().filter(|r| sel.contains(&r.id)).all(|r| r.archived);

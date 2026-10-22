@@ -71,7 +71,6 @@ enum Hit {
     Search,
     Segment(usize),
     Row(usize),
-    Open,
     Archive,
     ExportSel,
     Delete,
@@ -104,7 +103,6 @@ struct Pal {
     hover: (u32, f32),
     field: (u32, f32),
     pill: u32,
-    primary: (u32, u32),
     danger: u32,
     focus: u32,
 }
@@ -121,7 +119,6 @@ fn pal(dark: bool) -> Pal {
             hover: (0xFFFFFF, 0.06),
             field: (0x767680, 0.24),
             pill: 0x636366,
-            primary: (0xF5F5F7, 0x1C1C1E),
             danger: 0xFF453A,
             focus: 0x0A84FF,
         }
@@ -136,7 +133,6 @@ fn pal(dark: bool) -> Pal {
             hover: (0x000000, 0.045),
             field: (0x767680, 0.12),
             pill: 0xFFFFFF,
-            primary: (0x1D1D1F, 0xFFFFFF),
             danger: 0xFF3B30,
             focus: 0x0A84FF,
         }
@@ -345,6 +341,31 @@ pub fn refresh() {
     }
 }
 
+/// A note made here joins the list where new notes go (the bottom, unless Settings says
+/// the top), selected and ready to type in the detail card. Only the deck's own + opens a
+/// note window.
+fn new_here() {
+    let id = app::store_mut(|s| s.create("", ""));
+    app::save();
+    // Nothing may hide it: a search is cleared (outside the borrow: the search box's
+    // change notification comes straight back here) and the Notes view shown.
+    if let Some(search) = with(|l| (!l.query.is_empty()).then_some(l.search)).flatten() {
+        unsafe { SetWindowTextW(search, wide("").as_ptr()) };
+    }
+    with(|l| {
+        set_mode(l, 0);
+        rebuild(l);
+        if let Some(i) = l.rows.iter().position(|r| r.id == id) {
+            select_row(l, i, false, false);
+            ensure_visible(l, i);
+        }
+    });
+    app::refresh();
+    if let Some(e) = with(|l| l.editor).filter(|e| !e.is_null()) {
+        unsafe { SetFocus(e) };
+    }
+}
+
 /// Note typography changed: restyle the inline editor, if there is one.
 pub fn retheme_editor() {
     with(|l| l.fonts = Fonts::new(l.s));
@@ -447,7 +468,7 @@ fn perform_inner(hwnd: HWND, a: Action) {
                     unsafe { SetFocus(e) };
                 }
         }
-        Action::New => app::new_note(),
+        Action::New => new_here(),
         Action::Import => {
             let _ = app::import(hwnd);
         }
