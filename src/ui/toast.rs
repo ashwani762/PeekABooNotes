@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Ashwani Kumar Bachchan
+// Copyright (C) 2026 Ashwani Kumar
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Undo HUD: a dark capsule that rises from the bottom of the screen with a countdown

@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Ashwani Kumar Bachchan
+// Copyright (C) 2026 Ashwani Kumar
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Painting Settings: sidebar, groups, controls and the note preview.

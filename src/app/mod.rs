@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Ashwani Kumar Bachchan
+// Copyright (C) 2026 Ashwani Kumar
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Application state, the hidden main window (tray icon + global hotkeys) and commands.

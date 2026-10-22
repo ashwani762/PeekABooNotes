@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Ashwani Kumar Bachchan
+// Copyright (C) 2026 Ashwani Kumar
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The note, colour and tray menus, and the app commands they send.

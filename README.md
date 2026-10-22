@@ -185,7 +185,7 @@ A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three 
 
 ## License
 
-Copyright (C) 2026 Ashwani Kumar Bachchan
+Copyright (C) 2026 Ashwani Kumar
 
 PeekABoo Notes is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but without any warranty; see the [LICENSE](LICENSE) file for the full text.
 
