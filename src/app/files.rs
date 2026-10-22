@@ -131,12 +131,42 @@ pub fn import(owner: HWND) -> Outcome {
     Some(Ok(added))
 }
 
+/// The startup task declared in the MSIX manifest (`packaging/msix/AppxManifest.xml`).
+const STARTUP_TASK: &str = "PeekabooNotesStartup";
+
+/// Installed from an MSIX package. There the Run key is virtualised per package (Windows
+/// never reads it), so start-with-Windows goes through the manifest's startup task.
+fn packaged() -> bool {
+    use windows_sys::Win32::Foundation::APPMODEL_ERROR_NO_PACKAGE;
+    use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
+    static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    // Packaged: the empty buffer is just too small for the name.
+    *P.get_or_init(|| unsafe { GetCurrentPackageFullName(&mut 0, null_mut()) != APPMODEL_ERROR_NO_PACKAGE })
+}
+
+fn startup_task() -> Option<windows::ApplicationModel::StartupTask> {
+    windows::ApplicationModel::StartupTask::GetAsync(&windows::core::HSTRING::from(STARTUP_TASK)).ok()?.join().ok()
+}
+
 pub fn startup_enabled() -> bool {
+    if packaged() {
+        use windows::ApplicationModel::StartupTaskState as S;
+        return startup_task().and_then(|t| t.State().ok()).is_some_and(|s| s == S::Enabled || s == S::EnabledByPolicy);
+    }
     let (k, v) = (wide(RUN_KEY), wide(RUN_VALUE));
     unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, null_mut(), null_mut(), null_mut()) == 0 }
 }
 
 pub fn set_startup(on: bool) {
+    if packaged() {
+        // Turned off in Task Manager (DisabledByUser), enabling is refused and the toggle
+        // reads back off: only the user can undo that, there.
+        if let Some(t) = startup_task() {
+            let _ = if on { t.RequestEnableAsync().and_then(|op| op.join()).map(drop) } else { t.Disable() };
+        }
+        settings::refresh();
+        return;
+    }
     let (k, v) = (wide(RUN_KEY), wide(RUN_VALUE));
     unsafe {
         if on {
