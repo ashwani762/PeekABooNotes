@@ -64,7 +64,9 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             rich::paste_plain(e);
             return 0;
         }
-        WM_LBUTTONDOWN => {
+        // A quick second click on a circle arrives as a double-click: tick again, rather
+        // than letting RichEdit select the word under it.
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
             if let Some(st) = state(h) {
                 st.auto = None;
             }
