@@ -84,6 +84,8 @@ struct Tab {
     pull: Spring, // 0 = tucked, 1 = pulled out (preview)
     /// Cached spine label layout: (max length, fitted text, text length, cell height).
     fitted: Option<(i32, String, i32, i32)>,
+    /// The preview body's laid-out height at the current scale and typography.
+    body_h: f32,
 }
 
 impl Tab {
@@ -104,6 +106,7 @@ impl Tab {
             press: Spring::unit(1.0, motion::SNAPPY),
             pull: Spring::unit(0.0, motion::DEFAULT),
             fitted: None,
+            body_h: 0.0,
             slot: 0,
         }
     }
@@ -144,6 +147,8 @@ struct Geo {
     more: usize,
     /// Capsules in the pill (every card in the deck, including those that are out).
     caps: usize,
+    /// Height of what sits under the stack: the "+N" tile, the plus button, margins.
+    tail: f32,
 }
 
 impl Geo {
@@ -337,6 +342,19 @@ pub fn card_rect(id: u64) -> Option<(RECT, f32)> {
     .flatten()
 }
 
+/// Note `id`'s pulled-out card as it is on screen right now, for the card that flies
+/// open from it to start as exactly this.
+pub fn card_image(id: u64) -> Option<crate::render::gfx::Image> {
+    let (r, _) = card_rect(id)?;
+    with(|d| {
+        let mut w: RECT = unsafe { std::mem::zeroed() };
+        unsafe { GetWindowRect(d.hwnd, &mut w) };
+        let local = RECT { left: r.left - w.left, top: r.top - w.top, right: r.right - w.left, bottom: r.bottom - w.top };
+        d.canvas.as_mut()?.snapshot(local)
+    })
+    .flatten()
+}
+
 /// The plus button's screen rect, if the deck is fanned out (new notes grow from it).
 pub fn plus_rect() -> Option<(RECT, f32)> {
     with(|d| {
@@ -347,7 +365,7 @@ pub fn plus_rect() -> Option<(RECT, f32)> {
         let s = g.s;
         let centre_near = (TAB_W / 2.0 + 2.0) * s;
         let (cx, _) = span(&g, g.ew, centre_near, centre_near);
-        let (r, cy) = (17.0 * s, g.plus_cy());
+        let (r, cy) = (17.0 * s, g.plus_cy() + footer_drop(d));
         let rc = RECT { left: g.ex + (cx - r) as i32, top: g.ey + (cy - r) as i32, right: g.ex + (cx + r) as i32, bottom: g.ey + (cy + r) as i32 };
         Some((rc, r))
     })

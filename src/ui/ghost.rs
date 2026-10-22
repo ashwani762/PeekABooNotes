@@ -22,6 +22,7 @@ use crate::platform::util::{rect, wide};
 
 const CLASS: &str = "PeekabooGhost";
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
     /// Grow into a window; `on_arrive` reveals it.
     Open,
@@ -29,6 +30,21 @@ pub enum Kind {
     Close,
     /// Sink and dissolve in place (delete, archive).
     Dissolve,
+}
+
+/// What a flying card shows.
+pub struct Content {
+    pub title: String,
+    pub body: String,
+    /// Where the body starts, in px below the card's top, when it's a scrolled window's
+    /// view (no title then); None for the title and the top of the text.
+    pub body_top: Option<f32>,
+    /// The window itself, pixel for pixel: shown instead of the text when there is one,
+    /// so the card turns into the window (or the window into the card) without a jump.
+    pub image: Option<crate::render::gfx::Image>,
+    /// Opening: the deck card it takes off from, pixel for pixel, cross-faded into `image`
+    /// so the content never blinks out on the way.
+    pub from_image: Option<crate::render::gfx::Image>,
 }
 
 struct Ghost {
@@ -47,6 +63,9 @@ struct Ghost {
     color: u8,
     title: String,
     body: String,
+    body_top: Option<f32>,
+    image: Option<crate::render::gfx::Image>,
+    from_image: Option<crate::render::gfx::Image>,
     s: f32,
     title_font: Font,
     body_font: Font,
@@ -63,8 +82,7 @@ fn union(a: &RECT, b: &RECT, pad: i32) -> RECT {
 }
 
 /// Fly a card from `from` to `to` (screen rects with corner radii).
-#[allow(clippy::too_many_arguments)]
-pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, title: &str, body: &str, on_arrive: Option<Box<dyn FnOnce()>>) {
+pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, on_arrive: Option<Box<dyn FnOnce()>>) {
     if anim::reduced() {
         if let Some(f) = on_arrive {
             f();
@@ -113,8 +131,11 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, title: &st
         start_area: ((f.right - f.left) * (f.bottom - f.top)) as f32,
         end_area: ((t.right - t.left) * (t.bottom - t.top)) as f32,
         color,
-        title: title.to_string(),
-        body: body.chars().take(900).collect(),
+        title: content.title,
+        body: content.body.chars().take(900).collect(),
+        body_top: content.body_top,
+        image: content.image,
+        from_image: content.from_image,
         s,
         // The note's own typography, so the flight matches the window it becomes.
         title_font: crate::editor::rich::preview_fonts(s).0,
@@ -162,15 +183,31 @@ fn render(g: &mut Ghost) {
         Kind::Open => alpha * clamp01((p - 0.25) / 0.6),
         _ => alpha * (1.0 - clamp01(p / 0.6)),
     };
-    if content > 0.01 && sh.w > 40.0 * s && sh.h > 30.0 * s {
+    if let Some(img) = g.image.as_ref() {
+        // Anchored at the card's top-left, as the window lays itself out.
+        c.flush();
+        match (g.kind, g.from_image.as_ref()) {
+            (Kind::Open, Some(from)) => {
+                // From the deck card straight into the window, with no empty card between.
+                let k = clamp01((p - 0.05) / 0.55);
+                c.image(from, sh.x, sh.y, &sh, alpha * (1.0 - k));
+                c.image(img, sh.x, sh.y, &sh, alpha * k);
+            }
+            _ => c.image(img, sh.x, sh.y, &sh, content),
+        }
+    } else if content > 0.01 && sh.w > 40.0 * s && sh.h > 30.0 * s {
         let (x0, y0) = (sh.x + 18.0 * s, sh.y + 42.0 * s);
         let right = sh.x + sh.w - 16.0 * s;
         let bottom = sh.y + sh.h - 12.0 * s;
         if right > x0 && bottom > y0 {
-            let tr = rect(x0 as i32, y0 as i32, (right - x0) as i32, (26.0 * s) as i32);
-            let clip_title = rect(tr.left, tr.top, tr.right - tr.left, ((bottom - y0) as i32).min(tr.bottom - tr.top));
-            c.text(&g.title, &g.title_font, clip_title, theme::PAPER_TEXT, content, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
-            let by = y0 + 32.0 * s;
+            let by = if let Some(top) = g.body_top {
+                sh.y + top
+            } else {
+                let tr = rect(x0 as i32, y0 as i32, (right - x0) as i32, (26.0 * s) as i32);
+                let clip_title = rect(tr.left, tr.top, tr.right - tr.left, ((bottom - y0) as i32).min(tr.bottom - tr.top));
+                c.text(&g.title, &g.title_font, clip_title, theme::PAPER_TEXT, content, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+                y0 + 32.0 * s
+            };
             if bottom > by && !g.body.is_empty() {
                 let br = rect(x0 as i32, by as i32, (right - x0) as i32, (bottom - by) as i32);
                 crate::ui::draw_body(c, &g.body, &g.body_font, br, g.color, dark, content, s);

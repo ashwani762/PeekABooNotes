@@ -33,6 +33,11 @@ pub struct Note {
     /// Last window rectangle (screen coordinates), so notes reopen where you left them.
     #[serde(default)]
     pub rect: Option<[i32; 4]>,
+    /// Where you were in the text, so the note reopens there scrolled as you left it: the
+    /// caret, the first character in view (UTF-16 positions), and how many px of that
+    /// character's line were scrolled out of view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<[i32; 3]>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -247,13 +252,32 @@ pub fn title_of(text: &str) -> String {
     t
 }
 
-/// Everything after the title line, with markers turned into glyphs for previews.
-/// Nested items keep two leading spaces per level (see `ui::draw_body`).
+/// The most a preview ever shows: more than the tallest card holds, so its fade-out is
+/// still the cut, while a huge note costs no more to preview than a long one.
+const PREVIEW_LINES: usize = 20;
+const PREVIEW_LINE_CHARS: usize = 300;
+
+/// The start of everything after the title line, with markers turned into glyphs for
+/// previews. Nested items keep two leading spaces per level (see `ui::draw_body`).
 pub fn body_of(text: &str) -> String {
     let mut lines = text.lines().skip_while(|l| strip_marker(l).trim().is_empty());
     lines.next();
+    preview(lines)
+}
+
+/// Like `body_of`, from paragraph `first` (0 is the title line) on: what a scrolled note
+/// shows, for the card flying to or from its window.
+pub fn body_from(text: &str, first: usize) -> String {
+    preview(text.lines().skip(first))
+}
+
+fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
     let mut out = String::new();
-    for l in lines {
+    for l in lines.take(PREVIEW_LINES) {
+        let l: &str = match l.char_indices().nth(PREVIEW_LINE_CHARS) {
+            Some((i, _)) => &l[..i],
+            None => l,
+        };
         let t = l.trim_start();
         let level = ((l.len() - t.len()) / 2).min(5);
         let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();

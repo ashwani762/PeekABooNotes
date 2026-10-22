@@ -8,7 +8,7 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, HICON, ICONINFO, ULW_ALPHA, UpdateLayeredWindow,
+    CreateIconIndirect, GetClientRect, HICON, ICONINFO, ULW_ALPHA, UpdateLayeredWindow,
 };
 
 pub use crate::render::dw::Font;
@@ -407,6 +407,10 @@ impl Canvas {
         }
     }
 
+    pub fn batching(&self) -> bool {
+        self.batch.is_some()
+    }
+
     /// Draw everything recorded since `begin_batch`.
     pub fn flush(&mut self) {
         if let Some(ops) = self.batch.take() {
@@ -445,6 +449,14 @@ impl Canvas {
     }
 
     /// Copy the pixels of `r` out (for caching expensive, rarely-changing regions).
+    /// The pixels in `r` as a picture (None unless `r` lies wholly on the canvas).
+    pub fn snapshot(&mut self, r: RECT) -> Option<Image> {
+        if r.left < 0 || r.top < 0 || r.right > self.w || r.bottom > self.h || r.right <= r.left || r.bottom <= r.top {
+            return None;
+        }
+        Some(Image { w: r.right - r.left, h: r.bottom - r.top, px: self.copy_out(r) })
+    }
+
     pub fn copy_out(&mut self, r: RECT) -> Vec<u32> {
         let (w, h) = (self.w, self.h);
         let r = RECT { left: r.left.max(0), top: r.top.max(0), right: r.right.min(w), bottom: r.bottom.min(h) };
@@ -495,8 +507,9 @@ impl Canvas {
         }
     }
 
-    /// Blend an opaque rectangle toward `rgb`, keeping `a` of what's there — fades a
-    /// whole region (text included) in one pass.
+    /// Blend a rectangle toward `rgb`, keeping `a` of what's there: fades a whole region
+    /// (text included) in one pass. Each pixel keeps its own opacity, so a see-through
+    /// surface (a card mid-flight) fades without going solid, or dark where it's faint.
     pub fn fade_rect(&mut self, r: RECT, rgb: u32, a: f32) {
         if a >= 0.999 {
             return;
@@ -508,11 +521,13 @@ impl Canvas {
             let row = (y * w) as usize;
             for p in &mut px[row + r.left.max(0) as usize..row + r.right.min(w).max(r.left.max(0)) as usize] {
                 let v = *p;
+                let alpha = v >> 24;
                 let ch = |sh: u32| {
-                    let (src, dst) = ((v >> sh) & 0xFF, (rgb >> sh) & 0xFF);
+                    // Pixels are premultiplied: the target colour is too, by this pixel's alpha.
+                    let (src, dst) = ((v >> sh) & 0xFF, ((rgb >> sh) & 0xFF) * alpha / 255);
                     ((src * k + dst * (256 - k)) >> 8) << sh
                 };
-                *p = 0xFF00_0000 | ch(16) | ch(8) | ch(0);
+                *p = (v & 0xFF00_0000) | ch(16) | ch(8) | ch(0);
             }
         }
     }
@@ -589,6 +604,77 @@ impl Canvas {
     pub fn into_bitmap(mut self) -> HBITMAP {
         unsafe { GdiFlush() };
         self.img.release()
+    }
+
+    /// Draw `img` with its top-left at (x, y), only inside the rounded rectangle `clip`
+    /// (unrotated; anti-aliased at its edge), at `alpha`.
+    pub fn image(&mut self, img: &Image, x: f32, y: f32, clip: &Shape, alpha: f32) {
+        if alpha <= 0.002 || clip.w <= 0.0 || clip.h <= 0.0 {
+            return;
+        }
+        let (hx, hy) = (clip.w / 2.0, clip.h / 2.0);
+        let (cx, cy) = (clip.x + hx, clip.y + hy);
+        let r = clip.r.min(hx).min(hy).max(0.0);
+        let (ox, oy) = (x.round() as i32, y.round() as i32);
+        let x0 = (clip.x.floor() as i32).max(ox).max(0);
+        let y0 = (clip.y.floor() as i32).max(oy).max(0);
+        let x1 = ((clip.x + clip.w).ceil() as i32).min(ox + img.w).min(self.w);
+        let y1 = ((clip.y + clip.h).ceil() as i32).min(oy + img.h).min(self.h);
+        let cw = self.w;
+        let px = self.px();
+        for py in y0..y1 {
+            let (row, src_row) = ((py * cw) as usize, ((py - oy) * img.w) as usize);
+            for pxx in x0..x1 {
+                let (sx, sy) = (pxx as f32 + 0.5, py as f32 + 0.5);
+                let qx = (sx - cx).abs() - (hx - r);
+                let qy = (sy - cy).abs() - (hy - r);
+                let d = if qx > 0.0 && qy > 0.0 { (qx * qx + qy * qy).sqrt() - r } else { qx.max(qy) - r };
+                let a = alpha * (0.5 - d).clamp(0.0, 1.0);
+                if a <= 0.0 {
+                    continue;
+                }
+                // Both premultiplied; the picture is opaque.
+                let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
+                let k = (a * 256.0) as u32;
+                let ch = |sh: u32| ((((s >> sh) & 0xFF) * k + ((dst >> sh) & 0xFF) * (256 - k)) >> 8) << sh;
+                px[row + pxx as usize] = ch(24) | ch(16) | ch(8) | ch(0);
+            }
+        }
+    }
+}
+
+/// A picture of a window, for animating it as it opens or closes.
+pub struct Image {
+    pub w: i32,
+    pub h: i32,
+    px: Vec<u32>,
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn PrintWindow(hwnd: HWND, hdc: HDC, flags: u32) -> i32;
+}
+
+/// What `hwnd` (children and all) looks like right now, as Windows composes it: painted
+/// first if anything is pending. None if Windows can't provide it.
+pub fn capture(hwnd: HWND) -> Option<Image> {
+    const PW_CLIENTONLY: u32 = 1;
+    const PW_RENDERFULLCONTENT: u32 = 2;
+    unsafe {
+        let mut rc: RECT = std::mem::zeroed();
+        GetClientRect(hwnd, &mut rc);
+        let (w, h) = (rc.right, rc.bottom);
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        RedrawWindow(hwnd, std::ptr::null(), null_mut(), RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        let dib = Dib::new(w, h);
+        if PrintWindow(hwnd, dib.dc, PW_CLIENTONLY | PW_RENDERFULLCONTENT) == 0 {
+            return None;
+        }
+        GdiFlush();
+        let px = std::slice::from_raw_parts(dib.px, (w * h) as usize).iter().map(|p| p | 0xFF00_0000).collect();
+        Some(Image { w, h, px })
     }
 }
 

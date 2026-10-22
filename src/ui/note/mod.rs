@@ -24,6 +24,7 @@ mod chrome;
 mod commands;
 mod lists;
 mod input;
+mod scrollbar;
 use chrome::*;
 use commands::*;
 use lists::*;
@@ -78,6 +79,16 @@ struct NoteWin {
     hover: bool,
     /// Hosted inside All Notes' detail card (child window, no chrome of its own).
     embedded: bool,
+    /// The scroll bar (see `scrollbar`): shown, widened, pointer on it, held by a recent
+    /// scroll, mid-drag (pointer y and scroll at the grab), last (scroll, content) seen.
+    bar: Spring,
+    bar_wide: Spring,
+    bar_hot: bool,
+    bar_hold: bool,
+    bar_drag: Option<(i32, i32)>,
+    bar_seen: Option<(i32, i32)>,
+    /// Wheel scrolling glides to its target instead of jumping.
+    glide: Spring,
 }
 
 fn state(h: HWND) -> Option<&'static mut NoteWin> {
@@ -144,6 +155,13 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         active: true,
         hover: false,
         embedded: false,
+        bar: Spring::unit(0.0, theme::motion::DEFAULT),
+        bar_wide: Spring::unit(0.0, theme::motion::SNAPPY),
+        bar_hot: false,
+        bar_hold: false,
+        bar_drag: None,
+        bar_seen: None,
+        glide: Spring::px(0.0, theme::motion::SNAPPY),
     });
     // Hidden-until-arrival windows are created layered at alpha 0 so they can take focus
     // now (while we still hold the user's input) and become visible when the ghost lands.
@@ -174,6 +192,9 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(h, 3 /* DWMWA_TRANSITIONS_FORCEDISABLED */, &off as *const i32 as _, 4);
         SetWindowPos(h, null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
     }
+    // Dropping the system frame just grew the text area to its real size: place the text
+    // again for it, before the opening card takes its picture of the window.
+    open_at_place(h);
     if show {
         reveal(h);
     } else {
@@ -221,8 +242,15 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         active: false,
         hover: false,
         embedded: true,
+        bar: Spring::unit(0.0, theme::motion::DEFAULT),
+        bar_wide: Spring::unit(0.0, theme::motion::SNAPPY),
+        bar_hot: false,
+        bar_hold: false,
+        bar_drag: None,
+        bar_seen: None,
+        glide: Spring::px(0.0, theme::motion::SNAPPY),
     });
-    unsafe {
+    let h = unsafe {
         CreateWindowExW(
             0,
             wide(CLASS).as_ptr(),
@@ -237,7 +265,9 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
             app::hinst(),
             Box::into_raw(st) as _,
         )
-    }
+    };
+    scrollbar::hint(h);
+    h
 }
 
 pub fn is_embedded(h: HWND) -> bool {
@@ -250,11 +280,17 @@ pub fn reveal(h: HWND) {
         if IsWindow(h) == 0 {
             return;
         }
+        // The window has its final size only now (it was created at a default one). Done
+        // while it's still invisible, so the text never shows a jump.
+        open_at_place(h);
+        scrollbar::hint(h);
         let ex = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
         if ex & WS_EX_LAYERED != 0 {
             SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & !WS_EX_LAYERED) as isize);
             SetWindowPos(h, null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-            RedrawWindow(h, std::ptr::null(), null_mut(), RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+            // Paint everything now, in one go: out of the layered surface the window shows
+            // black wherever it hasn't painted yet (the footer, if only the text had).
+            RedrawWindow(h, std::ptr::null(), null_mut(), RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
         }
         if quiet() {
             ShowWindow(h, SW_SHOWNOACTIVATE);
@@ -267,50 +303,124 @@ pub fn reveal(h: HWND) {
     }
 }
 
+/// Where you are in the text: the caret, the first character in view, and how far its
+/// line is scrolled past the top (the first line is often only partly in view).
+fn view_of(edit: HWND) -> [i32; 3] {
+    const EM_GETFIRSTVISIBLELINE: u32 = 0x00CE;
+    const EM_LINEINDEX: u32 = 0x00BB;
+    let line = rich::send(edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+    let top = rich::send(edit, EM_LINEINDEX, line as usize, 0).max(0) as i32;
+    let cut = -rich::pos_from_char(edit, top).y;
+    [rich::sel(edit).1.max(0), top, cut.max(0)]
+}
+
+/// Back where you left the note: the caret where it was, and the line that was at the top
+/// at the top again (a character, not pixels, so it holds after a resize or a new text
+/// size). A note never opened before waits at the end, where you'd carry on writing.
+/// Loading and styling moved the selection around at the editor's earlier sizes and left
+/// it scrolled anywhere, so the scroll is set outright, with drawing held until it's final.
+fn open_at_place(h: HWND) {
+    let Some(st) = state(h) else { return };
+    let edit = st.edit;
+    let view = app::store(|s| s.note(st.id).and_then(|n| n.view));
+    let len = rich::text(edit).len() as i32;
+    unsafe { SendMessageW(edit, WM_SETREDRAW, 0, 0) };
+    match view {
+        Some([caret, top, cut]) if (0..=len).contains(&caret) && (0..=len).contains(&top) => {
+            rich::set_sel(edit, caret, caret);
+            let y = rich::pos_from_char(edit, top).y + rich::scroll_y(edit) + cut;
+            rich::set_scroll_y(edit, y.min(scrollbar::max_scroll(edit)));
+            scrollbar::keep_caret_in_view(edit);
+        }
+        _ => {
+            rich::set_sel(edit, len, len);
+            rich::set_scroll_y(edit, scrollbar::max_scroll(edit));
+        }
+    }
+    unsafe {
+        SendMessageW(edit, WM_SETREDRAW, 1, 0);
+        InvalidateRect(edit, std::ptr::null(), 1);
+    }
+}
+
 /// Stress runs must never take focus away from the user.
 fn quiet() -> bool {
     cfg!(feature = "stress") && std::env::args().any(|a| a == "--stress")
 }
 
-/// Current look of a note for a ghost: (screen rect, colour, title, body).
-fn snapshot(h: HWND) -> Option<(RECT, u8, String, String)> {
+/// Current look of a note for a ghost: (screen rect, colour, what it shows).
+fn snapshot(h: HWND) -> Option<(RECT, u8, crate::ui::ghost::Content)> {
     let st = state(h)?;
     let mut r: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetWindowRect(h, &mut r) };
     let (color, text) = app::store(|s| s.note(st.id).map(|n| (n.color, n.text.clone())))?;
-    Some((r, color, title_of(&text), crate::store::body_of(&text)))
+    Some((r, color, flight_content(h, &text)))
+}
+
+/// What the card flying to or from this window shows: the title and the top of the text,
+/// or, when the text is scrolled, the lines from the first one wholly in view, placed where
+/// the window has them, so the card and the window hand over without a jump.
+pub fn flight_content(h: HWND, text: &str) -> crate::ui::ghost::Content {
+    let image = if state(h).is_some_and(|st| !st.embedded) { crate::render::gfx::capture(h) } else { None };
+    let whole = crate::ui::ghost::Content { title: title_of(text), body: crate::store::body_of(text), body_top: None, image, from_image: None };
+    if whole.image.is_some() {
+        return whole;
+    }
+    let Some(st) = state(h) else { return whole };
+    if st.embedded || rich::scroll_y(st.edit) <= 0 {
+        return whole;
+    }
+    let t = rich::text(st.edit);
+    let (mut cp, mut para) = (0usize, 0usize);
+    while rich::pos_from_char(st.edit, cp as i32).y < 0 {
+        let Some(i) = t[cp..].iter().position(|&c| c == rich::CR) else { return whole };
+        cp += i + 1;
+        para += 1;
+    }
+    let y = rich::pos_from_char(st.edit, cp as i32).y as f32;
+    let body_top = header_h(st.s) as f32 + 2.0 * st.s + y;
+    crate::ui::ghost::Content { title: String::new(), body: crate::store::body_from(text, para), body_top: Some(body_top), image: None, from_image: None }
 }
 
 /// Ghost the note back to its tab (or the pill) as the window disappears.
 fn fly_home(h: HWND) {
     let Some(st) = state(h) else { return };
     let id = st.id;
-    let Some((r, color, title, body)) = snapshot(h) else { return };
-    if title == t!("note_untitled") && body.is_empty() {
+    let Some((r, color, content)) = snapshot(h) else { return };
+    if content.title == t!("note_untitled") && content.body.is_empty() {
         return; // an empty note simply vanishes
     }
     let home = crate::ui::deck::home_rect(id);
-    crate::ui::ghost::fly(crate::ui::ghost::Kind::Close, (r, 8.0 * st.s), home, color, &title, &body, None);
+    crate::ui::ghost::fly(crate::ui::ghost::Kind::Close, (r, 8.0 * st.s), home, color, content, None);
 }
 
 /// Sink and dissolve in place (archive / delete).
 pub fn dissolve(h: HWND) {
     let Some(st) = state(h) else { return };
-    let Some((r, color, title, body)) = snapshot(h) else { return };
+    let Some((r, color, content)) = snapshot(h) else { return };
     let (w, hh) = (r.right - r.left, r.bottom - r.top);
     let to = RECT { left: r.left + w / 20, top: r.top + hh / 12, right: r.right - w / 20, bottom: r.bottom - hh / 40 };
-    crate::ui::ghost::fly(crate::ui::ghost::Kind::Dissolve, (r, 8.0 * st.s), (to, 8.0 * st.s), color, &title, &body, None);
+    crate::ui::ghost::fly(crate::ui::ghost::Kind::Dissolve, (r, 8.0 * st.s), (to, 8.0 * st.s), color, content, None);
 }
 
 /// Fade header controls for every note that is mid-transition.
 pub fn frame(dt: f32) -> bool {
-    let wins: Vec<HWND> = app::ui(|u| u.notes.values().copied().collect());
+    let mut wins: Vec<HWND> = app::ui(|u| u.notes.values().copied().collect());
+    // All Notes' editor scrolls and shows its bar like a note window.
+    let inline = crate::ui::allnotes::editor();
+    if !inline.is_null() {
+        wins.push(inline);
+    }
     let mut moving = false;
     for h in wins {
         if let Some(st) = state(h) {
             let a = st.ctl.step(dt);
             let b = st.hot_a.step(dt);
-            if a || b {
+            let c = st.bar.step(dt) | st.bar_wide.step(dt);
+            if scrollbar::step(st, dt) {
+                moving = true;
+            }
+            if a || b || c {
                 moving = true;
                 unsafe { InvalidateRect(h, std::ptr::null(), 0) };
             }
@@ -362,11 +472,21 @@ pub fn id_of(h: HWND) -> Option<u64> {
 pub fn flush(h: HWND) {
     let Some(st) = state(h) else { return };
     unsafe { KillTimer(h, T_SAVE) };
+    let (id, edit) = (st.id, st.edit);
+    let view = Some(view_of(edit));
     if !st.dirty {
+        // Only moved around: keep the place (not the "edited" time) when it changed.
+        if app::store(|s| s.note(id).map(|n| n.view)) != Some(view) {
+            app::store_mut(|s| {
+                if let Some(n) = s.note_mut(id) {
+                    n.view = view;
+                }
+            });
+            app::save();
+        }
         return;
     }
     st.dirty = false;
-    let (id, edit) = (st.id, st.edit);
     let rtf = rich::get_rtf(edit);
     let text = app::rtf_to_text(&rtf);
     let title = title_of(&text);
@@ -375,6 +495,7 @@ pub fn flush(h: HWND) {
             n.rtf = rtf;
             n.text = text;
             n.updated = now();
+            n.view = view;
         }
     });
     app::save();
@@ -446,9 +567,6 @@ fn on_create(h: HWND) {
     apply_theme(h);
     rich::send(edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
     rich::send(edit, rich::EM_SETEVENTMASK, 0, (rich::ENM_CHANGE | rich::ENM_LINK) as isize);
-    // The caret waits at the end, where you'd carry on writing.
-    let end = rich::text(edit).len() as i32;
-    rich::set_sel(edit, end, end);
     unsafe {
         SetWindowSubclass(edit, Some(edit_proc), 1, h as usize);
         SetWindowTextW(h, wide(&title_of(&text)).as_ptr());
@@ -459,6 +577,7 @@ fn on_create(h: HWND) {
     }
     st.loading = false;
     layout(h);
+    open_at_place(h);
     if !st.embedded {
         theme::set_round_corners(h, false);
         app::ui(|u| u.notes.insert(st.id, h));
@@ -598,8 +717,19 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 flush(h);
                 return 0;
             }
+            WM_TIMER if wp == scrollbar::T_BAR => {
+                scrollbar::timer(h);
+                return 0;
+            }
+            WM_CAPTURECHANGED => scrollbar::cancel(h),
+            // The wheel over the margins (the scroll bar's included) scrolls the text too.
+            WM_MOUSEWHEEL => {
+                scrollbar::wheel(h, (wp >> 16) as i16);
+                return 0;
+            }
             WM_MOUSEMOVE => {
-                let b = btn_at(h, x_of(lp), y_of(lp));
+                let on_bar = scrollbar::mouse_move(h, x_of(lp), y_of(lp));
+                let b = if on_bar { Btn::None } else { btn_at(h, x_of(lp), y_of(lp)) };
                 if let Some(st) = state(h) {
                     if !st.tracking {
                         let mut tme = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
@@ -623,10 +753,14 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     st.tracking = false;
                     st.hot_a.to(0.0);
                 }
+                scrollbar::mouse_leave(h);
                 pointer_out(h);
                 return 0;
             }
             WM_LBUTTONDOWN => {
+                if scrollbar::mouse_down(h, x_of(lp), y_of(lp)) {
+                    return 0;
+                }
                 let b = btn_at(h, x_of(lp), y_of(lp));
                 if let Some(st) = state(h) {
                     st.pressed = b;
@@ -634,6 +768,9 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_LBUTTONUP => {
+                if scrollbar::mouse_up(h) {
+                    return 0;
+                }
                 let b = btn_at(h, x_of(lp), y_of(lp));
                 let pressed = state(h).map(|s| std::mem::replace(&mut s.pressed, Btn::None));
                 if pressed == Some(b) {

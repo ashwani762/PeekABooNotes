@@ -5,7 +5,13 @@ use super::*;
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
     let h = parent as HWND;
     match msg {
+        // One scroller for the whole note (see `scrollbar::wheel`), never RichEdit's own.
+        WM_MOUSEWHEEL => {
+            super::scrollbar::wheel(h, (wp >> 16) as i16);
+            return 0;
+        }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
+            super::scrollbar::interrupt(h);
             let vk = wp as u16;
             let (ctrl, shift, alt) = (key_down(VK_CONTROL), key_down(VK_SHIFT), key_down(VK_MENU));
             let Some(st) = state(h) else { return unsafe { DefSubclassProc(e, msg, wp, lp) } };
@@ -139,6 +145,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     ) || (msg == WM_MOUSEMOVE && wp & 0x0001 != 0);
     if drew {
         crate::editor::checks::paint(e);
+        super::scrollbar::sync(h);
     }
     r
 }

@@ -273,6 +273,11 @@ pub fn hwnd() -> HWND {
     with(|l| l.hwnd).unwrap_or(null_mut())
 }
 
+/// The note editor inside the detail card, if one is up.
+pub fn editor() -> HWND {
+    with(|l| l.editor).unwrap_or(null_mut())
+}
+
 fn quiet() -> bool {
     cfg!(feature = "stress") && std::env::args().any(|a| a == "--stress")
 }

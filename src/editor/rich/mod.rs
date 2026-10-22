@@ -42,6 +42,8 @@ pub const EM_GETTEXTEX: u32 = WM_USER + 94;
 pub const EM_GETTEXTLENGTHEX: u32 = WM_USER + 95;
 pub const EM_SETTEXTEX: u32 = WM_USER + 97;
 pub const EM_SETTYPOGRAPHYOPTIONS: u32 = WM_USER + 202;
+pub const EM_GETSCROLLPOS: u32 = WM_USER + 221;
+pub const EM_SETSCROLLPOS: u32 = WM_USER + 222;
 
 pub const EN_CHANGE: u32 = 0x0300;
 pub const EN_LINK: u32 = 0x070B;
@@ -340,6 +342,18 @@ pub fn pos_from_char(h: HWND, cp: i32) -> POINT {
     let mut p = POINT { x: 0, y: 0 };
     send(h, EM_POSFROMCHAR, &mut p as *mut _ as usize, cp as isize);
     p
+}
+
+/// How far the content is scrolled down, in px.
+pub fn scroll_y(h: HWND) -> i32 {
+    let mut p = POINT { x: 0, y: 0 };
+    send(h, EM_GETSCROLLPOS, 0, &mut p as *mut _ as isize);
+    p.y
+}
+
+pub fn set_scroll_y(h: HWND, y: i32) {
+    let p = POINT { x: 0, y: y.max(0) };
+    send(h, EM_SETSCROLLPOS, 0, &p as *const _ as isize);
 }
 
 pub fn para_start(t: &[u16], cp: i32) -> i32 {

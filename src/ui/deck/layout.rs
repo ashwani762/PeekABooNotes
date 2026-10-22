@@ -19,11 +19,13 @@ pub(super) fn compute_geo(n_items: usize) -> Geo {
     g.tab_h = if g.n == 0 { min_h } else { ((room - if g.more > 0 { 36.0 * s } else { 0.0 }) / g.n as f32 - gap).clamp(min_h, max_h) };
     g.step = g.tab_h + gap;
     g.top = 14.0 * s;
-    let stack = g.top + g.n as f32 * g.step - gap + if g.more > 0 { 36.0 * s } else { 0.0 } + 8.0 * s + 34.0 * s + 16.0 * s;
+    g.tail = if g.more > 0 { 36.0 * s } else { 0.0 } + 8.0 * s + 34.0 * s + 16.0 * s;
+    let stack = g.top + g.n as f32 * g.step - gap + g.tail;
     g.centre = work.top + (pos.clamp(0.05, 0.95) * wh) as i32;
     // With only a few cards the stack is short, but a pulled-out card can be as tall as
-    // its preview: the window always has room for the tallest one, or it gets cut off.
-    g.eh = stack.max((PREVIEW_MAX + 16.0) * s).min(wh).round() as i32;
+    // its preview: the window always has room for the tallest one with the plus button
+    // below it (see `footer_drop`), or it gets cut off.
+    g.eh = stack.max(8.0 * s + PREVIEW_MAX * s + gap + g.tail).min(wh).round() as i32;
     g.ew = ((CARD_W + PULL_GAP + 28.0) * s).round() as i32;
     g.ey = (g.centre - g.eh / 2).clamp(work.top, (work.bottom - g.eh).max(work.top));
     // The stack stays centred on the pill within the taller window.
@@ -99,6 +101,14 @@ pub(super) fn sync(d: &mut Deck) {
         for t in d.tabs.iter_mut() {
             t.fitted = None;
         }
+    }
+    // Measured, not estimated, so the card is exactly as tall as its preview (up to
+    // PREVIEW_MAX, past which the body fades out).
+    let s = g.s;
+    let bf = super::draw::font(d, 2, 13.0, FW_NORMAL as i32);
+    let w = ((CARD_W - SPINE_W - 2.0 * 14.0) * s) as i32;
+    for t in d.tabs.iter_mut() {
+        t.body_h = if t.body.is_empty() { 0.0 } else { crate::ui::body_height(&t.body, &bf, w, s) as f32 };
     }
     anim::wake(Client::Deck);
 }
@@ -204,7 +214,8 @@ pub(super) fn pose(d: &Deck, i: usize, w: i32, origin_y: f32) -> CardPose {
     let card_h = lerp(g.tab_h, preview_height(d, i), pull);
     let mut top = t.y.value;
     if pull > 0.0 {
-        let max_top = (g.eh as f32 - card_h - 8.0 * s).max(8.0 * s);
+        // Never so low that the plus button, dropping below it, would leave the window.
+        let max_top = (g.eh as f32 + 6.0 * s - g.tail - card_h).max(8.0 * s);
         top = lerp(top, top.min(max_top), pull);
     }
     // Capsule (p = 0) in the same coordinates: the pill sits PILL_INSET from the edge.
@@ -227,12 +238,23 @@ pub(super) fn pose(d: &Deck, i: usize, w: i32, origin_y: f32) -> CardPose {
     CardPose { shape, spine_x, pull, reveal: p }
 }
 
+/// How far the "+N" tile and the plus button move down to clear a pulled-out card that
+/// reaches past the bottom of the stack. It follows the card's pull spring, so they slide
+/// out of the way and back with it.
+pub(super) fn footer_drop(d: &Deck) -> f32 {
+    let g = &d.geo;
+    let rest = g.slot_y(g.n) + 6.0 * g.s; // bottom of the last tucked card
+    let bottoms = d.tabs.iter().enumerate().filter(|(_, t)| !t.open && t.pull.value > 0.0).map(|(i, _)| {
+        let sh = pose(d, i, g.ew, g.ey as f32).shape;
+        sh.y + sh.h - rest
+    });
+    bottoms.fold(0.0, f32::max)
+}
+
 pub(super) fn preview_height(d: &Deck, i: usize) -> f32 {
     let s = d.geo.s;
-    let t = &d.tabs[i];
-    let lines = t.body.lines().count().min(9) as f32;
-    let wrapped_extra = t.body.lines().map(|l| (l.chars().count() / 34) as f32).sum::<f32>().min(4.0);
-    let h = (66.0 + (lines + wrapped_extra) * 19.0) * s;
+    // Title band above the body, padding below it (as `draw_card` lays them out).
+    let h = 40.0 * s + d.tabs[i].body_h + 14.0 * s;
     h.clamp(d.geo.tab_h, PREVIEW_MAX * s)
 }
 
@@ -270,13 +292,14 @@ pub(super) fn hit_test(d: &Deck, x: i32, y: i32) -> Hit {
     }
     let centre_near = (TAB_W / 2.0 + 2.0) * s;
     let (cx, _) = span(g, g.ew, centre_near, centre_near);
+    let drop = footer_drop(d);
     if g.more > 0 {
-        let my = g.more_y();
+        let my = g.more_y() + drop;
         if fy >= my && fy < my + 26.0 * s && (fx - cx).abs() < TAB_W * s / 2.0 {
             return Hit::More;
         }
     }
-    let (dx, dy) = (fx - cx, fy - g.plus_cy());
+    let (dx, dy) = (fx - cx, fy - g.plus_cy() - drop);
     if dx * dx + dy * dy <= (21.0 * s).powi(2) {
         return Hit::Plus;
     }

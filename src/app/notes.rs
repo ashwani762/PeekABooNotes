@@ -60,12 +60,18 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
     let r = placement(id);
     match from {
         Some(from) if !crate::render::anim::reduced() => {
+            // Its picture before the deck tucks it away.
+            let from_image = deck::card_image(id);
             let h = note::create(id, r, false);
             deck::hand_off(id);
-            let title = if text.trim().is_empty() { String::new() } else { title_of(&text) };
-            let body = crate::store::body_of(&text);
+            // Shows what the window will (it's already laid out, scrolled to the end).
+            let mut content = note::flight_content(h, &text);
+            content.from_image = from_image;
+            if text.trim().is_empty() {
+                content.title.clear();
+            }
             let (_, s) = deck::monitor_geo();
-            crate::ui::ghost::fly(crate::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, &title, &body, Some(Box::new(move || note::reveal(h))));
+            crate::ui::ghost::fly(crate::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, Some(Box::new(move || note::reveal(h))));
         }
         _ => {
             note::create(id, r, true);

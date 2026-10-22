@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-use windows_sys::Win32::Graphics::Gdi::{GetDC, GetPixel, HDC, ReleaseDC};
+use windows_sys::Win32::Graphics::Gdi::{GetDC, GetPixel, HDC, IntersectClipRect, ReleaseDC};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, HideCaret, ShowCaret};
 
 use crate::render::anim::{self, Client, Spring, clamp01};
@@ -111,6 +111,10 @@ pub fn paint(e: HWND) {
     let hot = HOT.with(|h| *h.borrow());
     unsafe {
         let dc = GetDC(e);
+        // RichEdit's class hands out its parent's DC (CS_PARENTDC), which isn't clipped to
+        // the editor: without this, the circle of a line scrolled up under the header
+        // would still be drawn there.
+        IntersectClipRect(dc, rc.left, rc.top, rc.right, rc.bottom);
         HideCaret(e);
         for cp in boxes {
             let p0 = rich::pos_from_char(e, cp);

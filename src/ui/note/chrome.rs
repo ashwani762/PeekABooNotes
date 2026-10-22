@@ -26,7 +26,8 @@ pub(super) fn layout(h: HWND) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(h, &mut rc) };
     let s = st.s;
-    let (l, r, b) = if st.embedded { (0, 0, 0) } else { ((16.0 * s) as i32, (10.0 * s) as i32, (30.0 * s) as i32) };
+    // The right margin is also where the scroll bar runs.
+    let (l, r, b) = if st.embedded { (0, (12.0 * s) as i32, 0) } else { ((16.0 * s) as i32, (10.0 * s) as i32, (30.0 * s) as i32) };
     let top = if st.embedded { 0 } else { header_h(s) + (2.0 * s) as i32 };
     unsafe { MoveWindow(st.edit, l, top, (rc.right - l - r).max(1), (rc.bottom - top - b).max(1), 1) };
 }
@@ -85,6 +86,7 @@ pub(super) fn paint(h: HWND) {
             c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a * 0.85, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
         c.flush();
+        super::scrollbar::paint(h, st, &mut c, ink);
         c.blit(hdc, 0, 0);
         EndPaint(h, &ps);
     }
@@ -97,6 +99,10 @@ pub(super) fn hit_test(h: HWND, lp: LPARAM) -> LRESULT {
     unsafe {
         ScreenToClient(h, &mut p);
         GetClientRect(h, &mut rc);
+    }
+    // The scroll bar wins over the resize edge it runs along.
+    if super::scrollbar::on_bar(h, p.x, p.y) {
+        return HTCLIENT as LRESULT;
     }
     let b = (6.0 * st.s) as i32;
     let (l, r, t, bo) = (p.x < b, p.x >= rc.right - b, p.y < b, p.y >= rc.bottom - b);

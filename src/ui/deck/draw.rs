@@ -89,9 +89,10 @@ pub(super) fn render(d: &mut Deck) {
         let slide = (1.0 - d.extras.value) * 30.0 * s;
         let centre_near = (TAB_W / 2.0 + 2.0) * s - slide;
         let (cx, _) = span(&g, ww, centre_near, centre_near);
+        let drop = footer_drop(d);
         if g.more > 0 {
             let (w, h) = ((TAB_W - 10.0) * s, 26.0 * s);
-            let sh = Shape::new(cx - w / 2.0, g.more_y(), w, h, h / 2.0);
+            let sh = Shape::new(cx - w / 2.0, g.more_y() + drop, w, h, h / 2.0);
             let hot = d.more_hot.value;
             c.soft_shadow(&sh, s, 0.6 * ea);
             c.shape(&sh, mat.fill, mat.alpha * ea, 1.0, 0.0);
@@ -106,7 +107,7 @@ pub(super) fn render(d: &mut Deck) {
         let hot = d.plus_hot.value;
         let pressed = if d.pressed == Hit::Plus { 0.92 } else { 1.0 };
         let r = 17.0 * s * (1.0 + 0.08 * hot) * pressed;
-        let cy = g.plus_cy();
+        let cy = g.plus_cy() + drop;
         let sh = Shape::new(cx - r, cy - r, 2.0 * r, 2.0 * r, r);
         c.soft_shadow(&sh, s, 0.7 * ea);
         c.shape(&sh, mat.fill, mat.alpha * ea, 1.0, 0.0);

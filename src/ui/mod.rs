@@ -16,9 +16,20 @@ use crate::render::gfx::{Canvas, Font, Shape};
 /// A note's preview body (from `store::body_of`) in `r`, on paper `color`: list markers
 /// hang in their own column so wrapped lines line up under the text, nested items step
 /// in, checklist items get the editor's circles (ticked ones filled, their text struck
-/// and dimmed), and the last line that fits ends in an ellipsis.
+/// and dimmed), and the last line that fits ends in an ellipsis. Returns the height used
+/// and whether all of it fitted.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_body(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32) {
+pub fn draw_body(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32) -> (i32, bool) {
+    body_pass(Some(c), body, f, r, color, dark, alpha, s)
+}
+
+/// Height of `body` laid out by `draw_body` at width `w`.
+pub fn body_height(body: &str, f: &Font, w: i32, s: f32) -> i32 {
+    body_pass(None, body, f, crate::platform::util::rect(0, 0, w, i32::MAX / 2), 0, false, 1.0, s).0
+}
+
+#[allow(clippy::too_many_arguments)]
+fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32) -> (i32, bool) {
     let paper = crate::theme::paper(color, dark);
     let ink = crate::theme::paper_ink(color, dark);
     let text_rgb = crate::theme::paper_subtext(color, dark);
@@ -31,9 +42,10 @@ pub fn draw_body(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark:
     let box_w = (d + 6.0 * s) as i32;
     let mut y = r.top;
     for l in body.lines() {
-        let room = (r.bottom - y) / line_h * line_h;
-        if room < line_h {
-            break;
+        // Past the bottom the text is simply cut off; `fade_out` then softens the cut.
+        let room = r.bottom - y;
+        if room <= 0 {
+            return fade_out(c, r, line_h, paper);
         }
         let t = l.trim_start_matches(' ');
         let x = r.left + ((l.len() - t.len()) / 2) as i32 * step;
@@ -52,7 +64,15 @@ pub fn draw_body(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark:
         if w < step {
             continue;
         }
+        let (font, rgb) = if task == Some(true) { (&struck, done_rgb) } else { (f, text_rgb) };
+        let h = font.wrapped_height(text, w);
+        let Some(c) = c.as_deref_mut() else {
+            y += h.max(line_h);
+            continue;
+        };
         match task {
+            // A circle never pokes out below the cut.
+            Some(_) if room < line_h => {}
             Some(done) => {
                 let (cx, cy) = (x as f32 + d / 2.0, (y + f.ascent) as f32 - f.cap as f32 * 0.5);
                 let circle = Shape::new(cx - d / 2.0, cy - d / 2.0, d, d, d / 2.0);
@@ -68,11 +88,33 @@ pub fn draw_body(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark:
             }
             None => {}
         }
-        let (font, rgb) = if task == Some(true) { (&struck, done_rgb) } else { (f, text_rgb) };
-        let h = font.wrapped_height(text, w);
-        c.text(text, font, crate::platform::util::rect(tx, y, w, h.min(room)), rgb, alpha, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+        let fits = h <= room;
+        let flags = if fits { DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS } else { DT_LEFT | DT_WORDBREAK };
+        c.text(text, font, crate::platform::util::rect(tx, y, w, h.min(room)), rgb, alpha, flags);
+        if !fits {
+            return fade_out(Some(c), r, line_h, paper);
+        }
         y += h.max(line_h);
     }
+    (y - r.top, true)
+}
+
+/// The body ran past the bottom of `r`: fade its last line and a half into the paper, so
+/// the cut reads as "continues" rather than as a sliced line.
+fn fade_out(c: Option<&mut Canvas>, r: RECT, line_h: i32, paper: u32) -> (i32, bool) {
+    if let Some(c) = c {
+        let batching = c.batching();
+        c.flush();
+        let fade = (line_h * 3 / 2).min(r.bottom - r.top);
+        for k in 0..fade {
+            let row = crate::platform::util::rect(r.left - 2, r.bottom - fade + k, r.right - r.left + 4, 1);
+            c.fade_rect(row, paper, 1.0 - (k + 1) as f32 / fade as f32);
+        }
+        if batching {
+            c.begin_batch();
+        }
+    }
+    (r.bottom - r.top, false)
 }
 
 /// Split a preview line into its list marker ("•  ", "○  ", "1. ", "a. ") and its text.

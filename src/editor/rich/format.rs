@@ -201,7 +201,10 @@ pub fn style_boxes(h: HWND) {
         send(h, EM_SETCHARFORMAT, SCF_SELECTION, &boxf as *const _ as isize);
         let mut cur = ParaFormat2::new();
         send(h, EM_GETPARAFORMAT, 0, &mut cur as *mut _ as isize);
-        let level = if cur.offset == indent.offset { level_of(cur.start_indent, indent.start_indent) } else { 0 };
+        // Already styled, or not styled yet (no hanging offset: imported notes are built in
+        // the worker editor, which never styles them): either way the start indent carries
+        // the nesting. Any other offset belongs to a former bullet or number.
+        let level = if cur.offset == indent.offset || cur.offset == 0 { level_of(cur.start_indent, indent.start_indent) } else { 0 };
         let mut nested = indent;
         nested.start_indent += level * LEVEL;
         send(h, EM_SETPARAFORMAT, 0, &nested as *const _ as isize);
