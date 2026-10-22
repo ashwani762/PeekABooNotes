@@ -266,7 +266,6 @@ pub(super) fn click(l: &mut Lib, hit: Hit) -> Action {
             let all_archived = l.rows.iter().filter(|r| sel.contains(&r.id)).all(|r| r.archived);
             Action::Archive(sel, !all_archived)
         }
-        Hit::ExportSel => Action::Export(sel),
         Hit::Delete => Action::Delete(sel),
         Hit::Swatch(k) => match l.sel.last() {
             Some(id) => Action::Color(*id, theme::ORDER[k]),

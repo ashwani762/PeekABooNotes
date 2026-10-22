@@ -200,24 +200,11 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
     } else {
         unsafe {
             SetLayeredWindowAttributes(h, 0, 0, LWA_ALPHA);
-            if quiet() {
-                ShowWindow(h, SW_SHOWNOACTIVATE);
-            } else {
-                ShowWindow(h, SW_SHOW);
-                SetForegroundWindow(h);
-            }
+            ShowWindow(h, SW_SHOW);
+            SetForegroundWindow(h);
         }
     }
     h
-}
-
-/// Stress-test hook: replace the note's content as if typed.
-#[cfg(feature = "stress")]
-pub fn stress_type(h: HWND, text: &str) {
-    if let Some(st) = state(h) {
-        rich::load_markdown(st.edit, text);
-        mark_dirty(h);
-    }
 }
 
 /// An editor for note `id` hosted inside `parent` (All Notes' detail card) at `r`
@@ -292,10 +279,6 @@ pub fn reveal(h: HWND) {
             // black wherever it hasn't painted yet (the footer, if only the text had).
             RedrawWindow(h, std::ptr::null(), null_mut(), RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
         }
-        if quiet() {
-            ShowWindow(h, SW_SHOWNOACTIVATE);
-            return;
-        }
         ShowWindow(h, SW_SHOW);
         if GetForegroundWindow() != h {
             SetForegroundWindow(h);
@@ -341,11 +324,6 @@ fn open_at_place(h: HWND) {
         SendMessageW(edit, WM_SETREDRAW, 1, 0);
         InvalidateRect(edit, std::ptr::null(), 1);
     }
-}
-
-/// Stress runs must never take focus away from the user.
-fn quiet() -> bool {
-    cfg!(feature = "stress") && std::env::args().any(|a| a == "--stress")
 }
 
 /// Current look of a note for a ghost: (screen rect, colour, what it shows).

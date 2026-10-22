@@ -347,11 +347,6 @@ pub fn run() -> i32 {
             RegisterHotKey(main, id as i32, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, key as u32);
         }
 
-        #[cfg(feature = "stress")]
-        if std::env::args().any(|a| a == "--stress") {
-            crate::stress::start();
-        }
-
         while pump_once() {}
         0
     }

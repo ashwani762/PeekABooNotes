@@ -266,7 +266,7 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         let chip_base = bar_mid as i32 + f.chip.cap / 2;
         c.line_ct(&state, &f.chip, (x + 16.0 * s) as i32, chip_base, px(260.0), None, p.sub, DT_LEFT);
     }
-    for (hit, r, label) in detail_buttons(l, lay) {
+    for (hit, r, label, glyph) in detail_buttons(l, lay) {
         let hot = l.hover == hit;
         let down = hot && l.pressed == hit;
         let sh = Shape::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32, TOOLBAR_H * s / 2.0);
@@ -277,7 +277,11 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
             _ => (p.field.0, p.field.1 * if down { 2.2 } else if hot { 1.6 } else { 1.0 }, p.text),
         };
         c.shape(&sh, fill, fa, 1.0, 0.0);
-        c.line_ct(label, &f.button, r.left, label_base, r.right - r.left, None, ink, DT_CENTER);
+        // Icon and label centred together.
+        let (iw, gap, tw) = ((BUTTON_ICON * s) as i32, (BUTTON_ICON_GAP * s) as i32, text_w(&f.button, label));
+        let x0 = r.left + ((r.right - r.left) - (iw + gap + tw)) / 2;
+        icon(c, glyph, &f.button_icon, rect(x0, r.top, iw, r.bottom - r.top), ink);
+        c.line_ct(label, &f.button, x0 + iw + gap, label_base, tw + 2, None, ink, DT_LEFT);
     }
     let mut card = lay.card;
     card.y += lift;

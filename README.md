@@ -172,7 +172,6 @@ target\release\peekaboo-notes.exe
 
 Needs Rust (edition 2024) and runs on Windows 10 or 11.
 - `cargo test` runs the unit tests (string files, plural rules, the Markdown parser).
-- `cargo build --release --features stress` adds an in-process stress test (`peekaboo-notes.exe --stress`).
 
 **Developer switches**
 - `PEEKABOO_THEME=light|dark` forces an appearance.

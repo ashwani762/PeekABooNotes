@@ -56,6 +56,9 @@ const ROW_TITLE_BASE: f32 = 27.0;
 const ROW_META_BASE: f32 = 49.0;
 const TOOLBAR_Y: f32 = 44.0;
 const TOOLBAR_H: f32 = 30.0;
+/// An icon in a toolbar button, and its gap before the label.
+const BUTTON_ICON: f32 = 14.0;
+const BUTTON_ICON_GAP: f32 = 6.0;
 const CARD_Y: f32 = 92.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -72,7 +75,6 @@ enum Hit {
     Segment(usize),
     Row(usize),
     Archive,
-    ExportSel,
     Delete,
     Swatch(usize),
     Card,
@@ -153,6 +155,7 @@ struct Fonts {
     card_body: Font,
     empty: Font,
     icons: Font,
+    button_icon: Font,
     chrome: Font,
     edit: Font,
     /// The native search EDIT needs a GDI font.
@@ -177,6 +180,7 @@ impl Fonts {
             card_body: crate::editor::rich::preview_fonts(s).1,
             empty: f(15.0, FW_SEMIBOLD, theme::FACE_TEXT),
             icons: f(16.0, FW_NORMAL, icons),
+            button_icon: f(13.0, FW_NORMAL, icons),
             chrome: f(10.0, FW_NORMAL, icons),
             edit: f(14.0, FW_NORMAL, theme::FACE_TEXT),
             edit_gdi: crate::render::gfx::gdi_font((14.0 * s).round() as i32, FW_NORMAL as i32, theme::FACE_TEXT),
@@ -274,10 +278,6 @@ pub fn editor() -> HWND {
     with(|l| l.editor).unwrap_or(null_mut())
 }
 
-fn quiet() -> bool {
-    cfg!(feature = "stress") && std::env::args().any(|a| a == "--stress")
-}
-
 fn text_w(f: &Font, s: &str) -> i32 {
     f.measure(s).0
 }
@@ -293,9 +293,7 @@ pub fn show(archived: bool) {
             if IsIconic(h) != 0 {
                 ShowWindow(h, SW_RESTORE);
             }
-            if !quiet() {
-                SetForegroundWindow(h);
-            }
+            SetForegroundWindow(h);
         }
         return;
     }
@@ -321,12 +319,8 @@ pub fn show(archived: bool) {
             null_mut(),
         );
         SetWindowPos(hwnd, null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-        if quiet() {
-            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        } else {
-            ShowWindow(hwnd, SW_SHOW);
-            SetForegroundWindow(hwnd);
-        }
+        ShowWindow(hwnd, SW_SHOW);
+        SetForegroundWindow(hwnd);
     }
 }
 

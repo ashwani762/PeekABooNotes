@@ -38,17 +38,18 @@ pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 4] {
     [(Hit::Settings, r(0)), (Hit::Export, r(1)), (Hit::Import, r(2)), (Hit::New, r(3))]
 }
 
-pub(super) fn detail_buttons(l: &Lib, lay: &Layout) -> Vec<(Hit, RECT, &'static str)> {
+/// The detail pane's buttons: (hit, rect, label, icon glyph).
+pub(super) fn detail_buttons(l: &Lib, lay: &Layout) -> Vec<(Hit, RECT, &'static str, &'static str)> {
     let s = l.s;
     let archived = l.rows.iter().filter(|r| l.sel.contains(&r.id)).all(|r| r.archived);
-    let labels: [(Hit, &'static str); 3] =
-        [(Hit::Archive, if archived { t!("button_restore") } else { t!("button_archive") }), (Hit::ExportSel, t!("button_export")), (Hit::Delete, t!("button_delete"))];
+    let archive = if archived { (t!("button_restore"), "\u{E7A7}") } else { (t!("button_archive"), "\u{E7B8}") };
+    let labels: [(Hit, &'static str, &'static str); 2] = [(Hit::Archive, archive.0, archive.1), (Hit::Delete, t!("button_delete"), "\u{E74D}")];
     let mut out = Vec::new();
     let mut x = lay.w - (28.0 * s) as i32;
-    for (hit, label) in labels.iter().rev() {
-        let w = text_w(&l.fonts.button, label) + (28.0 * s) as i32;
+    for (hit, label, glyph) in labels.iter().rev() {
+        let w = text_w(&l.fonts.button, label) + ((28.0 + BUTTON_ICON + BUTTON_ICON_GAP) * s) as i32;
         x -= w;
-        out.push((*hit, rect(x, (TOOLBAR_Y * s) as i32, w, (TOOLBAR_H * s) as i32), *label));
+        out.push((*hit, rect(x, (TOOLBAR_Y * s) as i32, w, (TOOLBAR_H * s) as i32), *label, *glyph));
         x -= (8.0 * s) as i32;
     }
     out.reverse();
@@ -115,7 +116,7 @@ pub(super) fn hit_test(l: &Lib, x: i32, y: i32) -> Hit {
         return Hit::None;
     }
     if lay.wide && !l.sel.is_empty() {
-        for (h, r, _) in detail_buttons(l, &lay) {
+        for (h, r, ..) in detail_buttons(l, &lay) {
             if pt(&r) {
                 return h;
             }

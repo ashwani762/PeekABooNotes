@@ -13,8 +13,6 @@ mod editor;
 mod platform;
 mod render;
 mod store;
-#[cfg(feature = "stress")]
-mod stress;
 mod theme;
 mod ui;
 
