@@ -232,7 +232,16 @@ fn id_arg(args: &Value) -> Result<u64, String> {
 }
 
 fn text_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str, String> {
-    args.get(name).and_then(Value::as_str).ok_or_else(|| format!("Give \"{name}\" as text."))
+    let s = args.get(name).and_then(Value::as_str).ok_or_else(|| format!("Give \"{name}\" as text."))?;
+    if s.chars().count() > crate::common::store::MAX_NOTE_CHARS {
+        return Err(too_long());
+    }
+    Ok(s)
+}
+
+/// Why a note can't take more.
+pub fn too_long() -> String {
+    format!("Too long: a note holds up to {} characters.", crate::common::store::MAX_NOTE_CHARS)
 }
 
 fn color_arg(args: &Value) -> Result<Option<u8>, String> {

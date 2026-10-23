@@ -359,6 +359,13 @@ pub fn insert_text(h: HWND, s: &str) {
     }
 }
 
+/// Typing and pasting stop at the note limit, or where the note already is when it was
+/// saved longer (it keeps all of that, and just can't grow).
+pub fn limit_length(h: HWND) {
+    let n = (text(h).len()).max(crate::common::store::MAX_NOTE_CHARS);
+    send(h, EM_EXLIMITTEXT, 0, n.min(i32::MAX as usize) as isize);
+}
+
 pub fn char_from_pos(h: HWND, x: i32, y: i32) -> i32 {
     let p = POINT { x, y };
     send(h, EM_CHARFROMPOS, 0, &p as *const _ as isize) as i32
@@ -433,9 +440,10 @@ const BULLET_START: i32 = 40;
 /// Base look for an editor: font, colours, spacing, link detection.
 pub fn setup(h: HWND) {
     send(h, EM_SETOPTIONS, ECOOP_OR, ECO_AUTOVSCROLL | ECO_SELECTIONBAR);
-    send(h, EM_AUTOURLDETECT, 1, 0);
-    // RichEdit takes typing only up to 32,767 characters unless told otherwise: past that,
-    // a long note silently stopped accepting keys.
+    // Off: we make addresses links ourselves (see `link_addresses`).
+    send(h, EM_AUTOURLDETECT, 0, 0);
+    // RichEdit takes typing only up to 32,767 characters unless told otherwise (a long note
+    // silently stopped accepting keys). No limit while a note loads; then `limit_length`.
     send(h, EM_EXLIMITTEXT, 0, i32::MAX as isize);
     send(h, EM_SETTYPOGRAPHYOPTIONS, TO_ADVANCEDTYPOGRAPHY, TO_ADVANCEDTYPOGRAPHY as isize);
 }

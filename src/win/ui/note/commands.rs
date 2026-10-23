@@ -133,6 +133,8 @@ pub(super) fn paste(h: HWND) {
         rich::set_sel(e, end, end);
     } else {
         rich::paste_plain(e);
+        let (end, _) = rich::sel(e);
+        rich::link_addresses(e, a.max(0) as usize, end.max(0) as usize);
     }
     mark_dirty(h);
 }

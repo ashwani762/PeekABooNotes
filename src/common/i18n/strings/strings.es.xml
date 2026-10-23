@@ -48,6 +48,7 @@
     <!-- Notes -->
     <string name="note_untitled">Nueva nota</string>
     <string name="note_edited">Editada %1$s</string>
+    <string name="note_full">Esta nota está llena</string>
     <string name="file_untitled">Sin título</string>
 
     <!-- Times -->

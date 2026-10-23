@@ -105,7 +105,10 @@ fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let mut i = a;
     while i < b {
         if let Some((name, end, url)) = link_from(h, &links, i, b) {
-            let md = attachment_md(&url).unwrap_or_else(|| format!("[{}]({url})", unmark_str(&t[name..end])));
+            let shown = unmark_str(&t[name..end]);
+            // An address that links to itself is written as just the address.
+            let bare = looks_like_url(&shown) && normalize_url(&shown) == url;
+            let md = attachment_md(&url).unwrap_or_else(|| if bare { shown.clone() } else { format!("[{shown}]({url})") });
             out.push_str(&md);
             i = end;
             continue;
@@ -141,6 +144,13 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
         if let Some((name, end, url)) = link_from(h, &links, i, b) {
             if let Some(md) = attachment_md(&url) {
                 out.push_str(&md);
+                i = end;
+                continue;
+            }
+            // An address that links to itself goes out as just the address.
+            let shown = unmark_str(&t[name..end]);
+            if looks_like_url(&shown) && normalize_url(&shown) == url {
+                cur = marks(h, t, name, end, cur, out);
                 i = end;
                 continue;
             }

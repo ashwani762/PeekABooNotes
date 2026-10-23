@@ -40,6 +40,10 @@ const T_SAVE: usize = 1;
 const T_HIDE: usize = 3;
 /// Keeps the footer's "Edited 2 minutes ago" current.
 const T_AGE: usize = 4;
+/// Ends the footer's "This note is full".
+const T_FULL: usize = 5;
+const FULL_MS: u32 = 4000;
+const EN_MAXTEXT: u32 = 0x0501;
 const SAVE_DELAY_MS: u32 = 250;
 pub const WM_NOTE_CMD: u32 = WM_APP + 40;
 const WM_RESTYLE: u32 = WM_APP + 41;
@@ -80,6 +84,8 @@ struct NoteWin {
     dirty: bool,
     loading: bool,
     discard: bool,
+    /// When typing last ran into the note limit (the footer says so for a moment).
+    full_at: Option<std::time::Instant>,
     swallow: bool,
     icons: Option<Font>,
     meta: Option<Font>,
@@ -158,6 +164,7 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
+        full_at: None,
         swallow: false,
         icons: None,
         meta: None,
@@ -232,6 +239,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
+        full_at: None,
         swallow: false,
         icons: None,
         meta: None,
@@ -630,9 +638,12 @@ fn on_create(h: HWND) {
         } else if !text.is_empty() {
             rich::load_markdown(edit, &text);
         }
+        // Addresses in notes saved before links were ours, or that came in from elsewhere.
+        rich::link_addresses(edit, 0, usize::MAX);
         apply_theme(h);
     });
     rich::send(edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+    rich::limit_length(edit);
     connect_editor(h, edit);
     unsafe {
         // Files dropped on the frame (header, margins) too.
@@ -758,8 +769,17 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_COMMAND => {
-                if ((wp >> 16) & 0xFFFF) as u32 == rich::EN_CHANGE {
-                    mark_dirty(h);
+                match ((wp >> 16) & 0xFFFF) as u32 {
+                    rich::EN_CHANGE => mark_dirty(h),
+                    // At the limit: the footer says so for a few seconds.
+                    EN_MAXTEXT => {
+                        if let Some(st) = state(h) {
+                            st.full_at = Some(std::time::Instant::now());
+                        }
+                        SetTimer(h, T_FULL, FULL_MS, None);
+                        InvalidateRect(h, std::ptr::null(), 0);
+                    }
+                    _ => {}
                 }
                 return 0;
             }
@@ -810,6 +830,14 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             WM_TIMER if wp == T_SAVE => {
                 flush(h);
+                return 0;
+            }
+            WM_TIMER if wp == T_FULL => {
+                KillTimer(h, T_FULL);
+                if let Some(st) = state(h) {
+                    st.full_at = None;
+                }
+                InvalidateRect(h, std::ptr::null(), 0);
                 return 0;
             }
             WM_TIMER if wp == T_AGE => {

@@ -48,6 +48,7 @@
     <!-- Notes -->
     <string name="note_untitled">Neue Notiz</string>
     <string name="note_edited">Bearbeitet %1$s</string>
+    <string name="note_full">Diese Notiz ist voll</string>
     <string name="file_untitled">Ohne Titel</string>
 
     <!-- Times -->

@@ -81,12 +81,11 @@ pub fn set_link(h: HWND, a: i32, b: i32, url: &str) -> bool {
     unsafe { r.SetURL(&BSTR::from(format!("\"{url}\""))).is_ok() }
 }
 
-/// The blue RichEdit draws the addresses it spots by itself in. It gives no say in that
-/// colour, while named links (Ctrl+K) take theirs from the text: so they get this one.
-const LINK_BLUE: u32 = 0x0000FF;
+/// Every link's colour: a deep blue that reads on all twelve papers, dimmed or not.
+const LINK_BLUE: u32 = 0x0645AD;
 
-/// Named links in the same blue as typed addresses: one look for every link. Kept out of
-/// the undo history (a colour moves no text), so Ctrl+Z steps over it.
+/// Links in their blue (they take their colour from the text otherwise). Kept out of the
+/// undo history (a colour moves no text), so Ctrl+Z steps over it.
 pub fn color_named_links(h: HWND) {
     use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
     let t = text(h);
@@ -117,6 +116,93 @@ pub fn color_named_links(h: HWND) {
     }
 }
 
+/// Addresses typed or pasted into `t[a..b]` made links, and links whose text is an address
+/// pointed at that address (so editing one never leaves it going somewhere else).
+/// RichEdit's own address spotting stays off: it picks those links' colour itself, and
+/// drew them white on paper dimmed for dark mode.
+pub fn link_addresses(h: HWND, a: usize, b: usize) {
+    let t = text(h);
+    let b = b.min(t.len());
+    if a >= b {
+        return;
+    }
+    // Hidden link instructions count as gaps between words.
+    let mut gap = vec![false; t.len()];
+    for (start, name, _) in instructions(&t, 0, t.len()) {
+        gap[start..name].iter_mut().for_each(|g| *g = true);
+    }
+    let space = |i: usize| gap[i] || matches!(t[i], 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
+    let lead = "([<\"'".encode_utf16().collect::<Vec<u16>>();
+    let trail = ".,;:!?)]}>\"'".encode_utf16().collect::<Vec<u16>>();
+    let mut words = Vec::new();
+    let mut i = a;
+    while i < b {
+        if space(i) {
+            i += 1;
+            continue;
+        }
+        let (mut s, mut e) = (i, i);
+        while e < b && !space(e) {
+            e += 1;
+        }
+        i = e;
+        while s < e && lead.contains(&t[s]) {
+            s += 1;
+        }
+        while e > s && trail.contains(&t[e - 1]) {
+            e -= 1;
+        }
+        if e > s {
+            words.push((s, e));
+        }
+    }
+    // From the end: each new link adds hidden text before its name.
+    for (s, e) in words.into_iter().rev() {
+        let word = String::from_utf16_lossy(&t[s..e]);
+        if !looks_like_url(&word) {
+            continue;
+        }
+        let url = normalize_url(&word);
+        let (s, e) = (s as i32, e as i32);
+        if is_link(h, s) {
+            let Some((la, lb, cur)) = link_at(h, s) else { continue };
+            let name = name_start(&t, la, lb);
+            if name == s && lb == e {
+                if cur != url {
+                    set_link(h, s, e, &url);
+                }
+            } else if name == s {
+                // Typed on past the link's end: the link takes the whole address again.
+                let hidden = name - la;
+                remove_link(h, la, lb);
+                set_link(h, s - hidden, e - hidden, &url);
+            }
+            continue;
+        }
+        set_link(h, s, e, &url);
+    }
+    color_named_links(h);
+}
+
+/// The word just before the caret (the one a space, Tab or Enter ends) as a link, when
+/// it's an address.
+pub fn link_word_before(h: HWND) {
+    let t = text(h);
+    let (j, _) = sel(h);
+    let mut j = (j.max(0) as usize).min(t.len());
+    let blank = |c: u16| matches!(c, 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
+    while j > 0 && blank(t[j - 1]) {
+        j -= 1;
+    }
+    let mut i = j;
+    while i > 0 && !blank(t[i - 1]) {
+        i -= 1;
+    }
+    if t[i..j].iter().any(|&c| c == b'.' as u16 || c == b':' as u16) {
+        link_addresses(h, i, j);
+    }
+}
+
 /// Plain text again.
 pub fn remove_link(h: HWND, a: i32, b: i32) {
     if let Some(r) = range(h, a, b) {
@@ -141,16 +227,31 @@ pub fn link_at(h: HWND, cp: i32) -> Option<(i32, i32, String)> {
     } else {
         return None;
     };
-    let mut a = cp;
-    while a > 0 && cp - a < 2048 && is_link(h, a - 1) {
-        a -= 1;
-    }
-    let mut b = cp + 1;
-    while b < len && b - cp < 2048 && is_link(h, b) {
-        b += 1;
-    }
+    // The whole link in one step; else letter by letter.
+    let (a, b) = link_extent(h, cp).unwrap_or_else(|| {
+        let mut a = cp;
+        while a > 0 && cp - a < 2048 && is_link(h, a - 1) {
+            a -= 1;
+        }
+        let mut b = cp + 1;
+        while b < len && b - cp < 2048 && is_link(h, b) {
+            b += 1;
+        }
+        (a, b)
+    });
     let url = url_of(h, a, b);
     Some((a, b, url))
+}
+
+/// The link holding char `cp`, from TOM (hidden instructions included).
+fn link_extent(h: HWND, cp: i32) -> Option<(i32, i32)> {
+    use windows::Win32::UI::Controls::RichEdit::tomLink;
+    let r = range(h, cp, cp + 1)?;
+    unsafe {
+        r.Expand(tomLink.0).ok()?;
+        let (a, b) = (r.GetStart().ok()?, r.GetEnd().ok()?);
+        (a <= cp && b > cp).then_some((a, b))
+    }
 }
 
 /// The address of the link covering `a..b`: its own URL when it was given a name,
@@ -344,6 +445,23 @@ mod tests {
             LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
             CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut())
         }
+    }
+
+    #[test]
+    fn addresses_become_links() {
+        let h = editor();
+        setup(h);
+        load_markdown(h, "Trip\nsee www.example.com, and (https://example.org/a?b=1).\n[our plan](https://plan.example)");
+        link_addresses(h, 0, usize::MAX);
+        let t = text(h);
+        let urls: Vec<String> = instructions(&t, 0, t.len()).into_iter().map(|l| l.2).collect();
+        assert_eq!(urls, ["https://www.example.com", "https://example.org/a?b=1", "https://plan.example"]);
+        // Addresses go back out as themselves; a named link keeps its form.
+        assert_eq!(to_markdown(h, true), "# Trip\nsee www.example.com, and (https://example.org/a?b=1).\n[our plan](https://plan.example)");
+        // Twice changes nothing.
+        link_addresses(h, 0, usize::MAX);
+        assert_eq!(instructions(&text(h), 0, text(h).len()).len(), 3);
+        unsafe { DestroyWindow(h) };
     }
 
     #[test]

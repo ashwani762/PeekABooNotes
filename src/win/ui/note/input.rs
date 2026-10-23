@@ -109,6 +109,9 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     mark_dirty(h);
                     return 0;
                 }
+                if vk == VK_RETURN {
+                    rich::link_word_before(e);
+                }
                 if vk == VK_RETURN && !ctrl && !shift && handle_enter(h, e) {
                     st.swallow = true;
                     return 0;
@@ -132,11 +135,19 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if c == b' ' as u32 && try_auto_list(h, e) {
                 return 0;
             }
+            // A space or Tab ends a word: an address becomes a link.
+            if c == b' ' as u32 || c == b'\t' as u32 {
+                let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+                rich::link_word_before(e);
+                return r;
+            }
         }
         WM_PASTE => {
             paste(h);
             return 0;
         }
+        // Clicking away ends the word being typed too.
+        WM_KILLFOCUS => rich::link_word_before(e),
         // A quick second click on a circle arrives as a double-click: tick again, rather
         // than letting RichEdit select the word under it.
         WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {

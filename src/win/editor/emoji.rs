@@ -60,8 +60,9 @@ pub fn paint(e: HWND) {
             // RichEdit's own advance for it, so nothing after it is covered.
             let w = if p1.y == p0.y && p1.x > p0.x { p1.x - p0.x } else { (px * 1.25) as i32 };
             let h = (px * 1.36).ceil() as i32;
-            // Paper, or the selection's colour, from the cell's corner.
-            let under = GetPixel(dc, p0.x + 1, p0.y + 1);
+            // Paper, or the selection's colour, from the cell's corner (inside the editor:
+            // a line cut by its top edge has its corner above it).
+            let under = GetPixel(dc, p0.x + 1, (p0.y + 1).max(rc.top + 1));
             if under == u32::MAX {
                 continue;
             }

@@ -191,6 +191,10 @@ pub fn import(owner: HWND) -> Outcome {
             empty += 1;
             continue;
         }
+        if text.chars().count() > crate::common::store::MAX_NOTE_CHARS {
+            failed = Some(std::io::Error::other(format!("{} is longer than a note holds", f.display())));
+            continue;
+        }
         rich::load_markdown(w, text);
         // Links to files beside it (an export's attachments) come in as attachments.
         crate::win::ui::note::adopt_files(w, f.parent().unwrap_or(std::path::Path::new(".")));

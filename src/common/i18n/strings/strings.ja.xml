@@ -48,6 +48,7 @@
     <!-- Notes -->
     <string name="note_untitled">新規メモ</string>
     <string name="note_edited">%1$s に編集</string>
+    <string name="note_full">このメモはいっぱいです</string>
     <string name="file_untitled">無題</string>
 
     <!-- Times -->

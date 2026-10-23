@@ -318,6 +318,11 @@ impl Store {
 
 const MARKERS: [&str; 6] = ["[ ] ", "[x] ", "- [ ] ", "- [x] ", "- ", "* "];
 
+/// The most characters a note holds (about 500 pages): typing and pasting stop there, and
+/// imports and assistants bring in nothing longer. Far past what notes need, and still a
+/// note that opens in under a second and keeps up with typing.
+pub const MAX_NOTE_CHARS: usize = 1_000_000;
+
 /// Whether `s` starts the way a list item, checklist item or heading is written in
 /// Markdown, so that plain text starting so has to be written escaped ("\- not a list").
 pub fn looks_like_marker(s: &str) -> bool {

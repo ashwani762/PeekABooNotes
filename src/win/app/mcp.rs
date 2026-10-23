@@ -296,6 +296,9 @@ impl mcp::Notes for WinNotes {
     fn write(&mut self, id: u64, markdown: &str, append: bool) -> Result<Value, String> {
         flush_open(id);
         let n = store(|s| s.note(id).cloned()).ok_or_else(|| missing(id))?;
+        if append && n.text.chars().count() + markdown.chars().count() > crate::common::store::MAX_NOTE_CHARS {
+            return Err(crate::common::mcp::too_long());
+        }
         let w = ui(|u| u.worker);
         if append {
             // Into the note's own rich text, so its formatting stays as it is.
