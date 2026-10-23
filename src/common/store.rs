@@ -105,8 +105,8 @@ pub struct Settings {
     /// Note text size: 0 small, 1 medium, 2 large.
     #[serde(default = "default_note_size")]
     pub note_size: u8,
-    /// Interface language tag ("de", "pt-BR"); empty follows Windows.
-    #[serde(default)]
+    /// Interface language tag ("de", "pt-BR"); empty follows Windows. English to begin with.
+    #[serde(default = "default_language")]
     pub language: String,
     /// The note last worked on, for "Reopen Last Note" (also after a restart).
     #[serde(default)]
@@ -124,6 +124,10 @@ pub struct Settings {
 
 fn default_note_size() -> u8 {
     1
+}
+
+fn default_language() -> String {
+    "en".into()
 }
 
 fn default_pos() -> f32 {
@@ -148,7 +152,7 @@ impl Default for Settings {
             new_on_top: false,
             note_font: 0,
             note_size: default_note_size(),
-            language: String::new(),
+            language: default_language(),
             last_note: None,
             export_dir: String::new(),
             keep_open: false,
