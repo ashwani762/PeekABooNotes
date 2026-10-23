@@ -304,8 +304,26 @@ impl Store {
 
 const MARKERS: [&str; 6] = ["[ ] ", "[x] ", "- [ ] ", "- [x] ", "- ", "* "];
 
+/// Whether `s` starts the way a list item, checklist item or heading is written in
+/// Markdown, so that plain text starting so has to be written escaped ("\- not a list").
+pub fn looks_like_marker(s: &str) -> bool {
+    let hashes = s.chars().take_while(|&c| c == '#').count();
+    let digits = s.chars().take_while(|c| c.is_ascii_digit()).count();
+    ["- ", "* ", "+ ", "• ", "[ ] ", "[x] ", "[X] "].iter().any(|m| s.starts_with(m))
+        || ((1..=6).contains(&hashes) && s[hashes..].starts_with(' '))
+        || (digits > 0 && s[digits..].starts_with(". "))
+}
+
+/// A line written escaped because its text only looks like a marker: that text.
+pub fn unescaped(line: &str) -> Option<&str> {
+    line.trim_start().strip_prefix('\\').filter(|r| looks_like_marker(r))
+}
+
 /// Strip a leading list marker ("- ", "1. ", "[ ] " ...) from a line.
 pub fn strip_marker(line: &str) -> &str {
+    if let Some(r) = unescaped(line) {
+        return r;
+    }
     let l = line.trim_start();
     for m in MARKERS {
         if let Some(rest) = l.strip_prefix(m) {
@@ -361,7 +379,9 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
         let t = l.trim_start();
         let level = ((l.len() - t.len()) / 2).min(5);
         let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
-        let pretty = if let Some(r) = t.strip_prefix("[ ] ") {
+        let pretty = if let Some(r) = unescaped(t) {
+            r.to_string()
+        } else if let Some(r) = t.strip_prefix("[ ] ") {
             format!("○  {r}")
         } else if let Some(r) = t.strip_prefix("[x] ") {
             format!("●  {r}")

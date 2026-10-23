@@ -47,7 +47,13 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
             }
         }
         out.push_str(&prefix);
-        if inline && start == 0 && prefix.is_empty() && end > 0 {
+        // Plain text that only looks like a list or heading ("- not a list", typed and
+        // reverted with Backspace) is escaped, so it comes back as text.
+        let title = inline && start == 0 && prefix.is_empty() && end > 0;
+        if prefix.is_empty() && !title && crate::common::store::looks_like_marker(&visible(&t, body_start, end)) {
+            out.push('\\');
+        }
+        if title {
             out.push_str("# ");
             out.push_str(&with_links(h, &t, 0, end));
         } else if let Some(md) = inline.then(|| item_link(h, &t, body_start)).flatten().and_then(|l| attachment_md(&l.2)) {
@@ -99,15 +105,23 @@ fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let mut i = a;
     while i < b {
         if let Some((name, end, url)) = link_from(h, &links, i, b) {
-            let md = attachment_md(&url).unwrap_or_else(|| format!("[{}]({url})", String::from_utf16_lossy(&t[name..end])));
+            let md = attachment_md(&url).unwrap_or_else(|| format!("[{}]({url})", unmark_str(&t[name..end])));
             out.push_str(&md);
             i = end;
             continue;
         }
-        out.push_str(&String::from_utf16_lossy(&t[i..i + 1]));
-        i += 1;
+        let n = char_len(t, i, b);
+        out.push_str(&unmark_str(&t[i..i + n]));
+        i += n;
     }
     out
+}
+
+/// How many UTF-16 units the character at `i` takes (2 for a surrogate pair: most
+/// emoji), so it's never cut in half.
+fn char_len(t: &[u16], i: usize, b: usize) -> usize {
+    let pair = (0xD800..0xDC00).contains(&t[i]) && i + 1 < b && (0xDC00..0xE000).contains(&t[i + 1]);
+    if pair { 2 } else { 1 }
 }
 
 pub(super) fn inline_md(h: HWND, t: &[u16], a: usize, b: usize) -> String {
@@ -136,7 +150,8 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
             i = end;
             continue;
         }
-        set_sel(h, i as i32, i as i32 + 1);
+        let n = char_len(t, i, b);
+        set_sel(h, i as i32, (i + n) as i32);
         let cf = char_format(h, SCF_SELECTION);
         let st = (cf.effects & CFM_BOLD != 0, cf.effects & CFM_ITALIC != 0, cf.effects & CFM_STRIKEOUT != 0);
         if st != cur {
@@ -152,8 +167,8 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
             }
             cur = st;
         }
-        out.push_str(&String::from_utf16_lossy(&t[i..i + 1]));
-        i += 1;
+        out.push_str(&unmark_str(&t[i..i + n]));
+        i += n;
     }
     cur
 }
@@ -185,7 +200,9 @@ pub fn load_markdown(h: HWND, md: &str) {
         // Two spaces (or a tab) per nesting level, as `to_markdown` writes them.
         let indent: usize = raw[..raw.len() - l.len()].chars().map(|c| if c == '\t' { 2 } else { 1 }).sum();
         let hashes = l.chars().take_while(|&c| c == '#').count();
-        let (k, rest) = if let Some(r) = l.strip_prefix("- [ ] ").or(l.strip_prefix("[ ] ")) {
+        let (k, rest) = if let Some(r) = crate::common::store::unescaped(l) {
+            (Kind::Plain, r)
+        } else if let Some(r) = l.strip_prefix("- [ ] ").or(l.strip_prefix("[ ] ")) {
             (Kind::Task(false), r)
         } else if let Some(r) =
             l.strip_prefix("- [x] ").or(l.strip_prefix("- [X] ")).or(l.strip_prefix("[x] ")).or(l.strip_prefix("[X] "))

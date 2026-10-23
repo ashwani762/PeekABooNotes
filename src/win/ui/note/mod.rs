@@ -513,6 +513,38 @@ fn mark_dirty(h: HWND) {
         }
 }
 
+/// An emoji variation selector got into the editor directly (the emoji panel puts text
+/// in without a key message). RichEdit would stop drawing list bullets for good, so
+/// reload the content with the selector as a hidden marker (see `rich::selectors`),
+/// keeping the caret and scroll.
+fn unselect(h: HWND) {
+    let Some(st) = state(h) else { return };
+    let old = st.edit;
+    let (a, b) = rich::sel(old);
+    let y = rich::scroll_y(old);
+    let focused = unsafe { GetFocus() } == old;
+    let rtf = rich::get_rtf(old);
+    // The damage stays with the control, whatever is loaded into it: a fresh one.
+    let edit = new_editor(h);
+    st.loading = true;
+    st.edit = edit;
+    rich::set_rtf(edit, &rtf);
+    apply_theme(h);
+    connect_editor(h, edit);
+    layout(h);
+    rich::set_sel(edit, a, b);
+    rich::set_scroll_y(edit, y);
+    st.loading = false;
+    st.dirty = true;
+    unsafe {
+        DestroyWindow(old);
+        if focused {
+            SetFocus(edit);
+        }
+    }
+    mark_dirty(h);
+}
+
 /// Show note `id`'s stored content again wherever it's open (it was changed elsewhere,
 /// by an assistant say), keeping the place in it as far as the new content allows.
 pub fn reload(id: u64) {
@@ -558,18 +590,29 @@ fn apply_theme(h: HWND) {
     unsafe { InvalidateRect(h, std::ptr::null(), 1) };
 }
 
+/// The RichEdit for note window `h`, set up but empty and not yet listened to.
+fn new_editor(h: HWND) -> HWND {
+    let style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL) as u32;
+    let edit = unsafe { CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), style, 0, 0, 10, 10, h, 100 as _, app::hinst(), null_mut()) };
+    rich::setup(edit);
+    edit
+}
+
+/// Start listening to editor `edit` (once its content is in).
+fn connect_editor(h: HWND, edit: HWND) {
+    rich::send(edit, rich::EM_SETEVENTMASK, 0, (rich::ENM_CHANGE | rich::ENM_LINK) as isize);
+    attach::hook(edit);
+    unsafe { SetWindowSubclass(edit, Some(edit_proc), 1, h as usize) };
+}
+
 fn on_create(h: HWND) {
     let Some(st) = state(h) else { return };
     let dpi = unsafe { GetDpiForWindow(h) }.max(96);
     st.s = dpi as f32 / 96.0;
     st.icons = Some(Font::new(13.0 * st.s, FW_NORMAL, icon_face()));
     st.meta = Some(Font::new(11.5 * st.s, FW_NORMAL, theme::FACE_SMALL));
-    let style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL) as u32;
-    let edit = unsafe {
-        CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), style, 0, 0, 10, 10, h, 100 as _, app::hinst(), null_mut())
-    };
+    let edit = new_editor(h);
     st.edit = edit;
-    rich::setup(edit);
     let (rtf, text) = app::store(|s| s.note(st.id).map(|n| (n.rtf.clone(), n.text.clone()))).unwrap_or_default();
     if !rtf.is_empty() {
         rich::set_rtf(edit, &rtf);
@@ -578,10 +621,8 @@ fn on_create(h: HWND) {
     }
     apply_theme(h);
     rich::send(edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
-    rich::send(edit, rich::EM_SETEVENTMASK, 0, (rich::ENM_CHANGE | rich::ENM_LINK) as isize);
-    attach::hook(edit);
+    connect_editor(h, edit);
     unsafe {
-        SetWindowSubclass(edit, Some(edit_proc), 1, h as usize);
         // Files dropped on the frame (header, margins) too.
         windows_sys::Win32::UI::Shell::DragAcceptFiles(h, 1);
         SetWindowTextW(h, wide(&title_of(&text)).as_ptr());
@@ -744,6 +785,9 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     st.loading = true;
                     rich::style_title(st.edit);
                     rich::fix_caret_indent(st.edit);
+                    if rich::has_selectors(&rich::text(st.edit)) {
+                        unselect(h);
+                    }
                     st.loading = was;
                     if rich::text(st.edit).iter().any(|&c| is_task(c)) {
                         InvalidateRect(st.edit, std::ptr::null(), 0);

@@ -119,7 +119,7 @@ pub fn visible(t: &[u16], a: usize, b: usize) -> String {
     out.extend_from_slice(&t[i.min(b)..b]);
     out.retain(|&c| c != ITEM_LINK_NAME as u16);
     // A chip's paperclip only reads in the icon font: elsewhere, just the name.
-    let s = String::from_utf16_lossy(&out);
+    let s = unmark_str(&out);
     if s.contains(CLIP) { s.replace(&format!("{CLIP} "), "").replace(CLIP, "") } else { s }
 }
 
@@ -298,6 +298,29 @@ mod tests {
         load_markdown(h, "Plan\nRead **the [design doc](https://x.org/d)** and [notes](https://x.org/n).");
         assert_eq!(to_markdown(h, false), "Plan\nRead the design doc and notes.");
         assert_eq!(to_markdown(h, true), "# Plan\nRead **the [design doc](https://x.org/d)** and [notes](https://x.org/n).");
+        unsafe { DestroyWindow(h) };
+    }
+
+    #[test]
+    fn emoji_survive_markdown() {
+        let h = editor();
+        setup(h);
+        let md = "Trip \u{1F680}\n- **sun \u{1F600}** and \u{1F44D}\u{1F3FD} \u{2764}\u{FE0F}";
+        load_markdown(h, md);
+        assert_eq!(to_markdown(h, true), format!("# {md}"));
+        assert_eq!(to_markdown(h, false), "Trip \u{1F680}\n- sun \u{1F600} and \u{1F44D}\u{1F3FD} \u{2764}\u{FE0F}");
+        unsafe { DestroyWindow(h) };
+    }
+
+    #[test]
+    fn literal_markers_stay_text() {
+        let h = editor();
+        setup(h);
+        load_markdown(h, "Note\n\\- not a list\n- a real one\n\\1. not numbered");
+        assert_eq!(to_markdown(h, true), "# Note\n\\- not a list\n- a real one\n\\1. not numbered");
+        let stored = to_markdown(h, false);
+        assert_eq!(stored, "Note\n\\- not a list\n- a real one\n\\1. not numbered");
+        assert_eq!(crate::common::store::body_of(&stored), "- not a list\n•  a real one\n1. not numbered");
         unsafe { DestroyWindow(h) };
     }
 

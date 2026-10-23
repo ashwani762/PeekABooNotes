@@ -34,7 +34,7 @@ pub fn trim() {
 
 /// Draw every visible emoji of editor `e` in colour, straight onto its window.
 pub fn paint(e: HWND) {
-    let t = rich::text(e);
+    let t: Vec<u16> = rich::text(e).into_iter().map(rich::unmark).collect();
     let found = crate::common::emoji::find(&t, &[rich::BOX, rich::CHECKED]);
     if found.is_empty() {
         return;
@@ -67,7 +67,7 @@ pub fn paint(e: HWND) {
             let mut c = Canvas::new(w.max(1), h.max(1));
             c.clear(0xFF00_0000 | bg);
             c.begin_batch();
-            let s16 = String::from_utf16_lossy(&t[a..b]);
+            let s16 = rich::unmark_str(&t[a..b]);
             FONTS.with(|fonts| {
                 let mut fonts = fonts.borrow_mut();
                 let f = fonts.entry(px as u32).or_insert_with(|| Font::new(px, 400, FACE));

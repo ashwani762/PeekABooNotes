@@ -32,6 +32,9 @@ pub fn apply_base_format(h: HWND, text_rgb: u32, bg_rgb: u32) {
     send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     normalize_lists(h);
     fit_pictures(h);
+    // The body font just went over everything, file chips' paperclips included.
+    let len = text(h).len() as i32;
+    style_clips(h, 0, len, crate::win::ui::note::icon_face());
     set_sel(h, a, b);
     send(h, EM_HIDESELECTION, 0, 0);
     style_boxes(h);

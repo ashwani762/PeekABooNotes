@@ -133,6 +133,7 @@ pub(super) fn set_color(id: u64, c: u8) {
     if let Some(h) = note_hwnd(id) {
         note::retheme(h);
     }
+    allnotes::recolor(id);
     refresh();
 }
 

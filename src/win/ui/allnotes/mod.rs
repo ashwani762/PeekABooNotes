@@ -398,10 +398,22 @@ pub fn relabel() {
 }
 
 pub fn retheme() {
-    if let Some(h) = with(|l| l.hwnd) {
-        theme::set_dark_titlebar(h, app::dark());
-        unsafe { InvalidateRect(h, std::ptr::null(), 0) };
-        paint_now(h);
+    let Some((h, search)) = with(|l| (l.hwnd, l.search)) else { return };
+    theme::set_dark_titlebar(h, app::dark());
+    // The inline editor's paper, the card's cached pixels and the search field (its own
+    // control, which only repaints when told) all follow the new theme.
+    retheme_editor();
+    unsafe {
+        InvalidateRect(search, std::ptr::null(), 1);
+        InvalidateRect(h, std::ptr::null(), 0);
+    }
+    paint_now(h);
+}
+
+/// Note `id` changed colour: if the inline editor shows it, its paper follows.
+pub fn recolor(id: u64) {
+    if editor_for(id).is_some() {
+        retheme_editor();
     }
 }
 

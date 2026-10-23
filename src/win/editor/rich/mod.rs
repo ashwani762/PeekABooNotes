@@ -15,10 +15,12 @@ mod format;
 mod lists;
 mod links;
 mod markdown;
+mod selectors;
 pub use format::*;
 pub use links::*;
 pub use lists::*;
 pub use markdown::*;
+pub use selectors::{has_selectors, hide_marks, marker_for, unmark, unmark_str};
 
 pub const CLASS: &str = "RICHEDIT50W";
 
@@ -260,10 +262,11 @@ pub fn get_rtf(h: HWND) -> String {
 }
 
 pub fn set_rtf(h: HWND, rtf: &str) {
-    let rtf = strip_weights(rtf);
+    let rtf = selectors::rtf_to_marks(&strip_weights(rtf));
     let mut cur = InCursor { data: rtf.as_bytes(), pos: 0 };
     let mut es = EditStream { cookie: &mut cur as *mut _ as usize, error: 0, callback: in_cb };
     send(h, EM_STREAMIN, SF_RTF as usize, &mut es as *mut _ as isize);
+    hide_marks(h);
 }
 
 /// Drop explicit `\fweightN` words. An explicit weight wins over `\b` when RichEdit
@@ -328,8 +331,11 @@ pub fn set_sel(h: HWND, a: i32, b: i32) {
 }
 
 pub fn replace_sel(h: HWND, s: &str) {
-    let w = crate::win::util::wide(s);
+    let w = crate::win::util::wide(&selectors::to_marks(s));
     send(h, EM_REPLACESEL, 1, w.as_ptr() as isize);
+    if s.contains(['\u{FE0F}', '\u{FE0E}']) {
+        hide_marks(h);
+    }
 }
 
 /// Replace the selection with an RTF fragment ("{\rtf1 ...}"), undoably.
@@ -343,9 +349,12 @@ pub fn insert_rtf(h: HWND, rtf: &str) {
 
 /// Replace the selection with text, bypassing the subclass/undo tricks (used for "\r" inserts).
 pub fn insert_text(h: HWND, s: &str) {
-    let w = crate::win::util::wide(s);
+    let w = crate::win::util::wide(&selectors::to_marks(s));
     let st = SetTextEx { flags: ST_SELECTION | ST_DEFAULT, codepage: CP_UTF16 };
     send(h, EM_SETTEXTEX, &st as *const _ as usize, w.as_ptr() as isize);
+    if s.contains(['\u{FE0F}', '\u{FE0E}']) {
+        hide_marks(h);
+    }
 }
 
 pub fn char_from_pos(h: HWND, x: i32, y: i32) -> i32 {
@@ -427,8 +436,15 @@ const MARK_SIZE: i32 = 180; // 9pt
 const LEVEL: i32 = 320;
 const MAX_LEVEL: i32 = 5;
 
+/// Paste the clipboard's text, plain (through `replace_sel`, so selectors are kept out
+/// and it's undoable).
 pub fn paste_plain(h: HWND) {
-    send(h, EM_PASTESPECIAL, CF_UNICODETEXT, 0);
+    match crate::win::util::clipboard_text() {
+        Some(t) if t.contains(['\u{FE0F}', '\u{FE0E}']) => replace_sel(h, &t.replace("\r\n", "\r").replace('\n', "\r")),
+        _ => {
+            send(h, EM_PASTESPECIAL, CF_UNICODETEXT, 0);
+        }
+    }
 }
 
 fn is_task(c: u16) -> bool {

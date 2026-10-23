@@ -117,6 +117,13 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         }
         WM_CHAR => {
             let c = wp as u32;
+            // An emoji's variation selector goes in as its hidden stand-in (see
+            // rich::selectors): the real one would stop RichEdit drawing list bullets.
+            if let Some(m) = rich::marker_for(c as u16) {
+                let r = unsafe { DefSubclassProc(e, msg, m as usize, lp) };
+                rich::hide_marks(e);
+                return r;
+            }
             if let Some(st) = state(h)
                 && st.swallow && (c < 0x20 || c == 0x7F) {
                     st.swallow = false;
