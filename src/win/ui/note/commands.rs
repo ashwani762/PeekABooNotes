@@ -112,6 +112,18 @@ pub(super) fn paste(h: HWND) {
     let Some(st) = state(h) else { return };
     let e = st.edit;
     let (a, b) = rich::sel(e);
+    // Files copied in Explorer come in as attachments.
+    let files = super::attach::clipboard_files();
+    if !files.is_empty() {
+        rich::set_sel(e, a, b);
+        if a != b {
+            rich::replace_sel(e, "");
+        }
+        if super::attach::add(e, a, &files) > 0 {
+            mark_dirty(h);
+        }
+        return;
+    }
     if a != b
         && let Some(url) = crate::win::util::clipboard_text().map(|s| s.trim().to_string()).filter(|s| rich::looks_like_url(s))
         && !rich::text(e)[a as usize..b as usize].contains(&13)

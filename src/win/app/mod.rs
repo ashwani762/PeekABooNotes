@@ -301,6 +301,9 @@ pub fn run() -> i32 {
         let _ = mutex;
         log::startup();
 
+        // OLE: RichEdit's drag and drop (text within and between notes, files dropped in)
+        // and dragging attachments out.
+        let _ = windows::Win32::System::Ole::OleInitialize(None);
         LoadLibraryW(wide("Msftedit.dll").as_ptr());
         let icc = INITCOMMONCONTROLSEX { dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES };
         InitCommonControlsEx(&icc);

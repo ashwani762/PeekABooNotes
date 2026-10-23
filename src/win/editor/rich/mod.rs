@@ -331,6 +331,15 @@ pub fn replace_sel(h: HWND, s: &str) {
     send(h, EM_REPLACESEL, 1, w.as_ptr() as isize);
 }
 
+/// Replace the selection with an RTF fragment ("{\rtf1 ...}"), undoably.
+pub fn insert_rtf(h: HWND, rtf: &str) {
+    const ST_KEEPUNDO: u32 = 1;
+    let mut bytes = rtf.as_bytes().to_vec();
+    bytes.push(0);
+    let st = SetTextEx { flags: ST_SELECTION | ST_KEEPUNDO, codepage: 0 };
+    send(h, EM_SETTEXTEX, &st as *const _ as usize, bytes.as_ptr() as isize);
+}
+
 /// Replace the selection with text, bypassing the subclass/undo tricks (used for "\r" inserts).
 pub fn insert_text(h: HWND, s: &str) {
     let w = crate::win::util::wide(s);

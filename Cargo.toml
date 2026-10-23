@@ -10,7 +10,8 @@ repository = "https://github.com/ashwani762/PeekABooNotes"
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-windows = { version = "0.62.2", features = ["Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Controls", "Win32_UI_Controls_RichEdit", "Foundation_Numerics", "ApplicationModel", "Foundation"] }
+windows = { version = "0.62.2", features = ["Win32_Graphics_Direct2D", "Win32_Graphics_Direct2D_Common", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Controls", "Win32_UI_Controls_RichEdit", "Win32_Graphics_Imaging", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_System_Memory", "Win32_System_Variant", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Foundation_Numerics", "ApplicationModel", "Foundation"] }
+windows-core = "0.62.2"
 windows-numerics = "0.3.1"
 
 [dependencies.windows-sys]
@@ -28,6 +29,7 @@ features = [
     "Win32_System_Kernel",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
+    "Win32_System_Ole",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_System_Time",

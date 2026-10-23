@@ -50,6 +50,8 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         if inline && start == 0 && prefix.is_empty() && end > 0 {
             out.push_str("# ");
             out.push_str(&with_links(h, &t, 0, end));
+        } else if let Some(md) = inline.then(|| item_link(h, &t, body_start)).flatten().and_then(|l| attachment_md(&l.2)) {
+            out.push_str(&md);
         } else if inline {
             let body = inline_md(h, &t, body_start, end);
             // A ticked item's strikethrough is how it looks, not part of its text.
@@ -79,6 +81,15 @@ fn link_from(h: HWND, links: &[(usize, usize, String)], i: usize, b: usize) -> O
     Some((*name, end, url.clone()))
 }
 
+/// An attachment link as Markdown pointing at its file: `![name](file:///...)` for a
+/// picture, `[name](file:///...)` for anything else. None for other links.
+fn attachment_md(url: &str) -> Option<String> {
+    use crate::common::attach;
+    let name = attach::name_of(url)?;
+    let file = attach::file_url(&attach::dir().join(&name));
+    Some(if attach::is_image(&name) { format!("![{name}]({file})") } else { format!("[{name}]({file})") })
+}
+
 /// `t[a..b]` with links as `[name](url)` and no other marks (the title line).
 fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let links = instructions(t, a, b);
@@ -86,7 +97,8 @@ fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let mut i = a;
     while i < b {
         if let Some((name, end, url)) = link_from(h, &links, i, b) {
-            out.push_str(&format!("[{}]({url})", String::from_utf16_lossy(&t[name..end])));
+            let md = attachment_md(&url).unwrap_or_else(|| format!("[{}]({url})", String::from_utf16_lossy(&t[name..end])));
+            out.push_str(&md);
             i = end;
             continue;
         }
@@ -111,6 +123,11 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
     let mut i = a;
     while i < b {
         if let Some((name, end, url)) = link_from(h, &links, i, b) {
+            if let Some(md) = attachment_md(&url) {
+                out.push_str(&md);
+                i = end;
+                continue;
+            }
             out.push('[');
             cur = marks(h, t, name, end, cur, out);
             out.push_str(&format!("]({url})"));

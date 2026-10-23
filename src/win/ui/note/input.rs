@@ -5,24 +5,41 @@
 
 use super::*;
 
-/// Over a link, a tooltip shows where it goes.
-fn link_tip(e: HWND, x: i32, y: i32) {
-    use crate::win::ui::tooltip;
+thread_local! {
+    /// An attachment pressed on: (where, its file), until the pointer moves far enough
+    /// to drag it out or comes back up to open it.
+    static PRESS: std::cell::RefCell<Option<(POINT, std::path::PathBuf, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The link under the pointer: (start, end, address, the character pointed at). A
+/// picture counts as its attachment's link.
+fn link_under(e: HWND, x: i32, y: i32) -> Option<(i32, i32, String, i32)> {
     let lh = (rich::body_size() as f32 / 15.0 * 1.45) as i32;
-    // EM_CHARFROMPOS gives the nearest caret position: the character under the pointer
-    // is the one after it or the one before. None when off the end of a line.
+    let t = rich::text(e);
     let cp = rich::char_from_pos(e, x, y);
     let over = |c: i32| {
         let (p, q) = (rich::pos_from_char(e, c), rich::pos_from_char(e, c + 1));
         let right = if q.y == p.y && q.x > p.x { q.x } else { p.x };
-        c >= 0 && x >= p.x && x < right && y >= p.y && y < p.y + lh
+        // A line is as tall as what's on it (a picture): down to where the next starts.
+        let next_line = t.get(c.max(0) as usize..).and_then(|r| r.iter().position(|&ch| ch == 13)).map(|i| c + i as i32 + 1);
+        let bottom = next_line.filter(|&n| (n as usize) < t.len()).map_or(p.y + lh, |n| rich::pos_from_char(e, n).y);
+        c >= 0 && x >= p.x && x < right && y >= p.y && y < bottom.max(p.y + lh)
     };
-    let hit = [cp, cp - 1].into_iter().find(|&c| over(c));
-    let Some((a, b, url)) = hit.and_then(|c| rich::link_at(e, c).filter(|l| c >= l.0 && c < l.1)) else {
+    let hit = [cp, cp - 1].into_iter().find(|&c| over(c))?;
+    if let Some((a, b, url)) = rich::item_link(e, &t, hit as usize) {
+        return Some((a, b, url, hit));
+    }
+    rich::link_at(e, hit).filter(|l| hit >= l.0 && hit < l.1).map(|(a, b, url)| (a, b, url, hit))
+}
+
+/// Over a link, a tooltip shows where it goes.
+fn link_tip(e: HWND, x: i32, y: i32) {
+    use crate::win::ui::tooltip;
+    let lh = (rich::body_size() as f32 / 15.0 * 1.45) as i32;
+    let Some((a, b, url, cp)) = link_under(e, x, y) else {
         tooltip::leave(e);
         return;
     };
-    let cp = hit.unwrap_or(cp);
     // Under the part of the link the pointer is on.
     let t = rich::text(e);
     let from = rich::name_start(&t, a, b).max(a);
@@ -31,6 +48,21 @@ fn link_tip(e: HWND, x: i32, y: i32) {
     let p = rich::pos_from_char(e, cp);
     let (l, r) = if p0.y == pe.y { (p0.x, pe.x) } else { (p.x - 20, p.x + 20) };
     let anchor = crate::win::util::rect(l, p.y, (r - l).max(1), lh);
+    // An attachment: its name, and what dragging does.
+    if let Some(name) = crate::common::attach::name_of(&url) {
+        // Under what the line shows: a picture reaches down to where the next line starts.
+        let anchor = if rich::item_link(e, &t, cp as usize).is_some() {
+            let (s0, s1) = rich::item_shown(&t, cp as usize);
+            let (q0, q1) = (rich::pos_from_char(e, s0 as i32), rich::pos_from_char(e, s1 as i32));
+            let next = t[cp as usize..].iter().position(|&c| c == 13).map(|i| cp + i as i32 + 1).filter(|&n| (n as usize) < t.len());
+            let bottom = next.map_or(q0.y + lh, |n| rich::pos_from_char(e, n).y).min(q0.y + 600);
+            crate::win::util::rect(q0.x, q0.y, (q1.x - q0.x).max(1), (bottom - q0.y).max(lh))
+        } else {
+            anchor
+        };
+        tooltip::hover(e, anchor, &name, "");
+        return;
+    }
     let shown = url.strip_prefix("https://").or(url.strip_prefix("http://")).unwrap_or(&url).trim_end_matches('/');
     let shown: String = if shown.chars().count() > 60 { shown.chars().take(59).chain(std::iter::once('\u{2026}')).collect() } else { shown.to_string() };
     tooltip::hover(e, anchor, &shown, "");
@@ -104,6 +136,18 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if let Some(st) = state(h) {
                 st.auto = None;
             }
+            // Pressing on an attachment: drag it out, or click to open it.
+            if msg == WM_LBUTTONDOWN
+                && let Some((_, _, url, _)) = link_under(e, x_of(lp), y_of(lp))
+                && let Some(path) = super::attach::file_of(&url)
+            {
+                PRESS.with(|p| *p.borrow_mut() = Some((POINT { x: x_of(lp), y: y_of(lp) }, path, url)));
+                unsafe {
+                    SetFocus(e);
+                    SetCapture(e);
+                }
+                return 0;
+            }
             if !key_down(VK_SHIFT)
                 && let Some(cp) = checkbox_at(e, x_of(lp), y_of(lp)) {
                     unsafe { SetFocus(e) };
@@ -126,6 +170,27 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 unsafe { PostMessageW(h, WM_NOTE_CMD, cmd as usize, 0) };
             }
             return 0;
+        }
+        WM_MOUSEMOVE if PRESS.with(|p| p.borrow().is_some()) => {
+            let far = PRESS.with(|p| {
+                p.borrow().as_ref().is_some_and(|(at, _, _)| (x_of(lp) - at.x).abs() > 4 || (y_of(lp) - at.y).abs() > 4)
+            });
+            if far && let Some((_, path, _)) = PRESS.with(|p| p.borrow_mut().take()) {
+                unsafe { ReleaseCapture() };
+                crate::win::ui::tooltip::mute();
+                super::attach::drag_out(e, &path);
+            }
+            return 0;
+        }
+        WM_LBUTTONUP if PRESS.with(|p| p.borrow().is_some()) => {
+            unsafe { ReleaseCapture() };
+            if let Some((_, _, url)) = PRESS.with(|p| p.borrow_mut().take()) {
+                super::open_link(&url);
+            }
+            return 0;
+        }
+        WM_CAPTURECHANGED => {
+            PRESS.with(|p| p.borrow_mut().take());
         }
         WM_MOUSEMOVE => {
             let hot = checkbox_at(e, x_of(lp), y_of(lp));

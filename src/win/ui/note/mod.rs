@@ -23,6 +23,7 @@ use crate::common::store::title_of;
 use crate::win::theme;
 use crate::win::util::{WM_MOUSELEAVE, key_down, mix, now, rect, wide, x_of, y_of};
 
+mod attach;
 mod chrome;
 mod commands;
 mod lists;
@@ -552,8 +553,11 @@ fn on_create(h: HWND) {
     apply_theme(h);
     rich::send(edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
     rich::send(edit, rich::EM_SETEVENTMASK, 0, (rich::ENM_CHANGE | rich::ENM_LINK) as isize);
+    attach::hook(edit);
     unsafe {
         SetWindowSubclass(edit, Some(edit_proc), 1, h as usize);
+        // Files dropped on the frame (header, margins) too.
+        windows_sys::Win32::UI::Shell::DragAcceptFiles(h, 1);
         SetWindowTextW(h, wide(&title_of(&text)).as_ptr());
         if !st.embedded {
             let m = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
@@ -592,6 +596,19 @@ fn on_destroy(h: HWND) {
         }
     });
     app::refresh();
+}
+
+/// Open a link: a web address in the browser, an attachment with its own app.
+pub(super) fn open_link(url: &str) {
+    crate::win::ui::tooltip::mute();
+    let target = match crate::common::attach::name_of(url) {
+        Some(_) => match attach::file_of(url) {
+            Some(p) => p.to_string_lossy().into_owned(),
+            None => return,
+        },
+        None => url.to_string(),
+    };
+    unsafe { ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(&target).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
 }
 
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -675,14 +692,21 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     if m == WM_LBUTTONUP
                         && let Some(st) = state(h) {
                             let url = rich::url_of(st.edit, r.min, r.max);
-                            crate::win::ui::tooltip::mute();
-                            ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(&url).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                            open_link(&url);
                         }
                 }
                 return 0;
             }
             WM_NOTE_CMD => {
                 run_command(h, wp as u32);
+                return 0;
+            }
+            attach::WM_ATTACH => {
+                attach::flush_pending(h);
+                return 0;
+            }
+            WM_DROPFILES => {
+                attach::dropped_on_frame(h, wp);
                 return 0;
             }
             WM_RESTYLE => {

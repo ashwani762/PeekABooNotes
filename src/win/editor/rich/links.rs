@@ -112,6 +112,7 @@ pub fn visible(t: &[u16], a: usize, b: usize) -> String {
         i = name;
     }
     out.extend_from_slice(&t[i.min(b)..b]);
+    out.retain(|&c| c != ITEM_LINK_NAME as u16);
     String::from_utf16_lossy(&out)
 }
 
@@ -139,6 +140,7 @@ pub(super) fn md_links(s: &str) -> (String, Vec<(i32, i32, String)>) {
         match parsed {
             Some((name, url, used)) => {
                 let pre = &rest[..open];
+                let pre = pre.strip_suffix('!').unwrap_or(pre);
                 out.push_str(pre);
                 n += pre.encode_utf16().count() as i32;
                 let len = name.encode_utf16().count() as i32;
@@ -156,6 +158,53 @@ pub(super) fn md_links(s: &str) -> (String, Vec<(i32, i32, String)>) {
     }
     out.push_str(rest);
     (out, links)
+}
+
+/// An attachment sits on a line of its own: its picture, or a paperclip and its name,
+/// then its link, named with a zero-width space. The link is invisible because RichEdit
+/// underlines every link, and a line under a picture or a chip looks broken.
+pub const ITEM_LINK_NAME: char = '\u{200B}';
+
+/// The paragraph around `cp`: (start, end).
+fn para(t: &[u16], cp: usize) -> (usize, usize) {
+    let cp = cp.min(t.len());
+    let start = t[..cp].iter().rposition(|&c| c == 13).map_or(0, |i| i + 1);
+    let end = t[cp..].iter().position(|&c| c == 13).map_or(t.len(), |i| cp + i);
+    (start, end)
+}
+
+/// When `cp` is on an attachment's line, before its link: that link.
+pub fn item_link(h: HWND, t: &[u16], cp: usize) -> Option<(i32, i32, String)> {
+    let (start, end) = para(t, cp);
+    let last = instructions(t, start, end).pop()?;
+    let ends_line = last.1 + 1 == end && t.get(last.1) == Some(&(ITEM_LINK_NAME as u16));
+    (ends_line && cp < last.0).then(|| link_at(h, last.1 as i32)).flatten()
+}
+
+/// What an attachment's line shows before its link ("📎 plan.pdf", or a space for a
+/// picture): (start, end).
+pub fn item_shown(t: &[u16], cp: usize) -> (usize, usize) {
+    let (start, end) = para(t, cp);
+    let link = instructions(t, start, end).pop().map_or(end, |l| l.0);
+    (start, link)
+}
+
+/// Lines holding just a picture: single spacing, since the text's 1.2x would add a fifth
+/// of the picture's height under it. Moves the selection.
+pub fn fit_pictures(h: HWND) {
+    let t = text(h);
+    let mut start = 0usize;
+    while start < t.len() {
+        let end = t[start..].iter().position(|&c| c == 13).map_or(t.len(), |i| start + i);
+        if end > start && item_link(h, &t, start).is_some() && visible(&t, start, end).trim().is_empty() {
+            set_sel(h, start as i32, start as i32);
+            let mut pf = ParaFormat2::new();
+            pf.mask = PFM_LINESPACING;
+            pf.line_spacing_rule = 0;
+            send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+        }
+        start = end + 1;
+    }
 }
 
 /// Whether `s` reads as a web address (or mail link) on its own.

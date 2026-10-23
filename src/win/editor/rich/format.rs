@@ -31,6 +31,7 @@ pub fn apply_base_format(h: HWND, text_rgb: u32, bg_rgb: u32) {
     pf.space_after = 50;
     send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     normalize_lists(h);
+    fit_pictures(h);
     set_sel(h, a, b);
     send(h, EM_HIDESELECTION, 0, 0);
     style_boxes(h);

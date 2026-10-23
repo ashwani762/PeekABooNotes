@@ -10,6 +10,7 @@
 pub mod i18n; // first, so t!/tn! are in scope for everything after it
 
 pub mod anim;
+pub mod attach;
 pub mod log;
 pub mod search;
 pub mod store;
