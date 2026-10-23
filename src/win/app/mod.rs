@@ -280,6 +280,15 @@ pub fn schedule_trim() {
     }
 }
 
+/// The hidden converter still holds the last note it read: let it go.
+fn clear_worker() {
+    let w = ui(|u| u.worker);
+    if !w.is_null() {
+        unsafe { SetWindowTextW(w, [0u16].as_ptr()) };
+        rich::send(w, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+    }
+}
+
 fn trim_memory() {
     let busy = ui(|u| !u.notes.is_empty()) || !crate::win::ui::allnotes::hwnd().is_null() || !crate::win::ui::settings::hwnd().is_null();
     if busy {
@@ -287,9 +296,21 @@ fn trim_memory() {
     }
     crate::win::render::dw::trim();
     crate::win::editor::emoji::trim();
+    deck::trim();
+    clear_worker();
     unsafe {
-        use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
+        use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact, HeapOptimizeResources, HeapSetInformation};
         use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+        // HEAP_OPTIMIZE_RESOURCES_INFORMATION, version 1: with no heap named, every heap in
+        // the process (ours, DirectWrite's, RichEdit's) gives back its caches and free pages,
+        // which HeapCompact alone doesn't.
+        #[repr(C)]
+        struct Optimize {
+            version: u32,
+            flags: u32,
+        }
+        let o = Optimize { version: 1, flags: 0 };
+        HeapSetInformation(null_mut(), HeapOptimizeResources, &o as *const _ as *const _, size_of::<Optimize>());
         HeapCompact(GetProcessHeap(), 0);
         SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
     }
@@ -356,6 +377,8 @@ pub fn run() -> i32 {
             null_mut(),
         );
         rich::setup(worker);
+        // A converter, never edited by hand: no undo history to keep.
+        rich::send(worker, rich::EM_SETUNDOLIMIT, 0, 0);
         rich::apply_base_format(worker, 0x000000, 0xFFFFFF);
         ui(|u| {
             u.main = main;
@@ -372,6 +395,8 @@ pub fn run() -> i32 {
 
         // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
         mcp::init(main);
+        // Starting up touches far more than an idle deck needs: give it back once settled.
+        schedule_trim();
 
         while pump_once() {}
         log::shutdown("quit");

@@ -30,6 +30,7 @@ pub const EM_EMPTYUNDOBUFFER: u32 = 0x00CD;
 pub const EM_POSFROMCHAR: u32 = 0x00D6;
 pub const EM_CHARFROMPOS: u32 = 0x00D7;
 pub const EM_REDO: u32 = 0x0454;
+pub const EM_SETUNDOLIMIT: u32 = WM_USER + 82;
 pub const EM_GETCHARFORMAT: u32 = WM_USER + 58;
 pub const EM_GETPARAFORMAT: u32 = WM_USER + 61;
 pub const EM_HIDESELECTION: u32 = WM_USER + 63;

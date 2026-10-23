@@ -210,6 +210,11 @@ thread_local! {
     static DECK: RefCell<Option<Deck>> = const { RefCell::new(None) };
 }
 
+/// Let the label fonts go (with no window open): each keeps DirectWrite state alive.
+pub fn trim() {
+    with(|d| d.fonts.clear());
+}
+
 fn with<R>(f: impl FnOnce(&mut Deck) -> R) -> Option<R> {
     DECK.with(|d| d.try_borrow_mut().ok().and_then(|mut d| d.as_mut().map(f)))
 }

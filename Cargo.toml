@@ -49,7 +49,9 @@ features = [
 embed-manifest = "1.5.1"
 
 [profile.release]
-opt-level = 3
+# Size over the last few percent of speed: frames measured the same as at 3 (about 3 ms),
+# and the exe is a quarter smaller.
+opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"

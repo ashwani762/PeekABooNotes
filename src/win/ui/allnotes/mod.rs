@@ -1040,6 +1040,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_DESTROY => {
                 crate::win::ui::tooltip::leave(hwnd);
+                // The detail card's pixels (one to several MB) go with the window.
+                CARD_CACHE.with(|c| c.borrow_mut().take());
                 LIB.with(|l| {
                     if let Ok(mut l) = l.try_borrow_mut()
                         && let Some(lib) = l.take()

@@ -772,6 +772,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         w.take();
                     }
                 });
+                draw::forget_preview();
                 app::schedule_trim();
                 return 0;
             }

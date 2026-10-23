@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use embed_manifest::manifest::{ActiveCodePage, DpiAwareness, Setting};
+use embed_manifest::manifest::{ActiveCodePage, DpiAwareness, HeapType, Setting};
 use embed_manifest::{embed_manifest, new_manifest};
 
 /// The folder the exe is built into (target\<profile>), from OUT_DIR
@@ -35,12 +35,15 @@ fn copy_strings() {
 
 fn main() {
     if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
-        // Common Controls v6 (visual styles, cue banners), per-monitor v2 DPI, UTF-8 code page.
+        // Common Controls v6 (visual styles, cue banners), per-monitor v2 DPI, UTF-8 code page,
+        // and the segment heap (Windows 10 2004+; older builds ignore it): freed memory goes
+        // back to Windows promptly instead of lingering in heap segments.
         embed_manifest(
             new_manifest("PeekABoo.Notes")
                 .dpi_awareness(DpiAwareness::PerMonitorV2)
                 .active_code_page(ActiveCodePage::Utf8)
-                .long_path_aware(Setting::Enabled),
+                .long_path_aware(Setting::Enabled)
+                .heap_type(HeapType::SegmentHeap),
         )
         .expect("unable to embed manifest");
     }

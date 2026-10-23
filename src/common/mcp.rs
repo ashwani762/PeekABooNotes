@@ -53,95 +53,178 @@ fn color_names() -> Vec<&'static str> {
     crate::common::theme::ORDER.iter().map(|&i| color_name(i)).collect()
 }
 
+/// The tools, as JSON text (as data rather than `json!` code, which compiles to many KB).
+/// "__COLORS__" stands for the list of colour names.
+const TOOLS: &str = r#"[
+ {
+  "name": "list_notes",
+  "title": "List or search notes",
+  "description": "Lists notes, newest first, with each one's id, title, first line, colour and state. With a query it searches instead (forgiving: words in any order, word starts, small typos), best matches first.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Words to look for. Leave out to list."
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "archived",
+      "all"
+     ],
+     "description": "Which notes: active (the default), archived, or all."
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 500,
+     "description": "Most notes to return (default 50)."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true
+  }
+ },
+ {
+  "name": "read_note",
+  "title": "Read a note",
+  "description": "A note's full content as Markdown (the first line is its title), with its colour, state, dates and attached files (names and paths on disk).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "integer",
+     "description": "The note's id, from list_notes."
+    }
+   },
+   "required": [
+    "id"
+   ]
+  },
+  "annotations": {
+   "readOnlyHint": true
+  }
+ },
+ {
+  "name": "create_note",
+  "title": "Create a note",
+  "description": "Creates a note from Markdown. The first line is its title. Supported: **bold**, _italic_, ~~strike~~, - bullets, 1. numbers, - [ ] / - [x] checklist items, [links](https://...), and files on this computer as ![name](C:/path/picture.png) or [name](C:/path/file.pdf), which are copied in as attachments.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "markdown": {
+     "type": "string",
+     "description": "The note. The first line becomes the title."
+    },
+    "color": {
+     "type": "string",
+     "enum": "__COLORS__",
+     "description": "Paper colour. Leave out for the user's default."
+    },
+    "pinned": {
+     "type": "boolean",
+     "description": "Keep it open on top of other windows when opened."
+    }
+   },
+   "required": [
+    "markdown"
+   ]
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "update_note",
+  "title": "Replace a note's content",
+  "description": "Replaces a note's whole content with this Markdown (same format as create_note). Read the note first and keep what should stay: what isn't in the new Markdown is gone.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "integer"
+    },
+    "markdown": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "markdown"
+   ]
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  }
+ },
+ {
+  "name": "append_to_note",
+  "title": "Add to a note",
+  "description": "Adds Markdown to the end of a note, keeping everything already in it (formatting included).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "integer"
+    },
+    "markdown": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "id",
+    "markdown"
+   ]
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "set_note_state",
+  "title": "Archive, restore, pin or colour a note",
+  "description": "Changes a note's state: archive it (or bring it back), pin it, change its colour, or take it out of (or put it back in) the deck at the screen edge. Notes are never deleted from here; archiving puts one away and can be undone.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "integer"
+    },
+    "archived": {
+     "type": "boolean"
+    },
+    "pinned": {
+     "type": "boolean"
+    },
+    "color": {
+     "type": "string",
+     "enum": "__COLORS__"
+    },
+    "in_deck": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false,
+   "idempotentHint": true
+  }
+ }
+]"#;
+
 fn tools() -> Value {
-    let colors = color_names();
-    json!([
-        {
-            "name": "list_notes",
-            "title": "List or search notes",
-            "description": "Lists notes, newest first, with each one's id, title, first line, colour and state. With a query it searches instead (forgiving: words in any order, word starts, small typos), best matches first.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Words to look for. Leave out to list." },
-                    "status": { "type": "string", "enum": ["active", "archived", "all"], "description": "Which notes: active (the default), archived, or all." },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Most notes to return (default 50)." }
-                }
-            },
-            "annotations": { "readOnlyHint": true }
-        },
-        {
-            "name": "read_note",
-            "title": "Read a note",
-            "description": "A note's full content as Markdown (the first line is its title), with its colour, state, dates and attached files (names and paths on disk).",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "id": { "type": "integer", "description": "The note's id, from list_notes." } },
-                "required": ["id"]
-            },
-            "annotations": { "readOnlyHint": true }
-        },
-        {
-            "name": "create_note",
-            "title": "Create a note",
-            "description": "Creates a note from Markdown. The first line is its title. Supported: **bold**, _italic_, ~~strike~~, - bullets, 1. numbers, - [ ] / - [x] checklist items, [links](https://...), and files on this computer as ![name](C:/path/picture.png) or [name](C:/path/file.pdf), which are copied in as attachments.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "markdown": { "type": "string", "description": "The note. The first line becomes the title." },
-                    "color": { "type": "string", "enum": colors, "description": "Paper colour. Leave out for the user's default." },
-                    "pinned": { "type": "boolean", "description": "Keep it open on top of other windows when opened." }
-                },
-                "required": ["markdown"]
-            },
-            "annotations": { "readOnlyHint": false, "destructiveHint": false }
-        },
-        {
-            "name": "update_note",
-            "title": "Replace a note's content",
-            "description": "Replaces a note's whole content with this Markdown (same format as create_note). Read the note first and keep what should stay: what isn't in the new Markdown is gone.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "integer" },
-                    "markdown": { "type": "string" }
-                },
-                "required": ["id", "markdown"]
-            },
-            "annotations": { "readOnlyHint": false, "destructiveHint": true }
-        },
-        {
-            "name": "append_to_note",
-            "title": "Add to a note",
-            "description": "Adds Markdown to the end of a note, keeping everything already in it (formatting included).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "integer" },
-                    "markdown": { "type": "string" }
-                },
-                "required": ["id", "markdown"]
-            },
-            "annotations": { "readOnlyHint": false, "destructiveHint": false }
-        },
-        {
-            "name": "set_note_state",
-            "title": "Archive, restore, pin or colour a note",
-            "description": "Changes a note's state: archive it (or bring it back), pin it, change its colour, or take it out of (or put it back in) the deck at the screen edge. Notes are never deleted from here; archiving puts one away and can be undone.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "integer" },
-                    "archived": { "type": "boolean" },
-                    "pinned": { "type": "boolean" },
-                    "color": { "type": "string", "enum": colors },
-                    "in_deck": { "type": "boolean" }
-                },
-                "required": ["id"]
-            },
-            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true }
-        }
-    ])
+    let colors = serde_json::to_string(&color_names()).unwrap_or_else(|_| "[]".into());
+    serde_json::from_str(&TOOLS.replace("\"__COLORS__\"", &colors)).unwrap_or(Value::Null)
 }
 
 fn id_arg(args: &Value) -> Result<u64, String> {

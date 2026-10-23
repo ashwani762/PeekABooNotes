@@ -5,6 +5,18 @@
 
 use super::*;
 
+thread_local! {
+    /// The preview's fonts for the current typography and scale. Made on every paint, each
+    /// new text format left fresh layouts in DirectWrite's cache, frame after frame.
+    static PREVIEW: RefCell<Option<(PreviewKey, Font, Font)>> = const { RefCell::new(None) };
+}
+
+type PreviewKey = (&'static str, &'static str, i32, bool, u32);
+
+pub(super) fn forget_preview() {
+    PREVIEW.with(|p| p.borrow_mut().take());
+}
+
 pub(super) fn paint_now(h: HWND) {
     unsafe {
         let dc = GetDC(h);
@@ -292,8 +304,16 @@ pub(super) fn draw_preview(w: &Win, c: &mut Canvas, p: &Pal, r: &RECT) {
     let (body_face, body) = (crate::win::editor::rich::body_face(), crate::win::editor::rich::body_size());
     let bold_title = !matches!(app::store(|st| st.d.settings.note_font), 0 | 3);
     let title_face = if app::store(|st| st.d.settings.note_font) == 0 { theme::FACE_DISPLAY } else { body_face };
-    let title = Font::new(px(body * 13 / 10), if bold_title { FW_BOLD } else { FW_SEMIBOLD }, title_face);
-    let text = Font::new(px(body), FW_NORMAL, body_face);
+    let key = (title_face, body_face, body, bold_title, s.to_bits());
+    let (title, text) = PREVIEW.with(|p| {
+        let mut p = p.borrow_mut();
+        if p.as_ref().map(|(k, ..)| *k) != Some(key) {
+            let title = Font::new(px(body * 13 / 10), if bold_title { FW_BOLD } else { FW_SEMIBOLD }, title_face);
+            *p = Some((key, title, Font::new(px(body), FW_NORMAL, body_face)));
+        }
+        let (_, t, b) = p.as_ref().unwrap();
+        (t.clone(), b.clone())
+    });
     let x = (card.x + 20.0 * s) as i32;
     let tw = (card.w - 40.0 * s) as i32;
     let mut y = card.y as i32 + (18.0 * s) as i32 + title.ascent;
