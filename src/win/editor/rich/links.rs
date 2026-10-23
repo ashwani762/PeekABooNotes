@@ -26,6 +26,11 @@ fn range(h: HWND, a: i32, b: i32) -> Option<ITextRange2> {
     unsafe { doc(h)?.Range2(b, a).ok() }
 }
 
+/// The font size (points) of the character at `cp`, without touching the selection.
+pub fn size_at(h: HWND, cp: i32) -> Option<f32> {
+    range(h, cp, cp + 1).and_then(|r| unsafe { r.GetFont().ok()?.GetSize().ok() })
+}
+
 /// Make `a..b` a link to `url`.
 pub fn set_link(h: HWND, a: i32, b: i32, url: &str) -> bool {
     let Some(r) = range(h, a, b) else { return false };

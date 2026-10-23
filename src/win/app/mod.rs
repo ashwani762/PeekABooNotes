@@ -224,6 +224,7 @@ pub fn quit() {
     // Release Direct2D/DirectWrite while the process is fully alive: left to the exit-time
     // thread-local teardown, Direct2D faults inside the loader's shutdown and the exit stalls.
     crate::win::render::dw::trim();
+    crate::win::editor::emoji::trim();
     unsafe { PostQuitMessage(0) };
 }
 
@@ -279,6 +280,7 @@ fn trim_memory() {
         return;
     }
     crate::win::render::dw::trim();
+    crate::win::editor::emoji::trim();
     unsafe {
         use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
         use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};

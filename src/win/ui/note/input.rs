@@ -262,6 +262,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     ) || (msg == WM_MOUSEMOVE && wp & 0x0001 != 0);
     if drew {
         crate::win::editor::checks::paint(e);
+        crate::win::editor::emoji::paint(e);
         super::scrollbar::sync(h);
     }
     r
