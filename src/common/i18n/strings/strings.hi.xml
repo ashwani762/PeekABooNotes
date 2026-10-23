@@ -93,6 +93,10 @@
         <item quantity="one">%d चुना गया</item>
         <item quantity="other">%d चुने गए</item>
     </plurals>
+    <plurals name="tip_share">
+        <item quantity="one">यह नोट साझा करें</item>
+        <item quantity="other">ये %d नोट साझा करें</item>
+    </plurals>
     <plurals name="notes_selected">
         <item quantity="one">%d नोट चुना गया</item>
         <item quantity="other">%d नोट चुने गए</item>
@@ -252,11 +256,6 @@
     <string name="tip_color">रंग बदलें</string>
     <string name="tip_more">और</string>
     <string name="tip_close">बंद करें</string>
-    <string name="tip_import">नोट्स आयात करें</string>
-    <plurals name="tip_export">
-        <item quantity="one">यह नोट निर्यात करें</item>
-        <item quantity="other">ये %d नोट्स निर्यात करें</item>
-    </plurals>
     <string name="settings_group_assistants">AI सहायक</string>
     <string name="settings_mcp">सहायकों को अनुमति दें (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude और दूसरे AI ऐप आपके नोट्स पढ़ और लिख सकते हैं</string>

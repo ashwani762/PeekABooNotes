@@ -29,10 +29,12 @@ mod mcp;
 mod notes;
 mod menus;
 mod files;
+mod share;
 mod prefs;
 pub use notes::*;
 pub use menus::*;
 pub use files::*;
+pub use share::share;
 pub use prefs::*;
 pub use mcp::{CLIENTS as MCP_CLIENTS, set_enabled as set_mcp_enabled, setup_for as mcp_setup_for};
 

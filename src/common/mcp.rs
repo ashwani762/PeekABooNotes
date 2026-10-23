@@ -286,6 +286,8 @@ fn error(id: &Value, code: i64, message: &str) -> String {
 
 /// Answer one JSON-RPC message. None for notifications, which get no answer.
 pub fn handle(line: &str, notes: &mut dyn Notes) -> Option<String> {
+    // Some clients (a PowerShell pipe, for one) start the first line with a byte order mark.
+    let line = line.trim_start_matches('\u{FEFF}');
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(_) => return Some(error(&Value::Null, -32700, "Not JSON.")),
@@ -382,6 +384,8 @@ mod tests {
         assert!(!names.iter().any(|n| n.contains("delete")));
         assert_eq!(ask(&mut f, json!({ "jsonrpc": "2.0", "id": 3, "method": "nope" }))["error"]["code"], -32601);
         assert_eq!(handle("{oops", &mut f).map(|r| r.contains("-32700")), Some(true));
+        let bom = format!("\u{FEFF}{}", json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/list" }));
+        assert!(handle(&bom, &mut f).is_some_and(|r| r.contains("list_notes")));
     }
 
     #[test]

@@ -73,13 +73,12 @@ pub(super) fn cursor() -> POINT {
     p
 }
 
-pub fn note_menu_at_cursor(id: u64, owner: HWND) {
-    note_menu_at(id, cursor(), owner);
-}
-
-pub fn note_menu_at(id: u64, p: POINT, owner: HWND) {
+/// A note's menu at the mouse; `before` runs once a command is picked, ahead of it.
+pub fn note_menu_at_cursor(id: u64, owner: HWND, before: impl FnOnce()) {
+    let p = cursor();
     let cmd = popup(note_menu(id, false), p.x, p.y, owner);
     if cmd != 0 {
+        before();
         note_command(id, cmd);
     }
 }

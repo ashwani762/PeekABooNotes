@@ -60,12 +60,10 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             let a = p.hover.1 * if l.pressed == hit { 2.4 } else { 1.6 };
             c.shape(&Shape::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32, 8.0 * s), p.hover.0, a, 1.0, 0.0);
         }
-        // Import opens files to bring in (an open folder); export sends notes out (share).
         let glyph = match hit {
             Hit::New => "\u{E710}",
-            Hit::Import => "\u{ED25}",
-            Hit::Settings => "\u{E713}",
-            _ => "\u{E72D}",
+            Hit::Share => "\u{E72D}",
+            _ => "\u{E713}",
         };
         icon(c, glyph, &f.icons, r, p.text);
     }

@@ -132,7 +132,7 @@ fn main() {
     let (mut link, mut started) = (None, false);
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
-        let line = line.trim();
+        let line = line.trim().trim_start_matches('\u{FEFF}');
         if line.is_empty() {
             continue;
         }

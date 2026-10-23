@@ -89,6 +89,9 @@
     <plurals name="state_selected">
         <item quantity="other">%d 件を選択中</item>
     </plurals>
+    <plurals name="tip_share">
+        <item quantity="other">%d 件のメモを共有</item>
+    </plurals>
     <plurals name="notes_selected">
         <item quantity="other">%d 件のメモを選択中</item>
     </plurals>
@@ -242,10 +245,6 @@
     <string name="tip_color">色を変更</string>
     <string name="tip_more">その他</string>
     <string name="tip_close">閉じる</string>
-    <string name="tip_import">メモを読み込む</string>
-    <plurals name="tip_export">
-        <item quantity="other">%d 件のメモを書き出す</item>
-    </plurals>
     <string name="settings_group_assistants">AI アシスタント</string>
     <string name="settings_mcp">アシスタントを許可 (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT や Claude などの AI アプリがメモを読み書きできます</string>

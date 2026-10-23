@@ -93,6 +93,10 @@
         <item quantity="one">%d seleccionada</item>
         <item quantity="other">%d seleccionadas</item>
     </plurals>
+    <plurals name="tip_share">
+        <item quantity="one">Compartir esta nota</item>
+        <item quantity="other">Compartir estas %d notas</item>
+    </plurals>
     <plurals name="notes_selected">
         <item quantity="one">%d nota seleccionada</item>
         <item quantity="other">%d notas seleccionadas</item>
@@ -252,11 +256,6 @@
     <string name="tip_color">Cambiar color</string>
     <string name="tip_more">Más</string>
     <string name="tip_close">Cerrar</string>
-    <string name="tip_import">Importar notas</string>
-    <plurals name="tip_export">
-        <item quantity="one">Exportar esta nota</item>
-        <item quantity="other">Exportar estas %d notas</item>
-    </plurals>
     <string name="settings_group_assistants">Asistentes de IA</string>
     <string name="settings_mcp">Permitir asistentes (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude y otras apps de IA pueden leer y escribir tus notas</string>

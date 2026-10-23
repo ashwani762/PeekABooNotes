@@ -18,6 +18,7 @@ pub mod search;
 pub mod store;
 pub mod theme;
 pub mod util;
+pub mod zip;
 
 #[cfg(test)]
 mod tests {

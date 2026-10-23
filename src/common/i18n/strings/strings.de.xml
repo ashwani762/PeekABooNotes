@@ -93,6 +93,10 @@
         <item quantity="one">%d ausgewählt</item>
         <item quantity="other">%d ausgewählt</item>
     </plurals>
+    <plurals name="tip_share">
+        <item quantity="one">Diese Notiz teilen</item>
+        <item quantity="other">Diese %d Notizen teilen</item>
+    </plurals>
     <plurals name="notes_selected">
         <item quantity="one">%d Notiz ausgewählt</item>
         <item quantity="other">%d Notizen ausgewählt</item>
@@ -252,11 +256,6 @@
     <string name="tip_color">Farbe ändern</string>
     <string name="tip_more">Mehr</string>
     <string name="tip_close">Schließen</string>
-    <string name="tip_import">Notizen importieren</string>
-    <plurals name="tip_export">
-        <item quantity="one">Diese Notiz exportieren</item>
-        <item quantity="other">Diese %d Notizen exportieren</item>
-    </plurals>
     <string name="settings_group_assistants">KI-Assistenten</string>
     <string name="settings_mcp">Assistenten erlauben (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude und andere KI-Apps dürfen Notizen lesen und schreiben</string>

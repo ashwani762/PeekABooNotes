@@ -35,10 +35,25 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
         store_mut(|s| s.d.settings.export_dir = chosen);
         save();
     }
+    let total = ids.len();
+    let (written, failed) = write_markdown(&dir, ids);
+    match &failed {
+        Some(e) => log::warn(&format!("export: wrote {written} of {total} notes; last error: {e}")),
+        None => log::info(&format!("export: wrote {written} notes")),
+    }
+    if written == 0 {
+        return Some(Err(()));
+    }
+    open_path(&dir);
+    Some(Ok(written))
+}
+
+/// Write notes `ids` into `dir` as Markdown files, their attachments beside them: how many
+/// were written, and the last error if any weren't.
+pub(super) fn write_markdown(dir: &std::path::Path, ids: &[u64]) -> (usize, Option<std::io::Error>) {
     let notes: Vec<(String, String)> = store(|s| ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.rtf.clone(), n.text.clone())).collect());
     let mut used = HashSet::new();
     let (mut written, mut failed) = (0, None);
-    let total = notes.len();
     for (rtf, text) in notes {
         let md = if rtf.is_empty() { text.clone() } else { rtf_to_markdown(&rtf) };
         let base = file_safe(&title_of(&text));
@@ -49,21 +64,13 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
             name = format!("{base} ({k}).md");
             k += 1;
         }
-        let md = export_attachments(&md, &dir);
+        let md = crate::common::store::hard_breaks(&export_attachments(&md, dir));
         match std::fs::write(dir.join(name), md + "\n") {
             Ok(()) => written += 1,
             Err(e) => failed = Some(e),
         }
     }
-    match &failed {
-        Some(e) => log::warn(&format!("export: wrote {written} of {total} notes; last error: {e}")),
-        None => log::info(&format!("export: wrote {written} notes")),
-    }
-    if written == 0 {
-        return Some(Err(()));
-    }
-    open_path(&dir);
-    Some(Ok(written))
+    (written, failed)
 }
 
 /// Copy the attachments exported Markdown `md` points at into `dir`/attachments, so the

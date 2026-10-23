@@ -31,14 +31,14 @@ pub(super) fn caption_rects(lay: &Layout, s: f32) -> [(Hit, RECT); 3] {
 }
 
 /// Toolbar icons beside the large title, centred on its cap height.
-pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 4] {
+pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 3] {
     let size = (30.0 * s) as i32;
     let right = if lay.wide { lay.list_w as i32 - (14.0 * s) as i32 } else { lay.w - (3.0 * 46.0 * s) as i32 - (10.0 * s) as i32 };
     let cy = (TITLE_BASE - 28.0 * 0.7 / 2.0) * s;
     let y = (cy - size as f32 / 2.0).round() as i32;
     let gap = (2.0 * s) as i32;
     let r = |i: i32| rect(right - size * (i + 1) - gap * i, y, size, size);
-    [(Hit::Settings, r(0)), (Hit::Export, r(1)), (Hit::Import, r(2)), (Hit::New, r(3))]
+    [(Hit::Settings, r(0)), (Hit::Share, r(1)), (Hit::New, r(2))]
 }
 
 /// The tooltip for a toolbar icon under the pointer, or none.
@@ -51,8 +51,7 @@ pub(super) fn header_tip(l: &Lib, hit: Hit) {
     };
     let (label, keys) = match hit {
         Hit::New => (t!("menu_new_note").to_string(), crate::common::i18n::keys(&["ctrl", "N"])),
-        Hit::Import => (t!("tip_import").to_string(), String::new()),
-        Hit::Export => (tn!("tip_export", l.rows.iter().filter(|r| l.sel.contains(&r.id)).count()), String::new()),
+        Hit::Share => (tn!("tip_share", l.rows.iter().filter(|r| l.sel.contains(&r.id)).count()), String::new()),
         _ => (t!("menu_settings").to_string(), String::new()),
     };
     tooltip::hover(l.hwnd, r, &label, &keys);

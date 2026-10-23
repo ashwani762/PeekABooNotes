@@ -314,6 +314,25 @@ pub fn looks_like_marker(s: &str) -> bool {
         || (digits > 0 && s[digits..].starts_with(". "))
 }
 
+/// Markdown for reading outside the app. A line that runs on into the next one (not a
+/// heading, not before a bullet or heading, which start their own block) ends in two
+/// spaces, Markdown's line break: previewers then keep the note's lines apart instead of
+/// joining them into one paragraph, and a plain text editor shows nothing extra.
+pub fn hard_breaks(md: &str) -> String {
+    let lines: Vec<&str> = md.split('\n').collect();
+    let mut out = String::with_capacity(md.len() + lines.len() * 2);
+    for (i, l) in lines.iter().enumerate() {
+        out.push_str(l);
+        let Some(next) = lines.get(i + 1).map(|n| n.trim_start()) else { break };
+        let starts_block = looks_like_marker(next) && !next.starts_with(|c: char| c.is_ascii_digit());
+        if !l.trim().is_empty() && !l.trim_start().starts_with('#') && !next.is_empty() && !starts_block {
+            out.push_str("  ");
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// A line written escaped because its text only looks like a marker: that text.
 pub fn unescaped(line: &str) -> Option<&str> {
     line.trim_start().strip_prefix('\\').filter(|r| looks_like_marker(r))
@@ -415,5 +434,17 @@ fn list_number(n: usize, level: usize) -> String {
             }
             out
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn breaks_lines_for_previewers() {
+        let md = "# Standup\nYesterday: retries\nToday: search\n- one\n  - nested\n- two\nafter\n\n![a.jpg](attachments/a.jpg)\nAll good\n1. first\n2. second";
+        let want = "# Standup\nYesterday: retries  \nToday: search\n- one\n  - nested\n- two  \nafter\n\n![a.jpg](attachments/a.jpg)  \nAll good  \n1. first  \n2. second";
+        assert_eq!(hard_breaks(md), want);
     }
 }

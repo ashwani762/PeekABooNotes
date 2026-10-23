@@ -196,6 +196,8 @@ pub fn load_markdown(h: HWND, md: &str) {
     let mut lines: Vec<(Kind, i32, String, Runs, Links)> = Vec::new();
     // A file's final newline (and any blank lines after the text) is not an empty item.
     for raw in md.replace("\r\n", "\n").trim_end().split('\n') {
+        // Trailing spaces only ever mean a line break (`hard_breaks`), which a line is anyway.
+        let raw = raw.trim_end();
         let l = raw.trim_start();
         // Two spaces (or a tab) per nesting level, as `to_markdown` writes them.
         let indent: usize = raw[..raw.len() - l.len()].chars().map(|c| if c == '\t' { 2 } else { 1 }).sum();

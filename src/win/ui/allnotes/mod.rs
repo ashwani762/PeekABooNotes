@@ -71,8 +71,7 @@ enum Hit {
     Max,
     Close,
     New,
-    Import,
-    Export,
+    Share,
     Settings,
     Search,
     Segment(usize),
@@ -454,8 +453,7 @@ enum Action {
     None,
     Edit,
     New,
-    Import,
-    Export(Vec<u64>),
+    Share(Vec<u64>),
     Open(u64, Option<(RECT, f32)>),
     Archive(Vec<u64>, bool),
     Delete(Vec<u64>),
@@ -471,7 +469,7 @@ enum Action {
 }
 
 fn perform(hwnd: HWND, a: Action) {
-    if matches!(a, Action::Open(..) | Action::Archive(..) | Action::Delete(_) | Action::Color(..) | Action::Export(_) | Action::Menu(_)) {
+    if matches!(a, Action::Open(..) | Action::Archive(..) | Action::Delete(_) | Action::Color(..) | Action::Share(_)) {
         close_editor();
     }
     perform_inner(hwnd, a);
@@ -488,10 +486,8 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 }
         }
         Action::New => new_here(),
-        Action::Import => {
-            let _ = app::import(hwnd);
-        }
         Action::Settings => crate::win::ui::settings::show(),
+        Action::Share(ids) => app::share(hwnd, &ids),
         Action::Reorder(ids) => {
             app::store_mut(|s| s.reorder(&ids));
             app::save();
@@ -509,9 +505,6 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 unsafe { SetWindowTextW(s, wide("").as_ptr()) };
             }
         }
-        Action::Export(ids) => {
-            let _ = app::export(hwnd, &ids);
-        }
         Action::Open(id, from) => {
             if from.is_some() {
                 app::open_note_from(id, from)
@@ -526,7 +519,8 @@ fn perform_inner(hwnd: HWND, a: Action) {
             }
         }
         Action::Color(id, c) => app::note_command(id, app::NC_COLOR0 + c as u32),
-        Action::Menu(id) => app::note_menu_at_cursor(id, hwnd),
+        // The editor stays while the menu is open, and is saved and closed for its command.
+        Action::Menu(id) => app::note_menu_at_cursor(id, hwnd, close_editor),
         Action::Close => unsafe {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         },
@@ -1011,6 +1005,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     }
                     _ => Action::None,
                 });
+                // The newly selected note's editor under the menu, not its plain preview.
+                sync_editor();
                 paint_now(hwnd);
                 if let Some(a) = action {
                     perform(hwnd, a);

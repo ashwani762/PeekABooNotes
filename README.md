@@ -41,6 +41,7 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 - Search that forgives: words in any order, word starts ("rel" finds "release"), letters in runs ("relchk"), small typos and accents. Best matches first, with the matches marked and a line from the body when that is where it matched.
 - Switch between Notes, Archive and All.
 - Multi-select, drag to reorder, and edit inline. The + here adds a note right in the list, ready to type.
+- **Share** sends the selected notes as one zip, through the Windows share sheet (mail, Teams, Nearby Sharing and the rest): a Markdown file per note, with its pictures and files.
 - A note already open in its own window shows **Open Here** to bring it back.
 - Archive instead of deleting. Delete comes with a 10-second Undo that waits while you point at it.
 
@@ -135,6 +136,8 @@ Files in `lang` are read at startup and override the built-in strings, so you ca
 - **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)".
 - **Import** reads `.md` and `.txt` files and turns their Markdown into real formatting: headings, `**bold**`, `_italic_`, `~~strike~~`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists and `[links](https://...)`.
 - **Attachments travel too.** Export copies a note's pictures and files into an `attachments` folder beside the Markdown and links them relatively (`![photo.jpg](attachments/photo.jpg)`). Import copies linked local files back in as attachments.
+- **Readable anywhere.** The files are plain UTF-8 text that reads as it is in Notepad, and render in VS Code or any Markdown viewer with their pictures and files. Lines end in Markdown's line break (two spaces) so viewers keep them apart as the note has them.
+- Export and import are in Settings, under Data; Share, in All Notes, zips the same files for the notes you select.
 
 A round trip keeps nesting, emphasis, links, attachments and ticked items intact.
 

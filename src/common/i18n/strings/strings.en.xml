@@ -103,6 +103,10 @@
         <item quantity="one">%d selected</item>
         <item quantity="other">%d selected</item>
     </plurals>
+    <plurals name="tip_share">
+        <item quantity="one">Share This Note</item>
+        <item quantity="other">Share These %d Notes</item>
+    </plurals>
     <plurals name="notes_selected">
         <item quantity="one">%d note selected</item>
         <item quantity="other">%d notes selected</item>
@@ -262,11 +266,6 @@
     <string name="tip_color">Change Colour</string>
     <string name="tip_more">More</string>
     <string name="tip_close">Close</string>
-    <string name="tip_import">Import Notes</string>
-    <plurals name="tip_export">
-        <item quantity="one">Export This Note</item>
-        <item quantity="other">Export These %d Notes</item>
-    </plurals>
     <string name="settings_group_assistants">AI Assistants</string>
     <string name="settings_mcp">Allow assistants (MCP)</string>
     <string name="settings_mcp_sub">Lets ChatGPT, Claude and other AI apps read and write your notes</string>
