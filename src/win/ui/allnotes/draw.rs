@@ -177,9 +177,27 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         if dcy - d / 2.0 > top {
             c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(r.color).accent, la, 1.0, 0.0);
         }
+        // Search matches in the title, marked like a highlighter pen.
+        if !r.hits.is_empty() {
+            let mark = if selected { (theme::PAPER_TEXT, 0.14) } else if dark { (0xFFD60A, 0.32) } else { (0xFFCC00, 0.42) };
+            let byte = |ci: usize| r.title.char_indices().nth(ci).map_or(r.title.len(), |(b, _)| b);
+            let (asc, desc) = (f.row_title.ascent as f32, f.row_title.descent as f32);
+            for &(a, b) in &r.hits {
+                let x0 = tx + f.row_title.measure(&r.title[..byte(a)]).0;
+                let x1 = (x0 + f.row_title.measure(&r.title[byte(a)..byte(b)]).0).min(right);
+                if x0 < x1 {
+                    let pad = 1.5 * s;
+                    let hl = Shape::new(x0 as f32 - pad, tb as f32 - asc + 1.0 * s, (x1 - x0) as f32 + 2.0 * pad, asc + desc - 1.0 * s, 4.0 * s);
+                    c.shape(&hl, mark.0, mark.1 * la, 1.0, 0.0);
+                }
+            }
+        }
         c.line_ct(&r.title, &f.row_title, tx, tb, right - tx, clip, fade(tc), DT_LEFT);
-        // Second line: when it was edited (and where it lives, when that isn't the deck).
-        let time = if r.archived && l.mode == 2 {
+        // Second line: where the search matched, when the title doesn't show it;
+        // otherwise when it was edited (and where it lives, when that isn't the deck).
+        let time = if let Some(snip) = r.snippet.as_ref().filter(|_| !l.query.trim().is_empty()) {
+            snip.clone()
+        } else if r.archived && l.mode == 2 {
             t!("row_archived", r.time)
         } else if r.off_deck && !r.archived {
             t!("row_off_deck", r.time)

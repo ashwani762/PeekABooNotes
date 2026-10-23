@@ -19,7 +19,8 @@ pub(super) fn set_mode(l: &mut Lib, mode: usize) {
 }
 
 pub(super) fn rebuild(l: &mut Lib) {
-    let q = l.query.to_lowercase();
+    let q = crate::common::search::Query::new(&l.query);
+    let searching = !l.query.trim().is_empty();
     let mode = l.mode;
     let mut rows: Vec<Row> = app::store(|s| {
         s.d.notes
@@ -29,25 +30,41 @@ pub(super) fn rebuild(l: &mut Lib) {
                 2 => true,
                 _ => !n.archived,
             })
-            .filter(|n| q.is_empty() || n.text.to_lowercase().contains(&q))
-            .map(|n| {
-                let body = body_of(&n.text);
-                Row {
+            .filter_map(|n| {
+                let title = title_of(&n.text);
+                let m = if searching {
+                    // Everything after the title line, list markers aside.
+                    let rest: Vec<&str> = n.text.lines().skip_while(|l| strip_marker(l).trim().is_empty()).skip(1).map(strip_marker).collect();
+                    let rest = rest.join("
+");
+                    let m = q.score(&title, &rest)?;
+                    let snippet = m.body_at.map(|at| crate::common::search::snippet(&rest, at, 80));
+                    (m.score, m.title, snippet)
+                } else {
+                    (0, Vec::new(), None)
+                };
+                Some(Row {
                     id: n.id,
-                    title: title_of(&n.text),
+                    title,
                     off_deck: n.off_deck,
                     order: n.order,
-                    body,
+                    body: body_of(&n.text),
                     time: relative_time(n.updated),
                     created: n.created,
                     updated: n.updated,
                     color: n.color,
                     archived: n.archived,
-                }
+                    score: m.0,
+                    hits: m.1,
+                    snippet: m.2,
+                })
             })
             .collect()
     });
-    if mode == 0 {
+    if searching && !editor_focused(l) {
+        // Best matches first; among equals, the most recently edited.
+        rows.sort_by(|a, b| b.score.cmp(&a.score).then(b.updated.cmp(&a.updated)));
+    } else if mode == 0 {
         // Notes: the deck's own order, which you arrange by dragging rows here.
         rows.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
     } else if editor_focused(l) {

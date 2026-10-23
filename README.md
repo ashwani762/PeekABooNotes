@@ -36,7 +36,8 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
   <img src="docs/screenshots/all-notes.png" alt="The All Notes window: the note list on the left and the selected note open for editing on the right." width="85%">
 </p>
 
-- Search, and switch between Notes, Archive and All.
+- Search that forgives: words in any order, word starts ("rel" finds "release"), letters in runs ("relchk"), small typos and accents. Best matches first, with the matches marked and a line from the body when that is where it matched.
+- Switch between Notes, Archive and All.
 - Multi-select, drag to reorder, and edit inline. The + here adds a note right in the list, ready to type.
 - A note already open in its own window shows **Open Here** to bring it back.
 - Archive instead of deleting. Delete comes with a 10-second Undo that waits while you point at it.

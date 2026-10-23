@@ -26,7 +26,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
-use crate::common::store::{body_of, title_of};
+use crate::common::store::{body_of, strip_marker, title_of};
 use crate::win::theme::{self, motion};
 use crate::common::i18n::time::{edited_time, relative_time};
 use crate::win::util::{WM_MOUSELEAVE, cref, from_wide, key_down, mix, rect, wide, x_of, y_of};
@@ -96,6 +96,11 @@ struct Row {
     updated: i64,
     color: u8,
     archived: bool,
+    /// While searching: how well it matched, the matched parts of the title (char
+    /// ranges), and a piece of the body around a match the title doesn't show.
+    score: i32,
+    hits: Vec<(usize, usize)>,
+    snippet: Option<String>,
 }
 
 struct Pal {
