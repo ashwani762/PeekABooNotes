@@ -70,6 +70,7 @@ pub fn ask(owner: HWND, at: POINT, current: &str) -> Option<String> {
     let x = at.x.clamp(work.left + 8, (work.right - w - 8).max(work.left));
     // Below the text, or above it when there's no room.
     let y = if at.y + h > work.bottom - 8 { at.y - h - (30.0 * s) as i32 } else { at.y };
+    let y = y.clamp(work.top + 8, (work.bottom - h - 8).max(work.top));
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
     let hwnd = unsafe {
         CreateWindowExW(WS_EX_TOOLWINDOW, wide(CLASS).as_ptr(), wide("Link").as_ptr(), WS_POPUP | WS_CAPTION, x, y, w, h, owner, null_mut(), app::hinst(), null_mut())

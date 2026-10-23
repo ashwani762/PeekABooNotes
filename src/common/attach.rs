@@ -27,7 +27,13 @@ pub fn free_name(dir: &Path, name: &str) -> String {
     let p = Path::new(name);
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
     let ext = p.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
-    (2..).map(|n| format!("{stem} {n}{ext}")).find(|n| !dir.join(n).exists()).unwrap()
+    // "Plan (2).txt" taken goes on to "Plan (3).txt", not "Plan (2) (2).txt", as Windows names copies.
+    let stem = stem
+        .strip_suffix(')')
+        .and_then(|s| s.rsplit_once(" ("))
+        .filter(|(_, n)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        .map_or(stem, |(base, _)| base);
+    (2..).map(|n| format!("{stem} ({n}){ext}")).find(|n| !dir.join(n).exists()).unwrap()
 }
 
 /// Copy `src` into the attachments folder; returns the name it got there.
@@ -158,8 +164,11 @@ mod tests {
         let dir = std::env::temp_dir().join("peekaboo-attach-test");
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("a.txt"), "x").unwrap();
-        std::fs::write(dir.join("a 2.txt"), "x").unwrap();
-        assert_eq!(free_name(&dir, "a.txt"), "a 3.txt");
+        std::fs::write(dir.join("a (2).txt"), "x").unwrap();
+        std::fs::write(dir.join("Q3 plan 2.txt"), "x").unwrap();
+        assert_eq!(free_name(&dir, "a.txt"), "a (3).txt");
+        assert_eq!(free_name(&dir, "a (2).txt"), "a (3).txt");
+        assert_eq!(free_name(&dir, "Q3 plan 2.txt"), "Q3 plan 2 (2).txt");
         assert_eq!(free_name(&dir, "b.txt"), "b.txt");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(is_image("Photo.JPG") && !is_image("plan.pdf"));

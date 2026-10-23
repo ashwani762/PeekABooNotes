@@ -587,6 +587,7 @@ fn apply_theme(h: HWND) {
     rich::set_box_colors(st.edit, bg, theme::paper_subtext(color, dark), theme::PAPER_TEXT);
     crate::win::editor::checks::set_style(st.edit, theme::paper_ink(color, dark), bg, st.s);
     rich::style_boxes(st.edit);
+    rich::color_named_links(st.edit);
     st.loading = was;
     if !st.embedded {
         theme::set_border_color(h, mix(theme::color(color).ink, bg, 0.78));
@@ -790,6 +791,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     let was = st.loading;
                     st.loading = true;
                     rich::style_title(st.edit);
+                    rich::color_named_links(st.edit);
                     rich::fix_caret_indent(st.edit);
                     if rich::has_selectors(&rich::text(st.edit)) {
                         unselect(h);

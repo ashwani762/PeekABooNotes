@@ -46,6 +46,42 @@ pub fn set_link(h: HWND, a: i32, b: i32, url: &str) -> bool {
     unsafe { r.SetURL(&BSTR::from(format!("\"{url}\""))).is_ok() }
 }
 
+/// The blue RichEdit draws the addresses it spots by itself in. It gives no say in that
+/// colour, while named links (Ctrl+K) take theirs from the text: so they get this one.
+const LINK_BLUE: u32 = 0x0000FF;
+
+/// Named links in the same blue as typed addresses: one look for every link. Kept out of
+/// the undo history (a colour moves no text), so Ctrl+Z steps over it.
+pub fn color_named_links(h: HWND) {
+    use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
+    let t = text(h);
+    let links = instructions(&t, 0, t.len());
+    if links.is_empty() {
+        return;
+    }
+    let Some(d) = doc(h) else { return };
+    let want = crate::win::util::cref(LINK_BLUE) as i32;
+    let mut suspended = false;
+    for (_, name, _) in links {
+        // A picture's or file's link has a zero-width name: nothing to colour.
+        if t.get(name) == Some(&(ITEM_LINK_NAME as u16)) {
+            continue;
+        }
+        let Some((_, end, _)) = link_at(h, name as i32) else { continue };
+        let Some(f) = range(h, name as i32, end).and_then(|r| unsafe { r.GetFont().ok() }) else { continue };
+        if unsafe { f.GetForeColor() }.is_ok_and(|c| c != want) {
+            if !suspended {
+                let _ = unsafe { d.Undo(tomSuspend.0) };
+                suspended = true;
+            }
+            let _ = unsafe { f.SetForeColor(want) };
+        }
+    }
+    if suspended {
+        let _ = unsafe { d.Undo(tomResume.0) };
+    }
+}
+
 /// Plain text again.
 pub fn remove_link(h: HWND, a: i32, b: i32) {
     if let Some(r) = range(h, a, b) {
