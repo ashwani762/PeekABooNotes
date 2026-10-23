@@ -130,6 +130,11 @@ pub fn style_title(h: HWND) {
     if end == 0 || t[..end].iter().any(|&c| is_task(c)) {
         return;
     }
+    let (face, bold) = title_face();
+    // Already the title: leave the selection be, so typing stays one undo step.
+    if font_is(h, 0, end as i32, face, title_size()) {
+        return;
+    }
     let (a, b) = sel(h);
     // Moving the selection forgets a pending caret format (Ctrl+B, then type), so keep it.
     let pending = (a == b).then(|| char_format(h, SCF_SELECTION));
@@ -137,7 +142,6 @@ pub fn style_title(h: HWND) {
     set_sel(h, 0, end as i32);
     let cf = char_format(h, SCF_SELECTION);
     let want = CFM_FACE | CFM_SIZE;
-    let (face, bold) = title_face();
     let styled = cf.mask & want == want && cf.height == title_size() && face_is(&cf, face);
     if !styled && numbering(h) == 0 {
         let mut n = CharFormat2::new();

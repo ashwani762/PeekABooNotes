@@ -31,6 +31,15 @@ pub fn size_at(h: HWND, cp: i32) -> Option<f32> {
     range(h, cp, cp + 1).and_then(|r| unsafe { r.GetFont().ok()?.GetSize().ok() })
 }
 
+/// Whether all of `a..b` is in typeface `face` at `twips`, without touching the selection
+/// (moving it would end RichEdit's current undo step, so each typed letter became one).
+pub fn font_is(h: HWND, a: i32, b: i32, face: &str, twips: i32) -> bool {
+    let Some(f) = range(h, a, b).and_then(|r| unsafe { r.GetFont().ok() }) else { return false };
+    let size = unsafe { f.GetSize() }.unwrap_or(0.0);
+    let name = unsafe { f.GetName() }.map(|n| n.to_string()).unwrap_or_default();
+    (size * 20.0 - twips as f32).abs() < 1.0 && name.eq_ignore_ascii_case(face)
+}
+
 /// Make `a..b` a link to `url`.
 pub fn set_link(h: HWND, a: i32, b: i32, url: &str) -> bool {
     let Some(r) = range(h, a, b) else { return false };
