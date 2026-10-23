@@ -92,8 +92,12 @@ foreach ($d in @($layout, $priSrc)) {
     New-Item -ItemType Directory $d | Out-Null
 }
 Copy-Item $exe $layout
+# The MCP bridge assistants start; the manifest gives it a command on PATH.
+$bridge = Join-Path $ExeDir 'peekaboo-mcp.exe'
+if (-not (Test-Path $bridge)) { Fail "$bridge not found" }
+Copy-Item $bridge $layout
 $lang = Join-Path $ExeDir 'lang'
-if (-not (Test-Path $lang)) { $lang = Join-Path $root 'src\i18n\strings' }
+if (-not (Test-Path $lang)) { $lang = Join-Path $root 'src\common\i18n\strings' }
 New-Item -ItemType Directory (Join-Path $layout 'lang') | Out-Null
 Copy-Item (Join-Path $lang 'strings.*.xml') (Join-Path $layout 'lang')
 Copy-Item (Join-Path $src 'Assets') $layout -Recurse

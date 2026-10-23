@@ -210,7 +210,7 @@ const STARTUP_TASK: &str = "PeekABooNotesStartup";
 
 /// Installed from an MSIX package. There the Run key is virtualised per package (Windows
 /// never reads it), so start-with-Windows goes through the manifest's startup task.
-fn packaged() -> bool {
+pub(super) fn packaged() -> bool {
     use windows_sys::Win32::Foundation::APPMODEL_ERROR_NO_PACKAGE;
     use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
     static P: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

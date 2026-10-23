@@ -8,7 +8,9 @@
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap desktop rescap">
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  IgnorableNamespaces="uap desktop rescap uap3 desktop4">
 
   <Identity
     Name="PeekABooNotes"
@@ -44,6 +46,24 @@
         <desktop:Extension Category="windows.startupTask" Executable="peekaboo-notes.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="PeekABooNotesStartup" Enabled="false" DisplayName="PeekABoo Notes" />
         </desktop:Extension>
+      </Extensions>
+    </Application>
+    <!-- The MCP bridge for AI assistants: a console program with a command on PATH
+         (peekaboo-mcp.exe), since the package's own folder moves with every version. -->
+    <Application Id="PeekABooMcp" Executable="peekaboo-mcp.exe" EntryPoint="Windows.FullTrustApplication" desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
+      <uap:VisualElements
+        DisplayName="PeekABoo Notes MCP"
+        Description="Lets AI assistants use PeekABoo Notes"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="peekaboo-mcp.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="peekaboo-mcp.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
       </Extensions>
     </Application>
   </Applications>

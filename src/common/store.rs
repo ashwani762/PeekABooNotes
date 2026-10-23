@@ -117,6 +117,9 @@ pub struct Settings {
     /// Unpinned notes stay open when you click away (by default they fly back to the deck).
     #[serde(default)]
     pub keep_open: bool,
+    /// AI assistants may use the notes through MCP (off until turned on).
+    #[serde(default)]
+    pub mcp: bool,
 }
 
 fn default_note_size() -> u8 {
@@ -149,6 +152,7 @@ impl Default for Settings {
             last_note: None,
             export_dir: String::new(),
             keep_open: false,
+            mcp: false,
         }
     }
 }

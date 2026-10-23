@@ -220,7 +220,7 @@
     <plurals name="data_archived">
         <item quantity="other">アーカイブ %d 件</item>
     </plurals>
-    <string name="settings_data_footer">%1$s · %2$s · 入力中に自動で保存されます。</string>
+    <string name="settings_data_footer">%1$s · %2$s</string>
     <string name="settings_delete_all">すべてのメモを削除</string>
     <string name="settings_delete_all_sub">アーカイブ済みのメモも含みます</string>
     <string name="button_delete_all">すべて削除</string>
@@ -230,7 +230,6 @@
     </plurals>
     <string name="dialog_delete_all_ok">すべて削除</string>
     <string name="settings_notes_folder_portable">メモのフォルダ · ポータブル</string>
-    <string name="settings_portable_note">このコピーはポータブル版です。メモは「ドキュメント」ではなく、アプリと同じ場所に保存されます。</string>
 
     <!-- Tooltips on the icon buttons -->
     <string name="tip_done">完了にしてアーカイブ</string>
@@ -241,5 +240,15 @@
     <string name="tip_import">メモを読み込む</string>
     <plurals name="tip_export">
         <item quantity="other">%d 件のメモを書き出す</item>
+    </plurals>
+    <string name="settings_group_assistants">AI アシスタント</string>
+    <string name="settings_mcp">アシスタントを許可 (MCP)</string>
+    <string name="settings_mcp_sub">ChatGPT や Claude などの AI アプリがメモを読み書きできます</string>
+    <string name="settings_mcp_setup">アシスタントを接続</string>
+    <string name="settings_mcp_setup_sub">アプリを選んで構成をコピー</string>
+    <string name="button_copy_setup">構成をコピー</string>
+    <string name="settings_mcp_footer">アシスタントはメモをアーカイブできますが、削除はできません。</string>
+    <plurals name="result_copied">
+        <item quantity="other">コピーしました</item>
     </plurals>
 </resources>

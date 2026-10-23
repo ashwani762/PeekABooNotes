@@ -239,7 +239,7 @@
         <item quantity="one">%d archived</item>
         <item quantity="other">%d archived</item>
     </plurals>
-    <string name="settings_data_footer">%1$s · %2$s · Saved as you type.</string>
+    <string name="settings_data_footer">%1$s · %2$s</string>
     <string name="settings_delete_all">Delete all notes</string>
     <string name="settings_delete_all_sub">Every note, archived ones too</string>
     <string name="button_delete_all">Delete All</string>
@@ -250,7 +250,6 @@
     </plurals>
     <string name="dialog_delete_all_ok">Delete All</string>
     <string name="settings_notes_folder_portable">Notes folder · Portable</string>
-    <string name="settings_portable_note">This copy is portable: its notes stay beside the app, not in Documents.</string>
 
     <!-- Tooltips on the icon buttons -->
     <string name="tip_done">Mark as Done and Archive</string>
@@ -262,5 +261,16 @@
     <plurals name="tip_export">
         <item quantity="one">Export This Note</item>
         <item quantity="other">Export These %d Notes</item>
+    </plurals>
+    <string name="settings_group_assistants">AI Assistants</string>
+    <string name="settings_mcp">Allow assistants (MCP)</string>
+    <string name="settings_mcp_sub">Lets ChatGPT, Claude and other AI apps read and write your notes</string>
+    <string name="settings_mcp_setup">Connect an assistant</string>
+    <string name="settings_mcp_setup_sub">Choose your app to copy its setup</string>
+    <string name="button_copy_setup">Copy Setup</string>
+    <string name="settings_mcp_footer">Assistants can archive notes but never delete them.</string>
+    <plurals name="result_copied">
+        <item quantity="one">Copied</item>
+        <item quantity="other">Copied</item>
     </plurals>
 </resources>

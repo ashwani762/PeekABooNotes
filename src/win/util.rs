@@ -9,6 +9,33 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 
 pub use crate::common::util::*;
 
+/// Put `text` on the clipboard. False if it couldn't.
+pub fn set_clipboard_text(text: &str) -> bool {
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+    const CF_UNICODETEXT: u32 = 13;
+    let w = wide(text);
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return false;
+        }
+        EmptyClipboard();
+        let h = GlobalAlloc(GMEM_MOVEABLE, w.len() * 2);
+        let mut ok = false;
+        if !h.is_null() {
+            let p = GlobalLock(h) as *mut u16;
+            if !p.is_null() {
+                std::ptr::copy_nonoverlapping(w.as_ptr(), p, w.len());
+                GlobalUnlock(h);
+                // The clipboard owns the memory once this succeeds.
+                ok = !SetClipboardData(CF_UNICODETEXT, h as _).is_null();
+            }
+        }
+        CloseClipboard();
+        ok
+    }
+}
+
 /// The clipboard's text, if it holds any.
 pub fn clipboard_text() -> Option<String> {
     use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};

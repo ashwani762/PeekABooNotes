@@ -229,7 +229,7 @@
         <item quantity="one">%d संग्रहित</item>
         <item quantity="other">%d संग्रहित</item>
     </plurals>
-    <string name="settings_data_footer">%1$s · %2$s · लिखते समय सहेजा जाता है।</string>
+    <string name="settings_data_footer">%1$s · %2$s</string>
     <string name="settings_delete_all">सभी नोट्स हटाएँ</string>
     <string name="settings_delete_all_sub">हर नोट, संग्रहित नोट्स भी</string>
     <string name="button_delete_all">सभी हटाएँ</string>
@@ -240,7 +240,6 @@
     </plurals>
     <string name="dialog_delete_all_ok">सभी हटाएँ</string>
     <string name="settings_notes_folder_portable">नोट्स फ़ोल्डर · पोर्टेबल</string>
-    <string name="settings_portable_note">यह कॉपी पोर्टेबल है: नोट्स ऐप के पास ही रहते हैं, Documents में नहीं।</string>
 
     <!-- Tooltips on the icon buttons -->
     <string name="tip_done">पूरा हुआ, संग्रह में भेजें</string>
@@ -252,5 +251,16 @@
     <plurals name="tip_export">
         <item quantity="one">यह नोट निर्यात करें</item>
         <item quantity="other">ये %d नोट्स निर्यात करें</item>
+    </plurals>
+    <string name="settings_group_assistants">AI सहायक</string>
+    <string name="settings_mcp">सहायकों को अनुमति दें (MCP)</string>
+    <string name="settings_mcp_sub">ChatGPT, Claude और दूसरे AI ऐप आपके नोट्स पढ़ और लिख सकते हैं</string>
+    <string name="settings_mcp_setup">सहायक जोड़ें</string>
+    <string name="settings_mcp_setup_sub">अपना ऐप चुनें और उसका सेटअप कॉपी करें</string>
+    <string name="button_copy_setup">सेटअप कॉपी करें</string>
+    <string name="settings_mcp_footer">सहायक नोट्स को संग्रह में रख सकते हैं, पर कभी हटा नहीं सकते।</string>
+    <plurals name="result_copied">
+        <item quantity="one">कॉपी हो गया</item>
+        <item quantity="other">कॉपी हो गया</item>
     </plurals>
 </resources>

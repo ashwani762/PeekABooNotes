@@ -277,6 +277,11 @@ fn with<R>(f: impl FnOnce(&mut Lib) -> R) -> Option<R> {
     LIB.with(|l| l.try_borrow_mut().ok().and_then(|mut l| l.as_mut().map(f)))
 }
 
+/// The inline editor, when it's showing note `id`.
+pub fn editor_for(id: u64) -> Option<HWND> {
+    with(|l| (l.editor_id == id && !l.editor.is_null()).then_some(l.editor)).flatten()
+}
+
 pub fn hwnd() -> HWND {
     with(|l| l.hwnd).unwrap_or(null_mut())
 }

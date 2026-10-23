@@ -81,6 +81,8 @@ enum Key {
     Import,
     Export,
     DeleteAll,
+    Mcp,
+    McpSetup,
 }
 
 enum Ctl {
@@ -275,6 +277,7 @@ fn value(w: &Win, k: Key) -> usize {
             Key::NewColor => st.new_color.and_then(|c| theme::ORDER.iter().position(|&o| o == c)).map_or(0, |p| p + 1),
             Key::ReduceMotion => st.reduce_motion as usize,
             Key::HideUnpinned => !st.keep_open as usize,
+            Key::Mcp => st.mcp as usize,
             Key::ShowDeck => !st.deck_hidden as usize,
             Key::Edge => !st.edge_left as usize,
             Key::Cards => CARDS.iter().position(|&c| c == st.deck_max).unwrap_or(1),
@@ -383,6 +386,21 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         Key::Import => show_result(hwnd, k, app::import(hwnd), "result_imported"),
         Key::Export => show_result(hwnd, k, app::export_all(hwnd), "result_exported"),
         Key::DeleteAll => app::delete_all(hwnd),
+        Key::Mcp => {
+            app::update_settings(|s| s.mcp = v == 1);
+            app::set_mcp_enabled(v == 1);
+        }
+        Key::McpSetup => {
+            // Which app? Each wants its own form of the same setup.
+            let items = app::MCP_CLIENTS.iter().enumerate().map(|(i, name)| crate::win::ui::menu::action(i as u32 + 1, name, "", "")).collect();
+            let mut p = POINT { x: 0, y: 0 };
+            unsafe { GetCursorPos(&mut p) };
+            let choice = app::popup(items, p.x, p.y, hwnd);
+            if choice > 0 {
+                let copied = crate::win::util::set_clipboard_text(&app::mcp_setup_for(choice as usize - 1));
+                show_result(hwnd, k, Some(if copied { Ok(1) } else { Err(()) }), "result_copied");
+            }
+        }
     }
 }
 

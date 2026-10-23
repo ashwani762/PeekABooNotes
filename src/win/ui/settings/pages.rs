@@ -88,11 +88,8 @@ pub(super) fn page(i: usize) -> Vec<Group> {
             // A portable copy says so: its notes aren't in Documents, where people look.
             let path = data_dir().to_string_lossy().into_owned();
             let counts = t!("settings_data_footer", tn!("notes_count", n), tn!("data_archived", archived));
-            let (folder_label, footer) = if crate::win::util::portable() {
-                (t!("settings_notes_folder_portable"), format!("{counts} {}", t!("settings_portable_note")))
-            } else {
-                (t!("settings_notes_folder"), counts)
-            };
+            // The folder row already says when the copy is portable.
+            let (folder_label, footer) = if crate::win::util::portable() { (t!("settings_notes_folder_portable"), counts) } else { (t!("settings_notes_folder"), counts) };
             vec![
                 Group {
                     header: None,
@@ -102,6 +99,14 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                         row_sub(Key::Export, t!("settings_export_all"), t!("settings_export_sub"), Ctl::Button(t!("button_export"))),
                     ],
                     footer: Some(footer),
+                },
+                Group {
+                    header: Some(t!("settings_group_assistants")),
+                    rows: vec![
+                        row_sub(Key::Mcp, t!("settings_mcp"), t!("settings_mcp_sub"), Ctl::Toggle),
+                        row_sub(Key::McpSetup, t!("settings_mcp_setup"), t!("settings_mcp_setup_sub"), Ctl::Button(t!("button_copy_setup"))),
+                    ],
+                    footer: Some(t!("settings_mcp_footer").into()),
                 },
                 // Destructive, so on its own at the end.
                 Group {

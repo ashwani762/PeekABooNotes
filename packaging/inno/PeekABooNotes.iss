@@ -72,6 +72,8 @@ Name: "startup"; Description: "{cm:StartWithWindows}"
 
 [Files]
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+; The MCP bridge assistants start (Settings > Data > AI Assistants).
+Source: "{#SourceDir}\peekaboo-mcp.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\lang\*.xml"; DestDir: "{app}\lang"; Flags: ignoreversion
 Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion

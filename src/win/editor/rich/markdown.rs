@@ -54,9 +54,10 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
             out.push_str(&md);
         } else if inline {
             let body = inline_md(h, &t, body_start, end);
-            // A ticked item's strikethrough is how it looks, not part of its text.
+            // A ticked item's strikethrough is how it looks, not part of its text (also
+            // inside other marks: **~~bread~~**).
             let done = task && t[start] == CHECKED;
-            out.push_str(if done { body.strip_prefix("~~").and_then(|b| b.strip_suffix("~~")).unwrap_or(&body) } else { &body });
+            out.push_str(&if done { body.replace("~~", "") } else { body });
         } else {
             out.push_str(&visible(&t, body_start, end));
         }

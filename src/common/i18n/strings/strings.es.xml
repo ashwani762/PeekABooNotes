@@ -229,7 +229,7 @@
         <item quantity="one">%d archivada</item>
         <item quantity="other">%d archivadas</item>
     </plurals>
-    <string name="settings_data_footer">%1$s · %2$s · Se guarda mientras escribes.</string>
+    <string name="settings_data_footer">%1$s · %2$s</string>
     <string name="settings_delete_all">Eliminar todas las notas</string>
     <string name="settings_delete_all_sub">Todas, también las archivadas</string>
     <string name="button_delete_all">Eliminar todo</string>
@@ -240,7 +240,6 @@
     </plurals>
     <string name="dialog_delete_all_ok">Eliminar todo</string>
     <string name="settings_notes_folder_portable">Carpeta de notas · Portátil</string>
-    <string name="settings_portable_note">Esta copia es portátil: las notas se guardan junto a la app, no en Documentos.</string>
 
     <!-- Tooltips on the icon buttons -->
     <string name="tip_done">Hecha: mover al archivo</string>
@@ -252,5 +251,16 @@
     <plurals name="tip_export">
         <item quantity="one">Exportar esta nota</item>
         <item quantity="other">Exportar estas %d notas</item>
+    </plurals>
+    <string name="settings_group_assistants">Asistentes de IA</string>
+    <string name="settings_mcp">Permitir asistentes (MCP)</string>
+    <string name="settings_mcp_sub">ChatGPT, Claude y otras apps de IA pueden leer y escribir tus notas</string>
+    <string name="settings_mcp_setup">Conectar un asistente</string>
+    <string name="settings_mcp_setup_sub">Elige tu app para copiar su configuración</string>
+    <string name="button_copy_setup">Copiar configuración</string>
+    <string name="settings_mcp_footer">Los asistentes pueden archivar notas, pero nunca eliminarlas.</string>
+    <plurals name="result_copied">
+        <item quantity="one">Copiado</item>
+        <item quantity="other">Copiado</item>
     </plurals>
 </resources>

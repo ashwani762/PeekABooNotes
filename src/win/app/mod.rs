@@ -25,6 +25,7 @@ use crate::common::log;
 use crate::win::util::{data_dir, exe_path, file_safe, wide};
 use crate::win::{ui::{allnotes, deck, menu, note, settings, toast}, render::gfx, editor::rich, theme};
 
+mod mcp;
 mod notes;
 mod menus;
 mod files;
@@ -33,6 +34,7 @@ pub use notes::*;
 pub use menus::*;
 pub use files::*;
 pub use prefs::*;
+pub use mcp::{CLIENTS as MCP_CLIENTS, set_enabled as set_mcp_enabled, setup_for as mcp_setup_for};
 
 // Note commands (menus, shortcuts).
 pub const NC_OPEN: u32 = 200;
@@ -238,6 +240,10 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
             _ => {}
         },
         WM_ACTIVATE_OTHER => show_all_notes(false),
+        mcp::WM_MCP => {
+            mcp::on_message(wp, lp);
+            return 0;
+        }
         WM_SETTINGCHANGE => {
             apply_motion();
             apply_theme();
@@ -363,6 +369,9 @@ pub fn run() -> i32 {
             // If another app owns a combination we simply go without it.
             RegisterHotKey(main, id as i32, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, key as u32);
         }
+
+        // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
+        mcp::init(main);
 
         while pump_once() {}
         log::shutdown("quit");

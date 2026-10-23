@@ -13,6 +13,7 @@ pub mod anim;
 pub mod attach;
 pub mod emoji;
 pub mod log;
+pub mod mcp;
 pub mod search;
 pub mod store;
 pub mod theme;

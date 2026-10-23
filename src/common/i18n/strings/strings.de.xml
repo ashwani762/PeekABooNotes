@@ -229,7 +229,7 @@
         <item quantity="one">%d archiviert</item>
         <item quantity="other">%d archiviert</item>
     </plurals>
-    <string name="settings_data_footer">%1$s · %2$s · Wird beim Tippen gespeichert.</string>
+    <string name="settings_data_footer">%1$s · %2$s</string>
     <string name="settings_delete_all">Alle Notizen löschen</string>
     <string name="settings_delete_all_sub">Jede Notiz, auch archivierte</string>
     <string name="button_delete_all">Alle löschen</string>
@@ -240,7 +240,6 @@
     </plurals>
     <string name="dialog_delete_all_ok">Alle löschen</string>
     <string name="settings_notes_folder_portable">Notizordner · Portabel</string>
-    <string name="settings_portable_note">Diese Kopie ist portabel: Die Notizen liegen neben der App, nicht unter „Dokumente“.</string>
 
     <!-- Tooltips on the icon buttons -->
     <string name="tip_done">Erledigt, ins Archiv</string>
@@ -252,5 +251,16 @@
     <plurals name="tip_export">
         <item quantity="one">Diese Notiz exportieren</item>
         <item quantity="other">Diese %d Notizen exportieren</item>
+    </plurals>
+    <string name="settings_group_assistants">KI-Assistenten</string>
+    <string name="settings_mcp">Assistenten erlauben (MCP)</string>
+    <string name="settings_mcp_sub">ChatGPT, Claude und andere KI-Apps dürfen Notizen lesen und schreiben</string>
+    <string name="settings_mcp_setup">Assistenten verbinden</string>
+    <string name="settings_mcp_setup_sub">App wählen und ihre Einrichtung kopieren</string>
+    <string name="button_copy_setup">Einrichtung kopieren</string>
+    <string name="settings_mcp_footer">Assistenten können Notizen archivieren, aber nie löschen.</string>
+    <plurals name="result_copied">
+        <item quantity="one">Kopiert</item>
+        <item quantity="other">Kopiert</item>
     </plurals>
 </resources>

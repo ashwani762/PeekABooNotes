@@ -513,6 +513,31 @@ fn mark_dirty(h: HWND) {
         }
 }
 
+/// Show note `id`'s stored content again wherever it's open (it was changed elsewhere,
+/// by an assistant say), keeping the place in it as far as the new content allows.
+pub fn reload(id: u64) {
+    let open = [app::ui(|u| u.notes.get(&id).copied()), crate::win::ui::allnotes::editor_for(id)];
+    let (rtf, text) = app::store(|s| s.note(id).map(|n| (n.rtf.clone(), n.text.clone()))).unwrap_or_default();
+    for h in open.into_iter().flatten() {
+        let Some(st) = state(h) else { continue };
+        let (a, _) = rich::sel(st.edit);
+        let y = rich::scroll_y(st.edit);
+        st.loading = true;
+        if rtf.is_empty() {
+            rich::load_markdown(st.edit, &text);
+        } else {
+            rich::set_rtf(st.edit, &rtf);
+        }
+        st.dirty = false;
+        apply_theme(h);
+        let len = rich::text(st.edit).len() as i32;
+        rich::set_sel(st.edit, a.min(len), a.min(len));
+        rich::set_scroll_y(st.edit, y);
+        st.loading = false;
+        unsafe { SetWindowTextW(h, wide(&title_of(&text)).as_ptr()) };
+    }
+}
+
 fn apply_theme(h: HWND) {
     let Some(st) = state(h) else { return };
     let dark = app::dark();

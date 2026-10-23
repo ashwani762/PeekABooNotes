@@ -133,9 +133,30 @@ Files in `lang` are read at startup and override the built-in strings, so you ca
 ## Import and export
 
 - **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)".
-- **Import** reads `.md` and `.txt` files and turns their Markdown into real formatting: headings, `**bold**`, `_italic_`, `~~strike~~`, bullets, numbers, `[ ]` / `[x]` checklists and nested lists.
+- **Import** reads `.md` and `.txt` files and turns their Markdown into real formatting: headings, `**bold**`, `_italic_`, `~~strike~~`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists and `[links](https://...)`.
+- **Attachments travel too.** Export copies a note's pictures and files into an `attachments` folder beside the Markdown and links them relatively (`![photo.jpg](attachments/photo.jpg)`). Import copies linked local files back in as attachments.
 
-A round trip keeps nesting, emphasis and ticked items intact.
+A round trip keeps nesting, emphasis, links, attachments and ticked items intact.
+
+## AI assistants (MCP)
+
+PeekABoo Notes can let AI assistants find, read and write your notes through the [Model Context Protocol](https://modelcontextprotocol.io). It's off until you turn it on: **Settings > Data > Allow assistants (MCP)**. Then **Copy Setup**, pick your app, and paste:
+
+| App | Where it goes |
+|---|---|
+| ChatGPT (desktop app) | Add an MCP server of type STDIO, with the copied command |
+| Claude Desktop | `claude_desktop_config.json` (the copied `mcpServers` block) |
+| Claude Code | Run the copied `claude mcp add ...` command |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Codex | `~/.codex/config.toml` (the copied `[mcp_servers...]` table) |
+| Cursor, Windsurf, LM Studio | Their `mcp.json` (the copied `mcpServers` block) |
+| VS Code (Copilot) | `.vscode/mcp.json` (the copied `servers` block) |
+
+Any other app that runs local MCP servers works the same way: its command is `peekaboo-mcp.exe` from the app's folder (from the MSIX, just `peekaboo-mcp.exe`). ChatGPT on the web only reaches servers on the internet, so it can't use this one.
+
+The tools: `list_notes` (lists, or searches forgivingly), `read_note` (Markdown, colour, dates, attachments), `create_note`, `update_note`, `append_to_note` (keeps the note's formatting), and `set_note_state` (archive or restore, pin, colour, deck). There is no delete: the most an assistant can do is archive a note, which you can undo. Local files linked in an assistant's Markdown (`![chart](C:/path/chart.png)`) are copied in as attachments.
+
+How it works: the assistant starts `peekaboo-mcp.exe`, a small program that carries its messages over a named pipe to the running app (starting the app if needed). The app does the work on its own thread, so open notes, the deck and All Notes update as the assistant writes. The pipe only takes connections from this computer, and only while the switch is on.
 
 ## Your data
 
@@ -179,8 +200,9 @@ The app is split so other platforms can be added beside Windows: `src/common/` i
 | Path | Contents |
 |---|---|
 | `src/main.rs` | Entry point: picks the platform module |
-| `src/common/` | The portable app, with no OS calls: the note store (`store.rs`), interface strings (`i18n/`), design tokens (`theme.rs`), springs (`anim.rs`), the log (`log.rs`) and small helpers (`util.rs`). What it needs from the OS comes through `crate::os` |
-| `src/win/` | Windows: `os.rs` (what `common` asks of the OS), `app/` (message loop, note lifecycle, menus, import/export, autostart), `ui/` (deck, note windows, All Notes, Settings, menus, toasts, flying cards), `editor/` (RichEdit and the checklist overlay), `render/` (software canvas, DirectWrite, frame clock), `crash.rs`, `theme.rs`, `util.rs` |
+| `src/common/` | The portable app, with no OS calls: the note store (`store.rs`), interface strings (`i18n/`), search (`search.rs`), attachments (`attach.rs`), emoji (`emoji.rs`), the MCP protocol and tools (`mcp.rs`), design tokens (`theme.rs`), springs (`anim.rs`), the log (`log.rs`) and small helpers (`util.rs`). What it needs from the OS comes through `crate::os` |
+| `src/win/` | Windows: `os.rs` (what `common` asks of the OS), `app/` (message loop, note lifecycle, menus, import/export, autostart, the MCP pipe), `ui/` (deck, note windows, All Notes, Settings, menus, toasts, flying cards), `editor/` (RichEdit, links, and the checklist and colour-emoji overlays), `render/` (software canvas, DirectWrite, frame clock), `crash.rs`, `theme.rs`, `util.rs` |
+| `src/bin/peekaboo-mcp.rs` | The MCP bridge: stdin/stdout to the app's pipe |
 
 ## License
 
