@@ -195,16 +195,27 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         c.line_ct(&r.title, &f.row_title, tx, tb, right - tx, clip, fade(tc), DT_LEFT);
         // Second line: where the search matched, when the title doesn't show it;
         // otherwise when it was edited (and where it lives, when that isn't the deck).
-        let time = if let Some(snip) = r.snippet.as_ref().filter(|_| !l.query.trim().is_empty()) {
-            snip.clone()
-        } else if r.archived && l.mode == 2 {
-            t!("row_archived", r.time)
-        } else if r.off_deck && !r.archived {
-            t!("row_off_deck", r.time)
+        // "Edited Yesterday", then the start of the note in a lighter shade.
+        let (meta, preview) = if let Some(snip) = r.snippet.as_ref().filter(|_| !l.query.trim().is_empty()) {
+            (snip.clone(), None)
         } else {
-            r.time.clone()
+            let edited = t!("note_edited", r.time);
+            let meta = if r.archived && l.mode == 2 {
+                t!("row_archived", edited)
+            } else if r.off_deck && !r.archived {
+                t!("row_off_deck", edited)
+            } else {
+                edited
+            };
+            (meta, r.body.lines().map(|l| l.trim().trim_start_matches(['○', '●', '•', ' '])).find(|l| !l.is_empty()))
         };
-        c.line_ct(&time, &f.row_time, tx, mb, right - tx, clip, fade(mc), DT_LEFT);
+        let mw = c.line_ct(&meta, &f.row_time, tx, mb, right - tx, clip, fade(mc), DT_LEFT);
+        if let Some(pv) = preview {
+            let px0 = tx + mw;
+            if right - px0 > (24.0 * s) as i32 {
+                c.line_ct(&format!(" · {pv}"), &f.row_time, px0, mb, right - px0, clip, fade(mix(bg, mc, 0.7)), DT_LEFT);
+            }
+        }
         // Inset hairline separator, hidden next to highlighted rows.
         let next_selected = sel_idx.contains(&(i + 1));
         if !selected && !next_selected && i + 1 < l.rows.len() && lifted.is_none() {
