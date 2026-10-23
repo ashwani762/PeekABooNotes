@@ -176,26 +176,29 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         if dcy - d / 2.0 > top {
             c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(r.color).accent, la, 1.0, 0.0);
         }
-        // Search matches in the title, marked like a highlighter pen.
-        if !r.hits.is_empty() {
-            let mark = if selected { (theme::PAPER_TEXT, 0.14) } else if dark { (0xFFD60A, 0.32) } else { (0xFFCC00, 0.42) };
-            let byte = |ci: usize| r.title.char_indices().nth(ci).map_or(r.title.len(), |(b, _)| b);
-            let (asc, desc) = (f.row_title.ascent as f32, f.row_title.descent as f32);
-            for &(a, b) in &r.hits {
-                let x0 = tx + f.row_title.measure(&r.title[..byte(a)]).0;
-                let x1 = (x0 + f.row_title.measure(&r.title[byte(a)..byte(b)]).0).min(right);
+        // Search matches, marked like a highlighter pen: in the title, and in the line
+        // from the body when that's where they are.
+        let mark = if selected { (theme::PAPER_TEXT, 0.14) } else if dark { (0xFFD60A, 0.32) } else { (0xFFCC00, 0.42) };
+        let marks = |c: &mut Canvas, text: &str, hits: &[(usize, usize)], font: &Font, base: i32| {
+            let byte = |ci: usize| text.char_indices().nth(ci).map_or(text.len(), |(b, _)| b);
+            let (asc, desc) = (font.ascent as f32, font.descent as f32);
+            for &(a, b) in hits {
+                let x0 = tx + font.measure(&text[..byte(a)]).0;
+                let x1 = (x0 + font.measure(&text[byte(a)..byte(b)]).0).min(right);
                 if x0 < x1 {
                     let pad = 1.5 * s;
-                    let hl = Shape::new(x0 as f32 - pad, tb as f32 - asc + 1.0 * s, (x1 - x0) as f32 + 2.0 * pad, asc + desc - 1.0 * s, 4.0 * s);
+                    let hl = Shape::new(x0 as f32 - pad, base as f32 - asc + 1.0 * s, (x1 - x0) as f32 + 2.0 * pad, asc + desc - 1.0 * s, 4.0 * s);
                     c.shape(&hl, mark.0, mark.1 * la, 1.0, 0.0);
                 }
             }
-        }
+        };
+        marks(c, &r.title, &r.hits, &f.row_title, tb);
         c.line_ct(&r.title, &f.row_title, tx, tb, right - tx, clip, fade(tc), DT_LEFT);
         // Second line: where the search matched, when the title doesn't show it;
         // otherwise when it was edited (and where it lives, when that isn't the deck).
         // "Edited Yesterday", then the start of the note in a lighter shade.
         let (meta, preview) = if let Some(snip) = r.snippet.as_ref().filter(|_| !l.query.trim().is_empty()) {
+            marks(c, snip, &r.snippet_hits, &f.row_time, mb);
             (snip.clone(), None)
         } else {
             let edited = t!("note_edited", r.time);

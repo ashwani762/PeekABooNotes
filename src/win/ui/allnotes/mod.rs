@@ -100,6 +100,8 @@ struct Row {
     score: i32,
     hits: Vec<(usize, usize)>,
     snippet: Option<String>,
+    /// The matches inside `snippet`.
+    snippet_hits: Vec<(usize, usize)>,
 }
 
 struct Pal {

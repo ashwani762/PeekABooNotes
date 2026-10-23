@@ -39,9 +39,10 @@ pub(super) fn rebuild(l: &mut Lib) {
 ");
                     let m = q.score(&title, &rest)?;
                     let snippet = m.body_at.map(|at| crate::common::search::snippet(&rest, at, 80));
-                    (m.score, m.title, snippet)
+                    let marks = snippet.as_deref().map(|s| q.marks(s)).unwrap_or_default();
+                    (m.score, m.title, snippet, marks)
                 } else {
-                    (0, Vec::new(), None)
+                    (0, Vec::new(), None, Vec::new())
                 };
                 Some(Row {
                     id: n.id,
@@ -57,6 +58,7 @@ pub(super) fn rebuild(l: &mut Lib) {
                     score: m.0,
                     hits: m.1,
                     snippet: m.2,
+                    snippet_hits: m.3,
                 })
             })
             .collect()

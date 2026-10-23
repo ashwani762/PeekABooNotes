@@ -219,6 +219,14 @@ impl Query {
         m.title.sort_unstable();
         Some(m)
     }
+
+    /// Where the query's words are in `text` (a snippet of a body), as char ranges.
+    pub fn marks(&self, text: &str) -> Vec<(usize, usize)> {
+        let t = fold_all(text);
+        let mut out: Vec<(usize, usize)> = self.terms.iter().filter_map(|term| find(term, &t)).flat_map(|(_, r)| r).collect();
+        out.sort_unstable();
+        out
+    }
 }
 
 /// About `width` chars of the line of `body` holding char `at`, with an ellipsis where
@@ -275,6 +283,7 @@ mod tests {
         assert!(title.score > body.score);
         assert_eq!(title.title, vec![(0, 3)]);
         assert_eq!(body.body_at, Some(0));
+        assert_eq!(Query::new("rel it").marks("Release it now"), vec![(0, 3), (8, 10)]);
         let whole = Query::new("plan").score("Plan", "").unwrap();
         let start = Query::new("plan").score("Planning", "").unwrap();
         assert!(whole.score > start.score);
