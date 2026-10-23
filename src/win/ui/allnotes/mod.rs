@@ -936,7 +936,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             Action::None
                         }
                         Hit::Row(i) => {
-                            // Selection responds on press; a quick second press opens.
+                            // Selection responds on press; a quick second press opens the note
+                            // in its own window (the card beside the list already edits it).
                             let id = l.rows[i].id;
                             let dbl = l.last_click.1 == id && l.last_click.0.elapsed().as_millis() < GetDoubleClickTime() as u128;
                             l.last_click = (Instant::now(), id);
@@ -951,7 +952,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             }
                             if dbl {
                                 l.last_click.1 = 0;
-                                if l.editor.is_null() { open_selected(l) } else { Action::Edit }
+                                open_selected(l)
                             } else {
                                 Action::None
                             }

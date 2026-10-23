@@ -41,10 +41,15 @@ pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 3] {
     [(Hit::Settings, r(0)), (Hit::Share, r(1)), (Hit::New, r(2))]
 }
 
-/// The tooltip for a toolbar icon under the pointer, or none.
+/// The tooltip for a toolbar icon or colour swatch under the pointer, or none.
 pub(super) fn header_tip(l: &Lib, hit: Hit) {
     use crate::win::ui::tooltip;
     let lay = layout(l);
+    if let Hit::Swatch(k) = hit {
+        let r = swatch_rects(&lay, l.s)[k];
+        tooltip::hover(l.hwnd, r, theme::color_name(theme::ORDER[k]), "");
+        return;
+    }
     let Some((_, r)) = header_buttons(&lay, l.s).into_iter().find(|(x, _)| *x == hit) else {
         tooltip::leave(l.hwnd);
         return;

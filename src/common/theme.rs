@@ -34,6 +34,15 @@ pub const COLORS: [NoteColor; 12] = [
     NoteColor { name: "Sand", paper: 0xEDE2CB, accent: 0xC9A96E, ink: 0x5E4B26 },
 ];
 
+/// Colour `i`'s name, in the interface language (swatch tooltips).
+pub fn color_name(i: u8) -> &'static str {
+    const KEYS: [&str; 12] = [
+        "color_yellow", "color_peach", "color_pink", "color_lilac", "color_blue", "color_mint",
+        "color_lime", "color_graphite", "color_coral", "color_sky", "color_teal", "color_sand",
+    ];
+    crate::common::i18n::get(KEYS[i as usize % KEYS.len()])
+}
+
 /// Colours in hue order, for swatches, menus and Ctrl+. cycling.
 pub const ORDER: [u8; 12] = [0, 11, 1, 8, 2, 3, 4, 9, 10, 5, 6, 7];
 

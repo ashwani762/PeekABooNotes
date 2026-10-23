@@ -34,7 +34,7 @@ pub(super) fn tip_for(h: HWND, b: Btn) {
         Btn::Done => (t!("tip_done"), keys(&["ctrl", "shift", "A"])),
         Btn::Delete => (t!("menu_delete"), keys(&["ctrl", "shift", "del"])),
         Btn::Pin => (if pinned { t!("tip_unpin") } else { t!("menu_keep_on_top") }, keys(&["ctrl", "shift", "P"])),
-        Btn::Color => (t!("tip_color"), String::new()),
+        Btn::Color => (t!("tip_color"), keys(&["ctrl", "."])),
         Btn::More => (t!("tip_more"), String::new()),
         _ => (t!("tip_close"), keys(&["esc"])),
     };

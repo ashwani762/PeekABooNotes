@@ -402,7 +402,21 @@ fn choose(m: &mut Menu, t: Target) {
 
 /// Fade out without a choice. The mouse is released straight away and the window turns
 /// click-through, so the pointer is already back with whatever lies beneath.
+/// A swatch under the pointer says which colour it is.
+fn swatch_tip(m: &Menu, t: Target) {
+    use crate::win::ui::tooltip;
+    let Target::Swatch(i, k) = t else {
+        tooltip::leave(m.hwnd);
+        return;
+    };
+    let Some(&(ry, rh)) = layout_rows(m).get(i) else { return };
+    let d = SW * m.s;
+    let r = rect(m.margin + swatch_x(m, k) as i32, m.margin + (ry + (rh - d) / 2.0) as i32, d as i32, d as i32);
+    tooltip::hover(m.hwnd, r, theme::color_name(theme::ORDER[k]), "");
+}
+
 fn dismiss(m: &mut Menu) {
+    crate::win::ui::tooltip::mute();
     if m.result.is_some() || m.blink.is_some() || m.closing {
         return;
     }
@@ -541,6 +555,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     if t != m.hot && m.blink.is_none() {
                         m.hot = t;
                         render(m);
+                        swatch_tip(m, t);
                     }
                     let inside = x >= m.margin && y >= m.margin && x < m.margin + m.w && y < m.margin + m.h;
                     (!inside && m.blink.is_none()).then_some(POINT { x: m.origin.0 + x, y: m.origin.1 + y })
@@ -574,6 +589,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 with(|m| {
                     if !m.closing {
                         let t = target_at(m, x, y);
+                        crate::win::ui::tooltip::mute();
                         choose(m, t);
                     }
                 });
