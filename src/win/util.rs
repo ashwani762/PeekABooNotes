@@ -9,6 +9,30 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 
 pub use crate::common::util::*;
 
+/// The clipboard's text, if it holds any.
+pub fn clipboard_text() -> Option<String> {
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    const CF_UNICODETEXT: u32 = 13;
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 || OpenClipboard(std::ptr::null_mut()) == 0 {
+            return None;
+        }
+        let h = GetClipboardData(CF_UNICODETEXT);
+        let mut out = None;
+        if !h.is_null() {
+            let p = GlobalLock(h as _) as *const u16;
+            if !p.is_null() {
+                let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+                out = Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)));
+                GlobalUnlock(h as _);
+            }
+        }
+        CloseClipboard();
+        out
+    }
+}
+
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }

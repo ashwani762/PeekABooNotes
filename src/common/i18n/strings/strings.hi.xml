@@ -40,6 +40,8 @@
     <string name="menu_copy">कॉपी करें</string>
     <string name="menu_paste">चिपकाएँ</string>
     <string name="menu_select_all">सब चुनें</string>
+    <string name="menu_link">लिंक</string>
+    <string name="link_placeholder">लिंक चिपकाएँ या लिखें</string>
 
     <!-- Notes -->
     <string name="note_untitled">नया नोट</string>
@@ -210,6 +212,7 @@
     <string name="shortcut_move_deck">डेक को दूसरे किनारे पर ले जाएँ</string>
     <string name="shortcut_checklist">चेकलिस्ट</string>
     <string name="shortcut_tick">टिक करें या हटाएँ</string>
+    <string name="shortcut_link">लिंक जोड़ें या बदलें</string>
     <string name="shortcut_nest">सूची आइटम को अंदर या बाहर करें</string>
     <string name="shortcut_prev_next">पिछला या अगला नोट</string>
     <string name="shortcut_next_color">अगला रंग</string>

@@ -31,6 +31,7 @@ pub fn note_menu(id: u64, with_edit: bool) -> Vec<menu::Item> {
         v.push(action(NC_COPY, t!("menu_copy"), &crate::common::i18n::keys(&["ctrl", "C"]), IC_COPY));
         v.push(action(NC_PASTE, t!("menu_paste"), &crate::common::i18n::keys(&["ctrl", "V"]), IC_PASTE));
         v.push(action(NC_SELECT_ALL, t!("menu_select_all"), &crate::common::i18n::keys(&["ctrl", "A"]), IC_SELECT));
+        v.push(action(NC_LINK, t!("menu_link"), &crate::common::i18n::keys(&["ctrl", "K"]), IC_LINK));
     } else {
         v.push(action(NC_OPEN, t!("menu_open"), "", IC_OPEN));
     }

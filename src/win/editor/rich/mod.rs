@@ -13,8 +13,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
 
 mod format;
 mod lists;
+mod links;
 mod markdown;
 pub use format::*;
+pub use links::*;
 pub use lists::*;
 pub use markdown::*;
 

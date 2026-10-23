@@ -49,14 +49,14 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         out.push_str(&prefix);
         if inline && start == 0 && prefix.is_empty() && end > 0 {
             out.push_str("# ");
-            out.push_str(&String::from_utf16_lossy(&t[..end]));
+            out.push_str(&with_links(h, &t, 0, end));
         } else if inline {
             let body = inline_md(h, &t, body_start, end);
             // A ticked item's strikethrough is how it looks, not part of its text.
             let done = task && t[start] == CHECKED;
             out.push_str(if done { body.strip_prefix("~~").and_then(|b| b.strip_suffix("~~")).unwrap_or(&body) } else { &body });
         } else {
-            out.push_str(&String::from_utf16_lossy(&t[body_start..end]));
+            out.push_str(&visible(&t, body_start, end));
         }
         out.push('\n');
         if end >= t.len() {
@@ -71,15 +71,57 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
     out.trim_end().to_string()
 }
 
+/// Where a link that starts at a hidden instruction ends: (where its name starts, where
+/// it ends, url), or None when `i` doesn't start one.
+fn link_from(h: HWND, links: &[(usize, usize, String)], i: usize, b: usize) -> Option<(usize, usize, String)> {
+    let (_, name, url) = links.iter().find(|l| l.0 == i)?;
+    let end = link_at(h, *name as i32).map_or(b, |l| (l.1 as usize).min(b)).max(*name);
+    Some((*name, end, url.clone()))
+}
+
+/// `t[a..b]` with links as `[name](url)` and no other marks (the title line).
+fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
+    let links = instructions(t, a, b);
+    let mut out = String::new();
+    let mut i = a;
+    while i < b {
+        if let Some((name, end, url)) = link_from(h, &links, i, b) {
+            out.push_str(&format!("[{}]({url})", String::from_utf16_lossy(&t[name..end])));
+            i = end;
+            continue;
+        }
+        out.push_str(&String::from_utf16_lossy(&t[i..i + 1]));
+        i += 1;
+    }
+    out
+}
+
 pub(super) fn inline_md(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let mut out = String::new();
-    let mut cur = (false, false, false);
-    for i in a..b {
+    let cur = marks(h, t, a, b, (false, false, false), &mut out);
+    close_marks(&mut out, cur, (false, false, false));
+    out
+}
+
+/// Append `t[a..b]` with its marks to `out`, starting from the marks in effect `cur`;
+/// returns those in effect at the end. A mark running across a link stays open around
+/// it: **the [doc](url)**.
+fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), out: &mut String) -> (bool, bool, bool) {
+    let links = instructions(t, a, b);
+    let mut i = a;
+    while i < b {
+        if let Some((name, end, url)) = link_from(h, &links, i, b) {
+            out.push('[');
+            cur = marks(h, t, name, end, cur, out);
+            out.push_str(&format!("]({url})"));
+            i = end;
+            continue;
+        }
         set_sel(h, i as i32, i as i32 + 1);
         let cf = char_format(h, SCF_SELECTION);
         let st = (cf.effects & CFM_BOLD != 0, cf.effects & CFM_ITALIC != 0, cf.effects & CFM_STRIKEOUT != 0);
         if st != cur {
-            close_marks(&mut out, cur, st);
+            close_marks(out, cur, st);
             if st.0 && !cur.0 {
                 out.push_str("**");
             }
@@ -92,9 +134,9 @@ pub(super) fn inline_md(h: HWND, t: &[u16], a: usize, b: usize) -> String {
             cur = st;
         }
         out.push_str(&String::from_utf16_lossy(&t[i..i + 1]));
+        i += 1;
     }
-    close_marks(&mut out, cur, (false, false, false));
-    out
+    cur
 }
 
 pub(super) fn close_marks(out: &mut String, cur: (bool, bool, bool), next: (bool, bool, bool)) {
@@ -117,7 +159,7 @@ pub fn load_markdown(h: HWND, md: &str) {
         Number,
         Task(bool),
     }
-    let mut lines: Vec<(Kind, i32, String, Runs)> = Vec::new();
+    let mut lines: Vec<(Kind, i32, String, Runs, Links)> = Vec::new();
     // A file's final newline (and any blank lines after the text) is not an empty item.
     for raw in md.replace("\r\n", "\n").trim_end().split('\n') {
         let l = raw.trim_start();
@@ -142,6 +184,32 @@ pub fn load_markdown(h: HWND, md: &str) {
             }
         };
         let (text, mut runs) = inline_marks(rest);
+        // Links last: marks may sit inside their names. Removing the link syntax moves
+        // what follows it, so the runs move with it.
+        let (text, mut links) = {
+            let (plain, links) = md_links(&text);
+            let units = |s: &str| s.encode_utf16().count() as i32;
+            let (old, new) = (units(&text), units(&plain));
+            if old != new {
+                // Map each UTF-16 position of `text` to its place in `plain`.
+                let mut map = vec![0i32; old as usize + 1];
+                let (o, p): (Vec<u16>, Vec<u16>) = (text.encode_utf16().collect(), plain.encode_utf16().collect());
+                let (mut i, mut j) = (0usize, 0usize);
+                while i < o.len() {
+                    map[i] = j as i32;
+                    if j < p.len() && o[i] == p[j] {
+                        j += 1;
+                    }
+                    i += 1;
+                }
+                map[o.len()] = p.len() as i32;
+                for r in &mut runs {
+                    r.0 = map[r.0 as usize];
+                    r.1 = map[r.1 as usize];
+                }
+            }
+            (plain, links)
+        };
         let mark = match k {
             Kind::Task(true) => "\u{2611} ",
             Kind::Task(false) => "\u{2610} ",
@@ -152,10 +220,14 @@ pub fn load_markdown(h: HWND, md: &str) {
             r.0 += shift;
             r.1 += shift;
         }
+        for l in &mut links {
+            l.0 += shift;
+            l.1 += shift;
+        }
         let level = if matches!(k, Kind::Plain) { 0 } else { (indent / 2).min(MAX_LEVEL as usize) as i32 };
-        lines.push((k, level, format!("{mark}{text}"), runs));
+        lines.push((k, level, format!("{mark}{text}"), runs, links));
     }
-    let joined: Vec<&str> = lines.iter().map(|(_, _, s, _)| s.as_str()).collect();
+    let joined: Vec<&str> = lines.iter().map(|(_, _, s, _, _)| s.as_str()).collect();
     set_sel(h, 0, -1);
     insert_text(h, &joined.join("\r"));
     // Start clean: a reused control keeps the last document's list and character formats.
@@ -163,7 +235,9 @@ pub fn load_markdown(h: HWND, md: &str) {
     set_numbering(h, 0);
     set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
     let mut pos = 0i32;
-    for (k, level, s, runs) in &lines {
+    let mut links = Vec::new();
+    for (k, level, s, runs, line_links) in &lines {
+        links.extend(line_links.iter().map(|(a, b, url)| (pos + a, pos + b, url.clone())));
         let len = s.encode_utf16().count() as i32;
         set_sel(h, pos, pos);
         match k {
@@ -196,11 +270,17 @@ pub fn load_markdown(h: HWND, md: &str) {
         }
         pos += len + 1;
     }
+    // Each link adds hidden text before its name: from the end, so the rest stay put.
+    for (a, b, url) in links.iter().rev() {
+        set_link(h, *a, *b, url);
+    }
     set_sel(h, 0, 0);
 }
 
 /// Character-format runs within a line: (start, end, effect) in UTF-16 units.
 type Runs = Vec<(i32, i32, u32)>;
+/// Links within a line: (start, end, url) in UTF-16 units.
+type Links = Vec<(i32, i32, String)>;
 
 /// Strip `**bold**`, `_italic_` and `~~strike~~` marks from one line (as `to_markdown`
 /// writes them), returning the text and the (start, end, effect) runs in UTF-16 units.

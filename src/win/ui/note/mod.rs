@@ -674,8 +674,9 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     let (m, r) = (el.msg, el.chrg);
                     if m == WM_LBUTTONUP
                         && let Some(st) = state(h) {
-                            let url = String::from_utf16_lossy(&rich::range_text(st.edit, r.min, r.max));
-                            ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(url.trim()).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                            let url = rich::url_of(st.edit, r.min, r.max);
+                            crate::win::ui::tooltip::mute();
+                            ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(&url).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
                         }
                 }
                 return 0;

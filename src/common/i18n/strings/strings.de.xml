@@ -40,6 +40,8 @@
     <string name="menu_copy">Kopieren</string>
     <string name="menu_paste">Einfügen</string>
     <string name="menu_select_all">Alles auswählen</string>
+    <string name="menu_link">Link</string>
+    <string name="link_placeholder">Link einfügen oder eingeben</string>
 
     <!-- Notes -->
     <string name="note_untitled">Neue Notiz</string>
@@ -210,6 +212,7 @@
     <string name="shortcut_move_deck">Stapel an den anderen Rand</string>
     <string name="shortcut_checklist">Checkliste</string>
     <string name="shortcut_tick">Abhaken oder zurücksetzen</string>
+    <string name="shortcut_link">Link hinzufügen oder ändern</string>
     <string name="shortcut_nest">Listeneintrag ein- oder ausrücken</string>
     <string name="shortcut_prev_next">Vorherige oder nächste Notiz</string>
     <string name="shortcut_next_color">Nächste Farbe</string>

@@ -40,6 +40,8 @@
     <string name="menu_copy">Copier</string>
     <string name="menu_paste">Coller</string>
     <string name="menu_select_all">Tout sélectionner</string>
+    <string name="menu_link">Lien</string>
+    <string name="link_placeholder">Collez ou saisissez un lien</string>
 
     <!-- Notes -->
     <string name="note_untitled">Nouvelle note</string>
@@ -210,6 +212,7 @@
     <string name="shortcut_move_deck">Déplacer la pile sur l’autre bord</string>
     <string name="shortcut_checklist">Liste de tâches</string>
     <string name="shortcut_tick">Cocher ou décocher</string>
+    <string name="shortcut_link">Ajouter ou modifier un lien</string>
     <string name="shortcut_nest">Indenter ou désindenter un élément</string>
     <string name="shortcut_prev_next">Note précédente ou suivante</string>
     <string name="shortcut_next_color">Couleur suivante</string>

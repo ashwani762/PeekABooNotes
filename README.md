@@ -22,7 +22,8 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 **Notes**
 - Borderless paper cards that reopen where you left them: same place on screen, same scroll, caret where you stopped. Click away and an open note flies back to the deck; pin it to keep it open and on top (Settings can keep every note open instead).
 - Long notes get a slim scroll bar that shows while you scroll; drag it, click the track, or use the wheel anywhere on the note.
-- Bold, italic, underline and strikethrough. The first line is the title, and links are clickable.
+- Bold, italic, underline and strikethrough. The first line is the title.
+- Links: addresses you type are clickable, and Ctrl+K (or pasting an address over selected text) turns any words into a link. Hovering one shows where it goes; export writes it as `[words](address)` and import reads it back.
 - Bullets, numbers and checklists:
   - Typing `- `, `* `, `1. ` or `[] ` at the start of a line converts it; Backspace right after reverts.
   - Tab and Shift+Tab nest items; numbers go 1. → a. → i.
@@ -86,6 +87,7 @@ If another app already uses one of these, PeekABoo Notes goes without it.
 |---|---|
 | Esc / Ctrl+W | Close |
 | Ctrl+B / I / U | Bold / italic / underline |
+| Ctrl+K | Link the selected text, or change the link at the caret (pasting an address over selected text links it too) |
 | Ctrl+Shift+X | Strikethrough |
 | Ctrl+Shift+8 / 7 | Bulleted / numbered list |
 | Ctrl+Shift+L | Checklist |

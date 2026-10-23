@@ -40,6 +40,8 @@
     <string name="menu_copy">Copiar</string>
     <string name="menu_paste">Pegar</string>
     <string name="menu_select_all">Seleccionar todo</string>
+    <string name="menu_link">Enlace</string>
+    <string name="link_placeholder">Pega o escribe un enlace</string>
 
     <!-- Notes -->
     <string name="note_untitled">Nueva nota</string>
@@ -210,6 +212,7 @@
     <string name="shortcut_move_deck">Mover el mazo al otro borde</string>
     <string name="shortcut_checklist">Lista de tareas</string>
     <string name="shortcut_tick">Marcar o desmarcar</string>
+    <string name="shortcut_link">Añadir o cambiar un enlace</string>
     <string name="shortcut_nest">Sangrar o quitar sangría</string>
     <string name="shortcut_prev_next">Nota anterior o siguiente</string>
     <string name="shortcut_next_color">Color siguiente</string>

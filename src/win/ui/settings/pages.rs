@@ -75,6 +75,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 rows: vec![
                     keys(t!("shortcut_checklist"), &["ctrl", "shift", "L"]),
                     keys(t!("shortcut_tick"), &["ctrl", "enter"]),
+                    keys(t!("shortcut_link"), &["ctrl", "K"]),
                     keys(t!("shortcut_nest"), &["tab", "/", "shift", "tab"]),
                     keys(t!("shortcut_prev_next"), &["ctrl", "[", "/", "]"]),
                     keys(t!("shortcut_next_color"), &["ctrl", "."]),

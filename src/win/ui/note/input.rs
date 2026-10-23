@@ -5,6 +5,37 @@
 
 use super::*;
 
+/// Over a link, a tooltip shows where it goes.
+fn link_tip(e: HWND, x: i32, y: i32) {
+    use crate::win::ui::tooltip;
+    let lh = (rich::body_size() as f32 / 15.0 * 1.45) as i32;
+    // EM_CHARFROMPOS gives the nearest caret position: the character under the pointer
+    // is the one after it or the one before. None when off the end of a line.
+    let cp = rich::char_from_pos(e, x, y);
+    let over = |c: i32| {
+        let (p, q) = (rich::pos_from_char(e, c), rich::pos_from_char(e, c + 1));
+        let right = if q.y == p.y && q.x > p.x { q.x } else { p.x };
+        c >= 0 && x >= p.x && x < right && y >= p.y && y < p.y + lh
+    };
+    let hit = [cp, cp - 1].into_iter().find(|&c| over(c));
+    let Some((a, b, url)) = hit.and_then(|c| rich::link_at(e, c).filter(|l| c >= l.0 && c < l.1)) else {
+        tooltip::leave(e);
+        return;
+    };
+    let cp = hit.unwrap_or(cp);
+    // Under the part of the link the pointer is on.
+    let t = rich::text(e);
+    let from = rich::name_start(&t, a, b).max(a);
+    let p0 = rich::pos_from_char(e, from);
+    let pe = rich::pos_from_char(e, b);
+    let p = rich::pos_from_char(e, cp);
+    let (l, r) = if p0.y == pe.y { (p0.x, pe.x) } else { (p.x - 20, p.x + 20) };
+    let anchor = crate::win::util::rect(l, p.y, (r - l).max(1), lh);
+    let shown = url.strip_prefix("https://").or(url.strip_prefix("http://")).unwrap_or(&url).trim_end_matches('/');
+    let shown: String = if shown.chars().count() > 60 { shown.chars().take(59).chain(std::iter::once('\u{2026}')).collect() } else { shown.to_string() };
+    tooltip::hover(e, anchor, &shown, "");
+}
+
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
     let h = parent as HWND;
     match msg {
@@ -64,7 +95,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             }
         }
         WM_PASTE => {
-            rich::paste_plain(e);
+            paste(h);
             return 0;
         }
         // A quick second click on a circle arrives as a double-click: tick again, rather
@@ -102,8 +133,10 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             unsafe { TrackMouseEvent(&mut tme) };
             crate::win::editor::checks::set_hot(e, hot);
             pointer_in(h);
+            link_tip(e, x_of(lp), y_of(lp));
         }
         WM_MOUSELEAVE => {
+            crate::win::ui::tooltip::leave(e);
             crate::win::editor::checks::set_hot(e, None);
             pointer_out(h);
         }

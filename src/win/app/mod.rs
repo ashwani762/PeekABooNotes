@@ -57,6 +57,7 @@ pub const NC_COPY: u32 = 219;
 pub const NC_PASTE: u32 = 220;
 pub const NC_SELECT_ALL: u32 = 221;
 pub const NC_DECK: u32 = 222;
+pub const NC_LINK: u32 = 223;
 pub const NC_COLOR0: u32 = 300;
 
 // App commands (tray menu, hotkeys).
@@ -161,6 +162,7 @@ const IC_REFRESH: &str = "\u{E72C}";
 const IC_POWER: &str = "\u{E7E8}";
 const IC_SETTINGS: &str = "\u{E713}";
 const IC_ARCHIVE: &str = "\u{E7B8}";
+const IC_LINK: &str = "\u{E71B}";
 const IC_SWAP: &str = "\u{E8AB}";
 
 // ---------------------------------------------------------------- import / export / startup

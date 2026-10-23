@@ -50,6 +50,8 @@
     <string name="menu_copy">Copy</string>
     <string name="menu_paste">Paste</string>
     <string name="menu_select_all">Select All</string>
+    <string name="menu_link">Link</string>
+    <string name="link_placeholder">Paste or type a link</string>
 
     <!-- Notes -->
     <string name="note_untitled">New note</string>
@@ -220,6 +222,7 @@
     <string name="shortcut_move_deck">Move deck to the other edge</string>
     <string name="shortcut_checklist">Checklist</string>
     <string name="shortcut_tick">Tick or untick</string>
+    <string name="shortcut_link">Add or change a link</string>
     <string name="shortcut_nest">Indent or outdent a list item</string>
     <string name="shortcut_prev_next">Previous or next note</string>
     <string name="shortcut_next_color">Next colour</string>
