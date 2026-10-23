@@ -6,7 +6,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/hero.png" alt="PeekABoo Notes: two notes on the desktop and the edge deck fanned out, previewing a checklist. Light and dark appearance, split diagonally." width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.png">
+    <img src="docs/screenshots/hero-light.png" alt="Two notes open on the desktop, a trip plan with a sunset picture and checklist, and a 1:1 agenda, with the deck of note tabs fanned out at the screen edge, previewing a grocery checklist." width="100%">
+  </picture>
 </p>
 
 Your notes sit on the edge of the screen as a slim strip of colour. Point at it and they fan out as tabs; rest on one and it slides out to show you the note; click and it opens as a paper card, right where you left it. Click away and it flies home. Nothing to find, nothing to launch, nothing in your taskbar.
@@ -26,10 +29,20 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
 - **Pictures and files.** Drop them on a note: pictures show inline, files as a paperclip you can open or drag back out.
 - **Colour emoji** ❤️ 🚀 and twelve paper colours, four typefaces and three text sizes.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/note-dark.png">
+    <img src="docs/screenshots/note-light.png" alt="A sky-blue note, Lisbon weekend, with a sunset picture, a checklist with one item ticked, and a link." width="40%">
+  </picture>
+</p>
+
 ## Find anything
 
 <p align="center">
-  <img src="docs/screenshots/all-notes.png" alt="The All Notes window: the note list on the left and the selected note open for editing on the right." width="85%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/all-notes-dark.png">
+    <img src="docs/screenshots/all-notes-light.png" alt="All Notes searching for tram alfma, with a typo: the Lisbon note is found and the matching words marked, open for editing on the right." width="85%">
+  </picture>
 </p>
 
 **All Notes** puts everything in one place, with search that forgives: words in any order, the start of a word, a typo or a missing accent. "relchk" finds your release checklist. Matches are marked, best first, and you can edit right there without opening a window. Archive instead of deleting, and every delete comes with Undo.
@@ -44,6 +57,13 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
 
 Turn it on in Settings and **ChatGPT, Claude, Gemini, Copilot, Cursor** and other assistants can find, read and write your notes, through the open [Model Context Protocol](https://modelcontextprotocol.io). Pick your app, press **Copy Setup**, paste. Assistants can create, edit and archive notes, but never delete them. It's off until you say so, and works only on this computer.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/assistants-dark.png">
+    <img src="docs/screenshots/assistants-light.png" alt="Settings, AI Assistants: the switch to allow assistants is on, and Copy Setup lists ChatGPT, Claude Desktop, Claude Code, Gemini CLI, Codex, Cursor, VS Code, Windsurf and LM Studio." width="60%">
+  </picture>
+</p>
+
 ## Made to feel at home
 
 - **Light and dark**, following Windows or your choice.
@@ -51,7 +71,7 @@ Turn it on in Settings and **ChatGPT, Claude, Gemini, Copilot, Cursor** and othe
 - **Fluid motion**: everything moves on springs, and Reduce Motion calms it down.
 
 <p align="center">
-  <img src="docs/screenshots/settings.png" alt="Settings, Notes page: font, text size, new-note colour and a live preview." width="66%">
+  <img src="docs/screenshots/light-and-dark.png" alt="All Notes, split diagonally: the light appearance on the left, dark on the right." width="85%">
 </p>
 
 ## Small, fast and private
