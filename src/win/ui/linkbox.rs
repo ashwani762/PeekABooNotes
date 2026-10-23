@@ -66,8 +66,13 @@ pub fn ask(owner: HWND, at: POINT, current: &str) -> Option<String> {
         GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
         (dx.max(96) as f32 / 96.0, mi.rcWork)
     };
-    let (w, h) = ((W * s) as i32, (H * s) as i32);
-    let x = at.x.clamp(work.left + 8, (work.right - w - 8).max(work.left));
+    let mut owner_rc: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetWindowRect(owner, &mut owner_rc) };
+    let narrow = owner_rc.right - owner_rc.left - (16.0 * s) as i32;
+    let (w, h) = (((W * s) as i32).min(narrow.max((240.0 * s) as i32)), (H * s) as i32);
+    // Within the note where it fits, and always on the screen.
+    let x = at.x.min(owner_rc.right - w - (8.0 * s) as i32).max(owner_rc.left + (8.0 * s) as i32);
+    let x = x.clamp(work.left + 8, (work.right - w - 8).max(work.left));
     // Below the text, or above it when there's no room.
     let y = if at.y + h > work.bottom - 8 { at.y - h - (30.0 * s) as i32 } else { at.y };
     let y = y.clamp(work.top + 8, (work.bottom - h - 8).max(work.top));

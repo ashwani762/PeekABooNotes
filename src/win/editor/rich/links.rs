@@ -170,6 +170,13 @@ pub fn link_addresses(h: HWND, a: usize, b: usize) {
             if name == s && lb == e {
                 if cur != url {
                     set_link(h, s, e, &url);
+                } else if word == url {
+                    // Text that is exactly its address, read back from a saved note: RichEdit
+                    // takes it for one of its own and paints it its blue, whatever colour it's
+                    // given. Made again, it's ours.
+                    let hidden = name - la;
+                    remove_link(h, la, lb);
+                    set_link(h, s - hidden, e - hidden, &url);
                 }
             } else if name == s {
                 // Typed on past the link's end: the link takes the whole address again.
@@ -418,7 +425,19 @@ pub fn looks_like_url(s: &str) -> bool {
         return false;
     }
     let lower = s.to_ascii_lowercase();
-    ["http://", "https://", "mailto:", "ftp://", "file://"].iter().any(|p| lower.starts_with(p)) || (lower.starts_with("www.") && lower.len() > 5)
+    ["http://", "https://", "mailto:", "ftp://", "file://"].iter().any(|p| lower.starts_with(p)) || (lower.starts_with("www.") && lower.len() > 5) || email(s)
+}
+
+/// name@example.org: one @, a dotted domain after it, nothing odd around.
+fn email(s: &str) -> bool {
+    let Some((user, domain)) = s.split_once('@') else { return false };
+    let ok = |c: char| c.is_alphanumeric() || "._%+-".contains(c);
+    !user.is_empty()
+        && user.chars().all(ok)
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && domain.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-')
 }
 
 /// An address as typed, made something a browser opens: "example.com" -> "https://example.com".
@@ -445,6 +464,27 @@ mod tests {
             LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
             CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut())
         }
+    }
+
+    #[test]
+    fn marks_sit_outside_spaces() {
+        let h = editor();
+        setup(h);
+        // Round trip, underline included.
+        let md = "# T\n**bold** _italic_ <u>under</u> ~~strike~~ **two words** plain";
+        load_markdown(h, &md[2..]);
+        assert_eq!(to_markdown(h, true), md);
+        // Formatting that takes in the space after a word, as typing it does.
+        load_markdown(h, "T\nbold italic end\nour roadmap here");
+        let t = text(h);
+        let at = |s: &str| String::from_utf16_lossy(&t).find(s).unwrap() as i32;
+        set_sel(h, at("bold"), at("italic"));
+        set_effect(h, CFM_BOLD, true);
+        set_sel(h, at("italic"), at("end"));
+        set_effect(h, CFM_ITALIC, true);
+        assert!(set_link(h, at("our"), at("here"), "https://r.example"));
+        assert_eq!(to_markdown(h, true), "# T\n**bold** _italic_ end\n[our roadmap](https://r.example) here");
+        unsafe { DestroyWindow(h) };
     }
 
     #[test]

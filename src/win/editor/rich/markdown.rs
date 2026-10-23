@@ -129,15 +129,30 @@ fn char_len(t: &[u16], i: usize, b: usize) -> usize {
 
 pub(super) fn inline_md(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let mut out = String::new();
-    let cur = marks(h, t, a, b, (false, false, false), &mut out);
-    close_marks(&mut out, cur, (false, false, false));
+    let cur = marks(h, t, a, b, NO_MARKS, &mut out);
+    close_marks(&mut out, cur, NO_MARKS);
     out
 }
 
 /// Append `t[a..b]` with its marks to `out`, starting from the marks in effect `cur`;
 /// returns those in effect at the end. A mark running across a link stays open around
 /// it: **the [doc](url)**.
-fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), out: &mut String) -> (bool, bool, bool) {
+/// Bold, italic, strikethrough, underline.
+type Marks = (bool, bool, bool, bool);
+const NO_MARKS: Marks = (false, false, false, false);
+
+fn blank(c: u16) -> bool {
+    c == b' ' as u16 || c == b'\t' as u16
+}
+
+/// The marks on the character at `i`.
+fn marks_at(h: HWND, i: usize, n: usize) -> Marks {
+    set_sel(h, i as i32, (i + n) as i32);
+    let e = char_format(h, SCF_SELECTION).effects;
+    (e & CFM_BOLD != 0, e & CFM_ITALIC != 0, e & CFM_STRIKEOUT != 0, e & CFM_UNDERLINE != 0)
+}
+
+fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut String) -> Marks {
     let links = instructions(t, a, b);
     let mut i = a;
     while i < b {
@@ -154,16 +169,34 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
                 i = end;
                 continue;
             }
+            // Spaces at the end of a link's text go after its brackets.
+            let mut shown_end = end;
+            while shown_end > name && blank(t[shown_end - 1]) {
+                shown_end -= 1;
+            }
             out.push('[');
-            cur = marks(h, t, name, end, cur, out);
+            cur = marks(h, t, name, shown_end, cur, out);
             out.push_str(&format!("]({url})"));
+            out.push_str(&unmark_str(&t[shown_end..end]));
             i = end;
             continue;
         }
         let n = char_len(t, i, b);
-        set_sel(h, i as i32, (i + n) as i32);
-        let cf = char_format(h, SCF_SELECTION);
-        let st = (cf.effects & CFM_BOLD != 0, cf.effects & CFM_ITALIC != 0, cf.effects & CFM_STRIKEOUT != 0);
+        // A space carries only the marks on both sides of it: `**bold** _italic_`, never
+        // `**bold **_italic_` (a mark that closes after a space isn't one), while a bold
+        // phrase stays one run, `**two words**`.
+        let st = if blank(t[i]) {
+            let next = (i + n..b).find(|&j| !blank(t[j])).map(|j| marks_at(h, j, char_len(t, j, b)));
+            match next {
+                Some(nx) => {
+                    let here = marks_at(h, i, n);
+                    (here.0 && cur.0 && nx.0, here.1 && cur.1 && nx.1, here.2 && cur.2 && nx.2, here.3 && cur.3 && nx.3)
+                }
+                None => NO_MARKS,
+            }
+        } else {
+            marks_at(h, i, n)
+        };
         if st != cur {
             close_marks(out, cur, st);
             if st.0 && !cur.0 {
@@ -175,6 +208,10 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
             if st.2 && !cur.2 {
                 out.push_str("~~");
             }
+            // Markdown has no underline: the HTML tag, which viewers show and import reads.
+            if st.3 && !cur.3 {
+                out.push_str("<u>");
+            }
             cur = st;
         }
         out.push_str(&unmark_str(&t[i..i + n]));
@@ -183,7 +220,10 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: (bool, bool, bool), ou
     cur
 }
 
-pub(super) fn close_marks(out: &mut String, cur: (bool, bool, bool), next: (bool, bool, bool)) {
+pub(super) fn close_marks(out: &mut String, cur: Marks, next: Marks) {
+    if cur.3 && !next.3 {
+        out.push_str("</u>");
+    }
     if cur.2 && !next.2 {
         out.push_str("~~");
     }
@@ -354,10 +394,24 @@ pub(super) fn inline_marks(s: &str) -> (String, Runs) {
     let opens = |k: usize, slot: usize, len: usize| !space(Some(k + len)) && (slot != 1 || !word(k.checked_sub(1)));
     let mut out = String::new();
     let mut n = 0i32;
-    let mut open: [Option<i32>; 3] = [None; 3];
+    let mut open: [Option<i32>; 4] = [None; 4];
     let mut runs = Vec::new();
+    let tag = |k: usize, s: &str| s.chars().enumerate().all(|(j, ch)| at(k + j) == Some(ch));
     let mut i = 0;
     while i < c.len() {
+        // Underline, written as HTML since Markdown has none.
+        if tag(i, "<u>") && open[3].is_none() && (i + 3..c.len()).any(|j| tag(j, "</u>")) {
+            open[3] = Some(n);
+            i += 3;
+            continue;
+        }
+        if tag(i, "</u>")
+            && let Some(a) = open[3].take()
+        {
+            runs.push((a, n, CFM_UNDERLINE));
+            i += 4;
+            continue;
+        }
         if let Some((slot, len, effect)) = mark(i) {
             match open[slot] {
                 Some(a) if closes(i, slot, len) => {
@@ -392,6 +446,8 @@ mod tests {
         let (t, r) = inline_marks("Ship **v2.4** by _Friday_, not ~~Thursday~~");
         assert_eq!(t, "Ship v2.4 by Friday, not Thursday");
         assert_eq!(r, vec![(5, 9, CFM_BOLD), (13, 19, CFM_ITALIC), (25, 33, CFM_STRIKEOUT)]);
+        let (t, r) = inline_marks("an <u>underlined</u> word");
+        assert_eq!((t.as_str(), r), ("an underlined word", vec![(3, 13, CFM_UNDERLINE)]));
         // Nested, as `inline_md` writes them.
         let (t, r) = inline_marks("**_both_**");
         assert_eq!(t, "both");

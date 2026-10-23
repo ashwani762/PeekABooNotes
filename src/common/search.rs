@@ -115,6 +115,25 @@ fn find(term: &[char], t: &[char]) -> Option<(i32, Vec<(usize, usize)>)> {
             return Some(b);
         }
     }
+    // Three letters in order inside one word, from its start: "chk" for "checklist".
+    if n == 3 {
+        for start in 0..t.len() {
+            if t[start] != term[0] || !word_start(t, start) {
+                continue;
+            }
+            let end = (start..t.len()).find(|&j| !is_word(t[j])).unwrap_or(t.len());
+            let (mut k, mut hits) = (1, vec![start]);
+            for (i, &c) in t.iter().enumerate().take(end.min(start + 10)).skip(start + 1) {
+                if k < n && c == term[k] {
+                    hits.push(i);
+                    k += 1;
+                }
+            }
+            if k == n {
+                return Some((30, merge(&hits)));
+            }
+        }
+    }
     // A word with a typo or two, compared with the same length of its start. Only for
     // longer words, and the first letter has to be right: "test" isn't "best".
     if n >= 5 {
@@ -149,6 +168,20 @@ fn find(term: &[char], t: &[char]) -> Option<(i32, Vec<(usize, usize)>)> {
         return best;
     }
     None
+}
+
+/// Ranges in order, those that touch or overlap made one: two words matching "Rel" and
+/// "ease" mark "Release" once, not as two pills side by side.
+fn joined(mut r: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    r.sort_unstable();
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (a, b) in r {
+        match out.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
 }
 
 /// Neighbouring indices as ranges: [3, 4, 5, 9] -> [(3, 6), (9, 10)].
@@ -216,16 +249,14 @@ impl Query {
                 (None, None) => return None,
             }
         }
-        m.title.sort_unstable();
+        m.title = joined(m.title);
         Some(m)
     }
 
     /// Where the query's words are in `text` (a snippet of a body), as char ranges.
     pub fn marks(&self, text: &str) -> Vec<(usize, usize)> {
         let t = fold_all(text);
-        let mut out: Vec<(usize, usize)> = self.terms.iter().filter_map(|term| find(term, &t)).flat_map(|(_, r)| r).collect();
-        out.sort_unstable();
-        out
+        joined(self.terms.iter().filter_map(|term| find(term, &t)).flat_map(|(_, r)| r).collect())
     }
 }
 
@@ -273,6 +304,10 @@ mod tests {
         // Short words aren't stretched into gaps or typos.
         assert!(!hit("and", "a new day"));
         assert!(!hit("test", "the best"));
+        // Three-letter abbreviations, inside one word only.
+        assert!(hit("chk", "Release checklist"));
+        assert!(!hit("rcl", "Release checklist"));
+        assert_eq!(Query::new("rel ease").score("Release", "").unwrap().title, vec![(0, 7)]);
     }
 
     #[test]

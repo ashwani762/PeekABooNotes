@@ -62,7 +62,18 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
 fn link_command(h: HWND) {
     let Some(st) = state(h) else { return };
     let e = st.edit;
-    let (a, b) = rich::sel(e);
+    let (mut a, mut b) = rich::sel(e);
+    // A selection made with Ctrl+Shift+Right takes the space after the word: link the words.
+    {
+        let t = rich::text(e);
+        let blank = |i: i32| t.get(i as usize).is_some_and(|&c| c == b' ' as u16 || c == b'\t' as u16);
+        while b > a && blank(b - 1) {
+            b -= 1;
+        }
+        while a < b && blank(a) {
+            a += 1;
+        }
+    }
     let existing = rich::link_at(e, a);
     let clip = crate::win::util::clipboard_text().map(|s| s.trim().to_string()).filter(|s| rich::looks_like_url(s));
     // Under the start of what's being linked.

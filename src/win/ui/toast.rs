@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Undo HUD: a dark capsule that rises from the bottom of the screen with a countdown
-//! ring. Click it within ten seconds to restore what was deleted. The countdown waits
+//! ring. Click it within ten seconds to restore what was deleted (or archived). The countdown waits
 //! while the pointer is on the toast, so reaching for Undo never races the clock.
 
 use std::cell::RefCell;
@@ -24,6 +24,8 @@ const SECONDS: f32 = 10.0;
 struct Toast {
     hwnd: HWND,
     count: usize,
+    /// Archived rather than deleted.
+    archived: bool,
     /// Seconds of countdown left.
     left: f32,
     rise: Spring,
@@ -39,7 +41,7 @@ thread_local! {
     static TOAST: RefCell<Option<Toast>> = const { RefCell::new(None) };
 }
 
-pub fn show(count: usize) {
+pub fn show(count: usize, archived: bool) {
     TOAST.with(|t| {
         let mut t = t.borrow_mut();
         if t.is_none() {
@@ -64,6 +66,7 @@ pub fn show(count: usize) {
             *t = Some(Toast {
                 hwnd,
                 count,
+                archived,
                 left: SECONDS,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
                 alive: true,
@@ -76,6 +79,7 @@ pub fn show(count: usize) {
         }
         let t = t.as_mut().unwrap();
         t.count = count;
+        t.archived = archived;
         t.left = SECONDS;
         t.alive = true;
         t.rise.to(1.0);
@@ -161,7 +165,7 @@ fn render(t: &mut Toast) {
     c.ring(rcx, rcy, rr, 2.0 * s, left / SECONDS, theme::COLORS[0].accent, a);
     let secs = rect((rcx - rr) as i32, (rcy - rr) as i32, (2.0 * rr) as i32, (2.0 * rr) as i32);
     c.text(&format!("{}", left.ceil() as i32), &t.tiny, secs, 0xFFFFFF, 0.85 * a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    let msg = tn!("toast_deleted", t.count);
+    let msg = if t.archived { tn!("toast_archived", t.count) } else { tn!("toast_deleted", t.count) };
     let tx = (x + 48.0 * s) as i32;
     c.text(&msg, &t.body, rect(tx, y as i32, (w as f32 * 0.6) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     let (bw, bh) = (76.0 * s, 32.0 * s);

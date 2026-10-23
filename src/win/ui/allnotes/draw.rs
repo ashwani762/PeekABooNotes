@@ -336,8 +336,6 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
                 c.line_ct(&r.title, &f.card_title, (sh.x + 24.0 * s) as i32, (sh.y + 48.0 * s) as i32, (w - 48.0 * s) as i32, None, mix(bg, theme::PAPER_TEXT, a), DT_LEFT);
             }
         }
-        let msg = tn!("notes_selected", l.sel.len());
-        c.line_ct(&msg, &f.empty, card.x as i32, (card.y + card.h - 32.0 * s) as i32, card.w as i32, None, mix(p.window, p.sub, a), DT_CENTER);
         return;
     }
     let Some(r) = primary_row else { return };
@@ -384,7 +382,7 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         c.text_ct(body, &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, k), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
     }
     // Footer: when it was edited, then a hairline and the colour swatches.
-    let meta = t!("card_meta", edited_time(r.updated), relative_time(r.created));
+    let meta = t!("card_meta", edited_time(r.updated), crate::common::i18n::time::day(r.created));
     c.line_ct(&meta, &f.card_meta, x0, (rule_y - 12.0 * s) as i32, x1 - x0, None, ink(theme::paper_subtext(r.color, dark), 1.0), DT_LEFT);
     c.rrect(x0 as f32, rule_y, (x1 - x0) as f32, 1.0, 0.0, 0x000000, 0.08 * a);
     for (k, rc) in sw.iter().enumerate() {

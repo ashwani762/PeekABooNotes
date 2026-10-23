@@ -239,7 +239,12 @@ pub fn startup_enabled() -> bool {
         return startup_task().and_then(|t| t.State().ok()).is_some_and(|s| s == S::Enabled || s == S::EnabledByPolicy);
     }
     let (k, v) = (wide(RUN_KEY), wide(RUN_VALUE));
-    unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, null_mut(), null_mut(), null_mut()) == 0 }
+    let mut buf = [0u16; 1024];
+    let mut size = (buf.len() * 2) as u32;
+    let found = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, null_mut(), buf.as_mut_ptr() as _, &mut size) == 0 };
+    // Another copy's entry (an installed one, seen from a portable one) isn't ours.
+    let entry = crate::win::util::from_wide(&buf).to_lowercase();
+    found && entry.contains(&exe_path().to_string_lossy().to_lowercase())
 }
 
 pub fn set_startup(on: bool) {

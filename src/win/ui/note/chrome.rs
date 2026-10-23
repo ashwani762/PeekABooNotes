@@ -120,7 +120,7 @@ pub(super) fn paint(h: HWND) {
             }
             // A blank note hasn't been edited yet.
             if !blank || st.full_at.is_some() {
-                let fr = rect((18.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (36.0 * s) as i32, (18.0 * s) as i32);
+                let fr = rect((25.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (43.0 * s) as i32, (18.0 * s) as i32);
                 let meta = if st.full_at.is_some() { t!("note_full").to_string() } else { t!("note_edited", crate::common::i18n::time::edited_time(updated)) };
                 c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a * 0.85, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
             }

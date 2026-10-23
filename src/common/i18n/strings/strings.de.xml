@@ -57,12 +57,17 @@
         <item quantity="one">vor %d Min.</item>
         <item quantity="other">vor %d Min.</item>
     </plurals>
+    <string name="time_today">heute</string>
     <string name="time_yesterday">gestern</string>
     <string name="time_today_at">heute um %1$s</string>
     <string name="time_yesterday_at">gestern um %1$s</string>
     <string name="time_date_at">%1$s um %2$s</string>
 
     <!-- Undo toast -->
+    <plurals name="toast_archived">
+        <item quantity="one">Notiz archiviert</item>
+        <item quantity="other">%d Notizen archiviert</item>
+    </plurals>
     <plurals name="toast_deleted">
         <item quantity="one">Notiz gelöscht</item>
         <item quantity="other">%d Notizen gelöscht</item>
@@ -97,10 +102,6 @@
     <plurals name="tip_share">
         <item quantity="one">Diese Notiz teilen</item>
         <item quantity="other">Diese %d Notizen teilen</item>
-    </plurals>
-    <plurals name="notes_selected">
-        <item quantity="one">%d Notiz ausgewählt</item>
-        <item quantity="other">%d Notizen ausgewählt</item>
     </plurals>
     <string name="row_archived">%1$s · Archiviert</string>
     <string name="row_off_deck">%1$s · Nicht im Stapel</string>
@@ -197,9 +198,9 @@
     <string name="edge_top">Oben</string>
     <string name="edge_bottom">Unten</string>
     <string name="settings_cards">Karten im Stapel</string>
-    <string name="settings_cards_sub">Der Rest liegt in Alle Notizen</string>
+    <string name="settings_cards_sub">So viele, wie Platz haben; der Rest liegt in „Alle Notizen“</string>
     <string name="settings_new_notes">Neue Notizen</string>
-    <string name="settings_new_notes_sub">In Alle Notizen per Ziehen umsortieren</string>
+    <string name="settings_new_notes_sub">In „Alle Notizen“ per Ziehen umsortieren</string>
     <string name="new_notes_top">Oben</string>
     <string name="new_notes_bottom">Unten</string>
     <string name="settings_hide_unpinned">Notizen beim Wegklicken ausblenden</string>

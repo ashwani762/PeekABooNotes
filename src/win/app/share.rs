@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Ashwani Kumar
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Share notes: their Markdown and attachments in one zip, handed to the Windows share
-//! sheet (mail, Teams, nearby sharing and the rest).
+//! Share notes: their Markdown and attachments in one zip (or one note on its own as its
+//! Markdown file), handed to the Windows share sheet (mail, Teams, nearby sharing and the rest).
 
 use super::*;
 use std::path::{Path, PathBuf};
@@ -54,6 +54,18 @@ fn pack(name: &str, ids: &[u64]) -> std::io::Result<PathBuf> {
     let (written, failed) = write_markdown(&stage, ids);
     if written == 0 {
         return Err(failed.unwrap_or_else(|| std::io::Error::other("no notes written")));
+    }
+    // One note and nothing with it: share the Markdown file itself, which mail and chat
+    // apps show as it is.
+    let entries: Vec<PathBuf> = std::fs::read_dir(&stage)?.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    if let [only] = entries.as_slice()
+        && only.is_file()
+        && let Some(file) = only.file_name()
+    {
+        let out = base.join(file);
+        std::fs::rename(only, &out)?;
+        let _ = std::fs::remove_dir_all(&stage);
+        return Ok(out);
     }
     let zip = base.join(format!("{name}.zip"));
     crate::common::zip::zip_dir(&stage, &zip)?;

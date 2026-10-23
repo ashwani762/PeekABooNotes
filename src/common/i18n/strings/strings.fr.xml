@@ -57,12 +57,17 @@
         <item quantity="one">il y a %d min</item>
         <item quantity="other">il y a %d min</item>
     </plurals>
+    <string name="time_today">aujourd’hui</string>
     <string name="time_yesterday">hier</string>
     <string name="time_today_at">aujourd’hui à %1$s</string>
     <string name="time_yesterday_at">hier à %1$s</string>
     <string name="time_date_at">%1$s à %2$s</string>
 
     <!-- Undo toast -->
+    <plurals name="toast_archived">
+        <item quantity="one">Note archivée</item>
+        <item quantity="other">%d notes archivées</item>
+    </plurals>
     <plurals name="toast_deleted">
         <item quantity="one">Note supprimée</item>
         <item quantity="other">%d notes supprimées</item>
@@ -97,10 +102,6 @@
     <plurals name="tip_share">
         <item quantity="one">Partager cette note</item>
         <item quantity="other">Partager ces %d notes</item>
-    </plurals>
-    <plurals name="notes_selected">
-        <item quantity="one">%d note sélectionnée</item>
-        <item quantity="other">%d notes sélectionnées</item>
     </plurals>
     <string name="row_archived">%1$s · Archivée</string>
     <string name="row_off_deck">%1$s · Hors de la pile</string>
@@ -197,7 +198,7 @@
     <string name="edge_top">Haut</string>
     <string name="edge_bottom">Bas</string>
     <string name="settings_cards">Cartes dans la pile</string>
-    <string name="settings_cards_sub">Les autres sont dans Toutes les notes</string>
+    <string name="settings_cards_sub">Autant que l’écran en affiche, les autres dans Toutes les notes</string>
     <string name="settings_new_notes">Nouvelles notes</string>
     <string name="settings_new_notes_sub">Glissez dans Toutes les notes pour trier</string>
     <string name="new_notes_top">En haut</string>

@@ -334,9 +334,10 @@ fn open_at_place(h: HWND) {
             rich::set_scroll_y(edit, y.min(scrollbar::max_scroll(edit)));
             scrollbar::keep_caret_in_view(edit);
         }
+        // Never opened here before: from the top, title first.
         _ => {
-            rich::set_sel(edit, len, len);
-            rich::set_scroll_y(edit, scrollbar::max_scroll(edit));
+            rich::set_sel(edit, 0, 0);
+            rich::set_scroll_y(edit, 0);
         }
     }
     unsafe {

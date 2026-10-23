@@ -67,12 +67,17 @@
         <item quantity="one">%d min ago</item>
         <item quantity="other">%d mins ago</item>
     </plurals>
+    <string name="time_today">today</string>
     <string name="time_yesterday">yesterday</string>
     <string name="time_today_at">today at %1$s</string>
     <string name="time_yesterday_at">yesterday at %1$s</string>
     <string name="time_date_at">%1$s at %2$s</string>
 
     <!-- Undo toast -->
+    <plurals name="toast_archived">
+        <item quantity="one">Note archived</item>
+        <item quantity="other">%d notes archived</item>
+    </plurals>
     <plurals name="toast_deleted">
         <item quantity="one">Note deleted</item>
         <item quantity="other">%d notes deleted</item>
@@ -82,7 +87,7 @@
     <!-- All Notes -->
     <string name="library_title_notes">Notes</string>
     <string name="library_title_archive">Archive</string>
-    <string name="library_title_all">All notes</string>
+    <string name="library_title_all">All Notes</string>
     <string name="segment_notes">Notes</string>
     <string name="segment_archive">Archive</string>
     <string name="segment_all">All</string>
@@ -107,10 +112,6 @@
     <plurals name="tip_share">
         <item quantity="one">Share This Note</item>
         <item quantity="other">Share These %d Notes</item>
-    </plurals>
-    <plurals name="notes_selected">
-        <item quantity="one">%d note selected</item>
-        <item quantity="other">%d notes selected</item>
     </plurals>
     <string name="row_archived">%1$s · Archived</string>
     <string name="row_off_deck">%1$s · Not in deck</string>
@@ -207,7 +208,7 @@
     <string name="edge_top">Top</string>
     <string name="edge_bottom">Bottom</string>
     <string name="settings_cards">Cards in deck</string>
-    <string name="settings_cards_sub">The rest stay one click away in All Notes</string>
+    <string name="settings_cards_sub">As many as fit on the screen; the rest are in All Notes</string>
     <string name="settings_new_notes">New notes</string>
     <string name="settings_new_notes_sub">Drag notes in All Notes to reorder</string>
     <string name="new_notes_top">Top</string>

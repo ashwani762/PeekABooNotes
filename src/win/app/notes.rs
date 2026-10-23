@@ -109,9 +109,9 @@ pub fn step_note(id: u64, dir: i32, r: RECT) -> bool {
     let next = ids[(i + dir).rem_euclid(ids.len() as i32) as usize];
     if let Some(h) = note_hwnd(next) {
         unsafe { SetForegroundWindow(h) };
-    } else {
-        note::create(next, r, true);
+        return false;
     }
+    note::create(next, r, true);
     true
 }
 
@@ -139,7 +139,9 @@ pub(super) fn reopen_at_start() {
 
 pub(super) fn reopen_last() {
     let last = store(|s| s.d.settings.last_note.filter(|id| s.note(*id).is_some_and(|n| !n.archived)));
-    match last.or_else(|| store(|s| s.active_ids().first().copied())) {
+    // The last one gone or archived: the note edited most recently.
+    let recent = || store(|s| s.d.notes.iter().filter(|n| !n.archived).max_by_key(|n| n.updated).map(|n| n.id));
+    match last.or_else(recent) {
         Some(id) => open_note(id),
         None => new_note(),
     }
@@ -199,6 +201,22 @@ pub fn set_archived(ids: &[u64], archived: bool) {
     refresh();
 }
 
+/// Archive notes from a click or key, with the Undo toast, as deleting has.
+pub fn archive(ids: &[u64]) {
+    let before: Vec<(u64, i64)> = store(|s| ids.iter().filter_map(|id| s.note(*id).filter(|n| !n.archived).map(|n| (n.id, n.order))).collect());
+    if before.is_empty() {
+        return;
+    }
+    set_archived(ids, true);
+    let count = before.len();
+    // The toast undoes one thing: what was deleted before stays deleted.
+    ui(|u| {
+        u.pending.clear();
+        u.unarchive = before;
+    });
+    toast::show(count, true);
+}
+
 pub fn delete(ids: Vec<u64>) {
     for &id in &ids {
         if let Some(h) = note_hwnd(id) {
@@ -212,12 +230,13 @@ pub fn delete(ids: Vec<u64>) {
         return;
     }
     let count = ui(|u| {
+        u.unarchive.clear();
         u.pending.extend(removed);
         u.pending.len()
     });
     save();
     refresh();
-    toast::show(count);
+    toast::show(count, false);
 }
 
 /// Delete every note, archived ones too, once the user has said yes. The usual Undo toast
@@ -235,18 +254,38 @@ pub fn delete_all(owner: HWND) {
 fn confirm_delete_all(owner: HWND, n: usize) -> bool {
     use crate::win::ui::menu::{Item, action, danger};
     const ID_DELETE: u32 = 1;
-    let items = vec![danger(ID_DELETE, &tn!("menu_delete_all_notes", n), "", IC_DELETE), Item::Separator, action(2, t!("button_cancel"), "", "")];
+    // Cancel first, under the pointer: a click that lands a little low still deletes nothing.
+    let items = vec![action(2, t!("button_cancel"), "", ""), Item::Separator, danger(ID_DELETE, &tn!("menu_delete_all_notes", n), "", IC_DELETE)];
     let p = super::menus::cursor();
     popup(items, p.x, p.y, owner) == ID_DELETE
 }
 
+/// The toast's Undo: the notes just deleted come back, or the ones just archived return to
+/// the deck where they were.
 pub fn undo_delete() {
+    let unarchive = ui(|u| std::mem::take(&mut u.unarchive));
+    if !unarchive.is_empty() {
+        toast::hide();
+        store_mut(|s| {
+            for (id, order) in &unarchive {
+                if let Some(n) = s.note_mut(*id) {
+                    n.archived = false;
+                    n.order = *order;
+                }
+            }
+        });
+        save();
+        refresh();
+        crate::win::ui::allnotes::select(&unarchive.iter().map(|u| u.0).collect::<Vec<_>>());
+        return;
+    }
     let mut pending = ui(|u| std::mem::take(&mut u.pending));
     toast::hide();
     if pending.is_empty() {
         return;
     }
     pending.sort_by_key(|(i, _)| *i);
+    let ids: Vec<u64> = pending.iter().map(|(_, n)| n.id).collect();
     store_mut(|s| {
         for (i, n) in pending {
             s.insert_at(i, n);
@@ -254,10 +293,15 @@ pub fn undo_delete() {
     });
     save();
     refresh();
+    // What came back is what All Notes shows.
+    crate::win::ui::allnotes::select(&ids);
 }
 
 pub fn finalize_delete() {
-    ui(|u| u.pending.clear());
+    ui(|u| {
+        u.pending.clear();
+        u.unarchive.clear();
+    });
     toast::hide();
 }
 
@@ -279,8 +323,11 @@ pub fn note_command(id: u64, cmd: u32) {
             refresh();
         }
         NC_ARCHIVE => {
-            let archived = store(|s| s.note(id).is_some_and(|n| n.archived));
-            set_archived(&[id], !archived);
+            if store(|s| s.note(id).is_some_and(|n| n.archived)) {
+                set_archived(&[id], false);
+            } else {
+                archive(&[id]);
+            }
         }
         NC_DELETE => delete(vec![id]),
         NC_NEW => new_note(),

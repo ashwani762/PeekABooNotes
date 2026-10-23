@@ -340,6 +340,32 @@ pub fn show(archived: bool) {
     }
 }
 
+/// Select these notes, when All Notes is open (an Undo has just brought them back).
+pub fn select(ids: &[u64]) {
+    let h = with(|l| {
+        let found: Vec<u64> = ids.iter().copied().filter(|id| l.rows.iter().any(|r| r.id == *id)).collect();
+        if found.is_empty() {
+            return None;
+        }
+        l.anchor = found.last().copied();
+        l.sel = found;
+        if let Some(i) = primary_index(l) {
+            let lay = layout(l);
+            l.sel_y.to(lay.list_top + i as f32 * lay.row_h);
+            ensure_visible(l, i);
+        }
+        l.detail_a.snap(0.0);
+        l.detail_a.to(1.0);
+        Some(l.hwnd)
+    })
+    .flatten();
+    if let Some(h) = h {
+        paint_now(h);
+        sync_editor();
+        anim::wake(Client::List);
+    }
+}
+
 pub fn refresh() {
     let h = with(|l| {
         rebuild(l);
@@ -516,7 +542,8 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 app::open_note(id)
             }
         }
-        Action::Archive(ids, archived) => app::set_archived(&ids, archived),
+        Action::Archive(ids, true) => app::archive(&ids),
+        Action::Archive(ids, false) => app::set_archived(&ids, false),
         Action::Delete(ids) => {
             if !ids.is_empty() {
                 app::delete(ids)

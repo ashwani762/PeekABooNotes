@@ -85,6 +85,11 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if !matches!(vk, VK_BACK | VK_SHIFT | VK_CONTROL | VK_MENU) {
                 st.auto = None;
             }
+            if ctrl && shift && !alt && vk == b'Z' as u16 {
+                unsafe { DefSubclassProc(e, rich::EM_REDO, 0, 0) };
+                st.swallow = true;
+                return 0;
+            }
             if ctrl && !shift && !alt && vk == b'Z' as u16 {
                 if undo_toggle(e) {
                     mark_dirty(h);

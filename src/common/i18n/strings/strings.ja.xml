@@ -47,7 +47,7 @@
 
     <!-- Notes -->
     <string name="note_untitled">新規メモ</string>
-    <string name="note_edited">%1$s に編集</string>
+    <string name="note_edited">%1$sに編集</string>
     <string name="note_full">このメモはいっぱいです</string>
     <string name="file_untitled">無題</string>
 
@@ -56,12 +56,16 @@
     <plurals name="time_minutes_ago">
         <item quantity="other">%d 分前</item>
     </plurals>
+    <string name="time_today">今日</string>
     <string name="time_yesterday">昨日</string>
     <string name="time_today_at">今日 %1$s</string>
     <string name="time_yesterday_at">昨日 %1$s</string>
     <string name="time_date_at">%1$s %2$s</string>
 
     <!-- Undo toast -->
+    <plurals name="toast_archived">
+        <item quantity="other">%d 件のメモをアーカイブしました</item>
+    </plurals>
     <plurals name="toast_deleted">
         <item quantity="other">%d 件のメモを削除しました</item>
     </plurals>
@@ -92,9 +96,6 @@
     </plurals>
     <plurals name="tip_share">
         <item quantity="other">%d 件のメモを共有</item>
-    </plurals>
-    <plurals name="notes_selected">
-        <item quantity="other">%d 件のメモを選択中</item>
     </plurals>
     <string name="row_archived">%1$s · アーカイブ済み</string>
     <string name="row_off_deck">%1$s · デッキになし</string>
@@ -188,7 +189,7 @@
     <string name="edge_top">上</string>
     <string name="edge_bottom">下</string>
     <string name="settings_cards">デッキのカード数</string>
-    <string name="settings_cards_sub">残りは「すべてのメモ」からすぐに開けます</string>
+    <string name="settings_cards_sub">画面に収まる分を表示し、残りは「すべてのメモ」から開けます</string>
     <string name="settings_new_notes">新規メモの位置</string>
     <string name="settings_new_notes_sub">「すべてのメモ」でドラッグして並べ替え</string>
     <string name="new_notes_top">上</string>

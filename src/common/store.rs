@@ -333,19 +333,26 @@ pub fn looks_like_marker(s: &str) -> bool {
         || (digits > 0 && s[digits..].starts_with(". "))
 }
 
-/// Markdown for reading outside the app. A line that runs on into the next one (not a
-/// heading, not before a bullet or heading, which start their own block) ends in two
-/// spaces, Markdown's line break: previewers then keep the note's lines apart instead of
-/// joining them into one paragraph, and a plain text editor shows nothing extra.
+/// Markdown for reading outside the app, so viewers show the note's lines as it has them:
+/// a plain line followed by another ends in two spaces (Markdown's line break) rather
+/// than joining it into one paragraph, and a plain line right after a list gets a blank
+/// line before it, which would otherwise read as part of the last item. A plain text
+/// editor shows nothing extra.
 pub fn hard_breaks(md: &str) -> String {
     let lines: Vec<&str> = md.split('\n').collect();
+    let item = |l: &str| {
+        let t = l.trim_start();
+        looks_like_marker(t) && !t.starts_with('#')
+    };
+    let plain = |l: &str| !l.trim().is_empty() && !item(l) && !l.trim_start().starts_with('#');
     let mut out = String::with_capacity(md.len() + lines.len() * 2);
     for (i, l) in lines.iter().enumerate() {
         out.push_str(l);
-        let Some(next) = lines.get(i + 1).map(|n| n.trim_start()) else { break };
-        let starts_block = looks_like_marker(next) && !next.starts_with(|c: char| c.is_ascii_digit());
-        if !l.trim().is_empty() && !l.trim_start().starts_with('#') && !next.is_empty() && !starts_block {
+        let Some(&next) = lines.get(i + 1) else { break };
+        if plain(l) && plain(next) {
             out.push_str("  ");
+        } else if item(l) && plain(next) {
+            out.push('\n');
         }
         out.push('\n');
     }
@@ -463,7 +470,7 @@ mod tests {
     #[test]
     fn breaks_lines_for_previewers() {
         let md = "# Standup\nYesterday: retries\nToday: search\n- one\n  - nested\n- two\nafter\n\n![a.jpg](attachments/a.jpg)\nAll good\n1. first\n2. second";
-        let want = "# Standup\nYesterday: retries  \nToday: search\n- one\n  - nested\n- two  \nafter\n\n![a.jpg](attachments/a.jpg)  \nAll good  \n1. first  \n2. second";
+        let want = "# Standup\nYesterday: retries  \nToday: search\n- one\n  - nested\n- two\n\nafter\n\n![a.jpg](attachments/a.jpg)  \nAll good\n1. first\n2. second";
         assert_eq!(hard_breaks(md), want);
     }
 }

@@ -88,6 +88,8 @@ pub struct Ui {
     pub worker: HWND,
     pub notes: HashMap<u64, HWND>,
     pub pending: Vec<(usize, Note)>,
+    /// Notes just archived, with their places in the deck, for the toast's Undo.
+    pub unarchive: Vec<(u64, i64)>,
     pub dark: bool,
     pub icon: HICON,
     pub icon_sm: HICON,
@@ -356,6 +358,7 @@ pub fn run() -> i32 {
                 worker: null_mut(),
                 notes: HashMap::new(),
                 pending: Vec::new(),
+                unarchive: Vec::new(),
                 dark: wanted_dark(),
                 icon: gfx::app_icon(GetSystemMetrics(SM_CXICON).max(32)),
                 icon_sm: gfx::app_icon(GetSystemMetrics(SM_CXSMICON).max(16)),

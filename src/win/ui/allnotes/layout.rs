@@ -20,7 +20,9 @@ pub(super) fn layout(l: &Lib) -> Layout {
     let search = Shape::new(pad, SEARCH_Y * s, list_w - 2.0 * pad, SEARCH_H * s, 10.0 * s);
     let seg = Shape::new(pad, SEG_Y * s, list_w - 2.0 * pad, SEG_H * s, 9.0 * s);
     let detail_x = if wide { list_w } else { w as f32 };
-    let card = Shape::new(detail_x + 28.0 * s, CARD_Y * s, (w as f32 - detail_x - 56.0 * s).max(10.0), (h as f32 - CARD_Y * s - 28.0 * s).max(10.0), 18.0 * s);
+    let room = (w as f32 - detail_x - 56.0 * s).max(10.0);
+    let card_w = room.min(820.0 * s);
+    let card = Shape::new(detail_x + 28.0 * s + (room - card_w) / 2.0, CARD_Y * s, card_w, (h as f32 - CARD_Y * s - 28.0 * s).max(10.0), 18.0 * s);
     Layout { w, h, wide, list_w, search, seg, list_top: LIST_TOP * s, row_h: ROW_H * s, detail_x, card }
 }
 
@@ -33,7 +35,9 @@ pub(super) fn caption_rects(lay: &Layout, s: f32) -> [(Hit, RECT); 3] {
 /// Toolbar icons beside the large title, centred on its cap height.
 pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 3] {
     let size = (30.0 * s) as i32;
-    let right = if lay.wide { lay.list_w as i32 - (14.0 * s) as i32 } else { lay.w - (3.0 * 46.0 * s) as i32 - (10.0 * s) as i32 };
+    // In line with the search field's right edge, in both layouts: when only the list
+    // shows, the window's own buttons sit on the row above, out of the way.
+    let right = lay.list_w as i32 - (14.0 * s) as i32;
     let cy = (TITLE_BASE - 28.0 * 0.7 / 2.0) * s;
     let y = (cy - size as f32 / 2.0).round() as i32;
     let gap = (2.0 * s) as i32;

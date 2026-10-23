@@ -57,12 +57,17 @@
         <item quantity="one">hace %d min</item>
         <item quantity="other">hace %d min</item>
     </plurals>
+    <string name="time_today">hoy</string>
     <string name="time_yesterday">ayer</string>
     <string name="time_today_at">hoy a las %1$s</string>
     <string name="time_yesterday_at">ayer a las %1$s</string>
     <string name="time_date_at">%1$s a las %2$s</string>
 
     <!-- Undo toast -->
+    <plurals name="toast_archived">
+        <item quantity="one">Nota archivada</item>
+        <item quantity="other">%d notas archivadas</item>
+    </plurals>
     <plurals name="toast_deleted">
         <item quantity="one">Nota eliminada</item>
         <item quantity="other">%d notas eliminadas</item>
@@ -97,10 +102,6 @@
     <plurals name="tip_share">
         <item quantity="one">Compartir esta nota</item>
         <item quantity="other">Compartir estas %d notas</item>
-    </plurals>
-    <plurals name="notes_selected">
-        <item quantity="one">%d nota seleccionada</item>
-        <item quantity="other">%d notas seleccionadas</item>
     </plurals>
     <string name="row_archived">%1$s · Archivada</string>
     <string name="row_off_deck">%1$s · Fuera del mazo</string>
@@ -197,7 +198,7 @@
     <string name="edge_top">Arriba</string>
     <string name="edge_bottom">Abajo</string>
     <string name="settings_cards">Tarjetas en el mazo</string>
-    <string name="settings_cards_sub">El resto, en Todas las notas</string>
+    <string name="settings_cards_sub">Las que quepan en la pantalla; el resto, en Todas las notas</string>
     <string name="settings_new_notes">Notas nuevas</string>
     <string name="settings_new_notes_sub">Arrastra en Todas las notas para reordenar</string>
     <string name="new_notes_top">Arriba</string>

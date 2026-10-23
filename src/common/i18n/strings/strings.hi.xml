@@ -57,12 +57,17 @@
         <item quantity="one">%d मिनट पहले</item>
         <item quantity="other">%d मिनट पहले</item>
     </plurals>
+    <string name="time_today">आज</string>
     <string name="time_yesterday">कल</string>
     <string name="time_today_at">आज %1$s बजे</string>
     <string name="time_yesterday_at">कल %1$s बजे</string>
     <string name="time_date_at">%1$s, %2$s बजे</string>
 
     <!-- Undo toast -->
+    <plurals name="toast_archived">
+        <item quantity="one">नोट संग्रहित किया गया</item>
+        <item quantity="other">%d नोट संग्रहित किए गए</item>
+    </plurals>
     <plurals name="toast_deleted">
         <item quantity="one">नोट हटाया गया</item>
         <item quantity="other">%d नोट हटाए गए</item>
@@ -97,10 +102,6 @@
     <plurals name="tip_share">
         <item quantity="one">यह नोट साझा करें</item>
         <item quantity="other">ये %d नोट साझा करें</item>
-    </plurals>
-    <plurals name="notes_selected">
-        <item quantity="one">%d नोट चुना गया</item>
-        <item quantity="other">%d नोट चुने गए</item>
     </plurals>
     <string name="row_archived">%1$s · संग्रहित</string>
     <string name="row_off_deck">%1$s · डेक में नहीं</string>
@@ -197,7 +198,7 @@
     <string name="edge_top">ऊपर</string>
     <string name="edge_bottom">नीचे</string>
     <string name="settings_cards">डेक में कार्ड</string>
-    <string name="settings_cards_sub">बाक़ी सभी नोट्स में एक क्लिक दूर रहते हैं</string>
+    <string name="settings_cards_sub">जितने स्क्रीन पर आ सकें; बाक़ी सभी नोट्स में</string>
     <string name="settings_new_notes">नए नोट्स</string>
     <string name="settings_new_notes_sub">क्रम बदलने के लिए सभी नोट्स में खींचें</string>
     <string name="new_notes_top">ऊपर</string>
