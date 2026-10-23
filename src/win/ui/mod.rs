@@ -10,6 +10,7 @@ pub mod menu;
 pub mod note;
 pub mod settings;
 pub mod toast;
+pub mod tooltip;
 
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::Graphics::Gdi::{DT_END_ELLIPSIS, DT_LEFT, DT_WORDBREAK};

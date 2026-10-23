@@ -234,4 +234,13 @@
     <string name="dialog_delete_all_ok">Eliminar todo</string>
     <string name="settings_notes_folder_portable">Carpeta de notas · Portátil</string>
     <string name="settings_portable_note">Esta copia es portátil: las notas se guardan junto a la app, no en Documentos.</string>
+
+    <!-- Tooltips on the icon buttons -->
+    <string name="tip_done">Hecha: mover al archivo</string>
+    <string name="tip_unpin">Quitar de siempre visible</string>
+    <string name="tip_color">Cambiar color</string>
+    <string name="tip_more">Más</string>
+    <string name="tip_close">Cerrar</string>
+    <string name="tip_import">Importar notas</string>
+    <string name="tip_export">Exportar estas notas</string>
 </resources>

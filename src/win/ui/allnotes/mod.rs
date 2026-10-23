@@ -869,6 +869,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         l.tracking = true;
                     }
                     let hit = hit_test(l, x, y);
+                    header_tip(l, hit);
                     if hit == l.hover {
                         return false;
                     }
@@ -892,6 +893,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_MOUSELEAVE => {
+                crate::win::ui::tooltip::leave(hwnd);
                 with(|l| {
                     l.tracking = false;
                     if l.hover != Hit::Max {
@@ -903,6 +905,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_LBUTTONDOWN => {
+                crate::win::ui::tooltip::mute();
                 let (x, y) = (x_of(lp), y_of(lp));
                 let action = with(|l| {
                     let hit = hit_test(l, x, y);
@@ -1026,6 +1029,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_DESTROY => {
+                crate::win::ui::tooltip::leave(hwnd);
                 LIB.with(|l| {
                     if let Ok(mut l) = l.try_borrow_mut()
                         && let Some(lib) = l.take()

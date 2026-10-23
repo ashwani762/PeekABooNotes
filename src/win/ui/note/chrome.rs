@@ -9,12 +9,40 @@ pub(super) fn header_h(s: f32) -> i32 {
     (36.0 * s) as i32
 }
 
-pub(super) fn buttons(cw: i32, s: f32) -> [(Btn, RECT); 4] {
+pub(super) fn buttons(cw: i32, s: f32) -> [(Btn, RECT); 6] {
     let (bw, bh) = ((28.0 * s) as i32, (24.0 * s) as i32);
     let top = (header_h(s) - bh) / 2;
     let right = cw - (6.0 * s) as i32;
     let at = |i: i32| rect(right - bw * (i + 1), top, bw, bh);
-    [(Btn::Close, at(0)), (Btn::More, at(1)), (Btn::Color, at(2)), (Btn::Pin, at(3))]
+    // What to do with the note sits apart from the window's own controls.
+    let gap = (8.0 * s) as i32;
+    let apart = |i: i32| rect(right - bw * (i + 1) - gap, top, bw, bh);
+    [(Btn::Close, at(0)), (Btn::More, at(1)), (Btn::Color, at(2)), (Btn::Pin, at(3)), (Btn::Delete, apart(4)), (Btn::Done, apart(5))]
+}
+
+/// Show (or move along) the tooltip for header button `b`; `Btn::None` lets it go.
+pub(super) fn tip_for(h: HWND, b: Btn) {
+    use crate::common::i18n::keys;
+    use crate::win::ui::tooltip;
+    let Some(st) = state(h) else { return };
+    if b == Btn::None || st.embedded {
+        tooltip::leave(h);
+        return;
+    }
+    let pinned = app::store(|s| s.note(st.id).map(|n| n.pinned)).unwrap_or(false);
+    let (label, k) = match b {
+        Btn::Done => (t!("tip_done"), keys(&["ctrl", "shift", "A"])),
+        Btn::Delete => (t!("menu_delete"), keys(&["ctrl", "shift", "del"])),
+        Btn::Pin => (if pinned { t!("tip_unpin") } else { t!("menu_keep_on_top") }, keys(&["ctrl", "shift", "P"])),
+        Btn::Color => (t!("tip_color"), String::new()),
+        Btn::More => (t!("tip_more"), String::new()),
+        _ => (t!("tip_close"), keys(&["esc"])),
+    };
+    let mut rc: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetClientRect(h, &mut rc) };
+    if let Some((_, r)) = buttons(rc.right, st.s).into_iter().find(|(x, _)| *x == b) {
+        tooltip::hover(h, r, label, &k);
+    }
 }
 
 pub(super) fn btn_at(h: HWND, x: i32, y: i32) -> Btn {
@@ -58,9 +86,12 @@ pub(super) fn paint(h: HWND) {
                     continue;
                 }
                 let (bx, by, bw, bh) = (r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32);
-                if st.hot == b {
-                    let ha = st.hot_a.value * a;
-                    c.shape(&Shape::new(bx, by, bw, bh, 7.0 * s), ink, 0.13 * ha, 1.0, 0.0);
+                // Delete warns in red when aimed at.
+                let danger = if dark { 0xFF453A } else { 0xD70015 };
+                let hot = if st.hot == b { st.hot_a.value } else { 0.0 };
+                if hot > 0.0 {
+                    let tint = if b == Btn::Delete { danger } else { ink };
+                    c.shape(&Shape::new(bx, by, bw, bh, 7.0 * s), tint, 0.13 * hot * a, 1.0, 0.0);
                 }
                 match b {
                     Btn::Color => {
@@ -71,11 +102,14 @@ pub(super) fn paint(h: HWND) {
                     }
                     _ => {
                         let glyph = match b {
+                            Btn::Done => "\u{E73E}",
+                            Btn::Delete => "\u{E74D}",
                             Btn::Pin => if pinned { "\u{E841}" } else { "\u{E718}" },
                             Btn::More => "\u{E712}",
                             _ => "\u{E8BB}",
                         };
-                        c.text(glyph, icons, r, ink, a * 0.9, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        let rgb = if b == Btn::Delete { mix(ink, danger, hot) } else { ink };
+                        c.text(glyph, icons, r, rgb, a * 0.9, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                         if b == Btn::Pin && pinned {
                             // The font's solid pin has no needle: draw the outline pin over
                             // it, so the filled head keeps its point.
@@ -134,6 +168,13 @@ pub(super) fn click(h: HWND, b: Btn) {
             PostMessageW(h, WM_CLOSE, 0, 0);
         },
         Btn::Pin => app::note_command(id, NC_PIN),
+        // Posted: both take this window away, which mustn't happen inside its own click.
+        Btn::Done => unsafe {
+            PostMessageW(h, WM_NOTE_CMD, NC_ARCHIVE as usize, 0);
+        },
+        Btn::Delete => unsafe {
+            PostMessageW(h, WM_NOTE_CMD, NC_DELETE as usize, 0);
+        },
         Btn::Color => {
             let mut rc: RECT = unsafe { std::mem::zeroed() };
             unsafe { GetClientRect(h, &mut rc) };

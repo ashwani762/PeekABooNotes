@@ -23,6 +23,7 @@ pub enum Client {
     List = 16,
     Menu = 32,
     Settings = 64,
+    Tip = 128,
 }
 
 thread_local! {
@@ -54,7 +55,7 @@ pub fn tick() {
     });
     let mask = ACTIVE.with(|a| a.get());
     let mut keep = 0;
-    for c in [Client::Deck, Client::Ghost, Client::Toast, Client::Notes, Client::List, Client::Menu, Client::Settings] {
+    for c in [Client::Deck, Client::Ghost, Client::Toast, Client::Notes, Client::List, Client::Menu, Client::Settings, Client::Tip] {
         let bit = c as u32;
         if mask & bit == 0 {
             continue;
@@ -67,6 +68,7 @@ pub fn tick() {
             Client::List => crate::win::ui::allnotes::frame(dt),
             Client::Menu => crate::win::ui::menu::frame(dt),
             Client::Settings => crate::win::ui::settings::frame(dt),
+            Client::Tip => crate::win::ui::tooltip::frame(dt),
         };
         if more {
             keep |= bit;

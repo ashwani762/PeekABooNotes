@@ -244,4 +244,13 @@
     <string name="dialog_delete_all_ok">Delete All</string>
     <string name="settings_notes_folder_portable">Notes folder · Portable</string>
     <string name="settings_portable_note">This copy is portable: its notes stay beside the app, not in Documents.</string>
+
+    <!-- Tooltips on the icon buttons -->
+    <string name="tip_done">Mark as Done and Archive</string>
+    <string name="tip_unpin">Stop Keeping on Top</string>
+    <string name="tip_color">Change Colour</string>
+    <string name="tip_more">More</string>
+    <string name="tip_close">Close</string>
+    <string name="tip_import">Import Notes</string>
+    <string name="tip_export">Export These Notes</string>
 </resources>

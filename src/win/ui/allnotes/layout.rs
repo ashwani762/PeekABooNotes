@@ -41,6 +41,23 @@ pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 4] {
     [(Hit::Settings, r(0)), (Hit::Export, r(1)), (Hit::Import, r(2)), (Hit::New, r(3))]
 }
 
+/// The tooltip for a toolbar icon under the pointer, or none.
+pub(super) fn header_tip(l: &Lib, hit: Hit) {
+    use crate::win::ui::tooltip;
+    let lay = layout(l);
+    let Some((_, r)) = header_buttons(&lay, l.s).into_iter().find(|(x, _)| *x == hit) else {
+        tooltip::leave(l.hwnd);
+        return;
+    };
+    let (label, keys) = match hit {
+        Hit::New => (t!("menu_new_note"), crate::common::i18n::keys(&["ctrl", "N"])),
+        Hit::Import => (t!("tip_import"), String::new()),
+        Hit::Export => (t!("tip_export"), String::new()),
+        _ => (t!("menu_settings"), String::new()),
+    };
+    tooltip::hover(l.hwnd, r, label, &keys);
+}
+
 /// The detail pane's buttons: (hit, rect, label, icon glyph).
 pub(super) fn detail_buttons(l: &Lib, lay: &Layout) -> Vec<(Hit, RECT, &'static str, &'static str)> {
     let s = l.s;

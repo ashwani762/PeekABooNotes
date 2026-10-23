@@ -224,4 +224,13 @@
     <string name="dialog_delete_all_ok">すべて削除</string>
     <string name="settings_notes_folder_portable">メモのフォルダ · ポータブル</string>
     <string name="settings_portable_note">このコピーはポータブル版です。メモは「ドキュメント」ではなく、アプリと同じ場所に保存されます。</string>
+
+    <!-- Tooltips on the icon buttons -->
+    <string name="tip_done">完了にしてアーカイブ</string>
+    <string name="tip_unpin">手前に表示をやめる</string>
+    <string name="tip_color">色を変更</string>
+    <string name="tip_more">その他</string>
+    <string name="tip_close">閉じる</string>
+    <string name="tip_import">メモを読み込む</string>
+    <string name="tip_export">これらのメモを書き出す</string>
 </resources>

@@ -234,4 +234,13 @@
     <string name="dialog_delete_all_ok">सभी हटाएँ</string>
     <string name="settings_notes_folder_portable">नोट्स फ़ोल्डर · पोर्टेबल</string>
     <string name="settings_portable_note">यह कॉपी पोर्टेबल है: नोट्स ऐप के पास ही रहते हैं, Documents में नहीं।</string>
+
+    <!-- Tooltips on the icon buttons -->
+    <string name="tip_done">पूरा हुआ, संग्रह में भेजें</string>
+    <string name="tip_unpin">ऊपर रखना बंद करें</string>
+    <string name="tip_color">रंग बदलें</string>
+    <string name="tip_more">और</string>
+    <string name="tip_close">बंद करें</string>
+    <string name="tip_import">नोट्स आयात करें</string>
+    <string name="tip_export">ये नोट्स निर्यात करें</string>
 </resources>

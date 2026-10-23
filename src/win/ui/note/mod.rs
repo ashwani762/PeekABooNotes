@@ -42,6 +42,9 @@ const WM_RESTYLE: u32 = WM_APP + 41;
 #[derive(Clone, Copy, PartialEq)]
 enum Btn {
     None,
+    /// Done: archive the note.
+    Done,
+    Delete,
     Pin,
     Color,
     More,
@@ -718,6 +721,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         st.tracking = true;
                     }
                     pointer_in(h);
+                    tip_for(h, b);
                     if st.hot != b {
                         if b != Btn::None {
                             st.hot = b;
@@ -734,11 +738,13 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     st.tracking = false;
                     st.hot_a.to(0.0);
                 }
+                crate::win::ui::tooltip::leave(h);
                 scrollbar::mouse_leave(h);
                 pointer_out(h);
                 return 0;
             }
             WM_LBUTTONDOWN => {
+                crate::win::ui::tooltip::mute();
                 if scrollbar::mouse_down(h, x_of(lp), y_of(lp)) {
                     return 0;
                 }
@@ -800,6 +806,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_DESTROY => {
+                crate::win::ui::tooltip::leave(h);
                 on_destroy(h);
                 app::schedule_trim();
                 return 0;

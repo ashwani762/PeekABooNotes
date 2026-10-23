@@ -234,4 +234,13 @@
     <string name="dialog_delete_all_ok">Alle löschen</string>
     <string name="settings_notes_folder_portable">Notizordner · Portabel</string>
     <string name="settings_portable_note">Diese Kopie ist portabel: Die Notizen liegen neben der App, nicht unter „Dokumente“.</string>
+
+    <!-- Tooltips on the icon buttons -->
+    <string name="tip_done">Erledigt, ins Archiv</string>
+    <string name="tip_unpin">Nicht mehr im Vordergrund</string>
+    <string name="tip_color">Farbe ändern</string>
+    <string name="tip_more">Mehr</string>
+    <string name="tip_close">Schließen</string>
+    <string name="tip_import">Notizen importieren</string>
+    <string name="tip_export">Diese Notizen exportieren</string>
 </resources>
