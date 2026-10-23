@@ -57,9 +57,9 @@
         <item quantity="one">il y a %d min</item>
         <item quantity="other">il y a %d min</item>
     </plurals>
-    <string name="time_yesterday">Hier</string>
-    <string name="time_today_at">Aujourd’hui à %1$s</string>
-    <string name="time_yesterday_at">Hier à %1$s</string>
+    <string name="time_yesterday">hier</string>
+    <string name="time_today_at">aujourd’hui à %1$s</string>
+    <string name="time_yesterday_at">hier à %1$s</string>
     <string name="time_date_at">%1$s à %2$s</string>
 
     <!-- Undo toast -->

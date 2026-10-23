@@ -57,9 +57,9 @@
         <item quantity="one">hace %d min</item>
         <item quantity="other">hace %d min</item>
     </plurals>
-    <string name="time_yesterday">Ayer</string>
-    <string name="time_today_at">Hoy a las %1$s</string>
-    <string name="time_yesterday_at">Ayer a las %1$s</string>
+    <string name="time_yesterday">ayer</string>
+    <string name="time_today_at">hoy a las %1$s</string>
+    <string name="time_yesterday_at">ayer a las %1$s</string>
     <string name="time_date_at">%1$s a las %2$s</string>
 
     <!-- Undo toast -->

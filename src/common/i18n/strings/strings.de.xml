@@ -57,9 +57,9 @@
         <item quantity="one">vor %d Min.</item>
         <item quantity="other">vor %d Min.</item>
     </plurals>
-    <string name="time_yesterday">Gestern</string>
-    <string name="time_today_at">Heute um %1$s</string>
-    <string name="time_yesterday_at">Gestern um %1$s</string>
+    <string name="time_yesterday">gestern</string>
+    <string name="time_today_at">heute um %1$s</string>
+    <string name="time_yesterday_at">gestern um %1$s</string>
     <string name="time_date_at">%1$s um %2$s</string>
 
     <!-- Undo toast -->

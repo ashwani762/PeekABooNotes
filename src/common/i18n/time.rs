@@ -20,7 +20,8 @@ fn weekday(t: &LocalTime) -> String {
     os::format_weekday(t, &super::tag()).unwrap_or_else(|| date(t, true))
 }
 
-/// Compact list time: "3:42 PM", "Yesterday", "Tuesday", "October 18".
+/// Compact list time: "3:42 PM", "yesterday", "Tuesday", "October 18". Always used
+/// within a sentence ("Edited yesterday"), so today and yesterday are lowercase.
 pub fn relative_time(ts: i64) -> String {
     let (t, today) = (os::local_time(ts), os::local_time(now()));
     match local_day(&today) - local_day(&t) {
@@ -31,7 +32,7 @@ pub fn relative_time(ts: i64) -> String {
     }
 }
 
-/// Sentence form for details: "Today at 3:42 PM", "Yesterday at 9:10 AM",
+/// Sentence form for details: "today at 3:42 PM", "yesterday at 9:10 AM",
 /// "October 18 at 11:02 AM".
 pub fn long_time(ts: i64) -> String {
     let (t, today) = (os::local_time(ts), os::local_time(now()));

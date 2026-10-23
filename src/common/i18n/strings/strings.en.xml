@@ -67,9 +67,9 @@
         <item quantity="one">%d min ago</item>
         <item quantity="other">%d mins ago</item>
     </plurals>
-    <string name="time_yesterday">Yesterday</string>
-    <string name="time_today_at">Today at %1$s</string>
-    <string name="time_yesterday_at">Yesterday at %1$s</string>
+    <string name="time_yesterday">yesterday</string>
+    <string name="time_today_at">today at %1$s</string>
+    <string name="time_yesterday_at">yesterday at %1$s</string>
     <string name="time_date_at">%1$s at %2$s</string>
 
     <!-- Undo toast -->
