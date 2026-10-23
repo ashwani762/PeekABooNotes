@@ -439,6 +439,12 @@ impl Canvas {
         dw::text(&mut self.target(), s, f, r, clip, rgb, 1.0, flags);
     }
 
+    /// `text`, but nothing drawn below `bottom`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_above(&mut self, s: &str, f: &Font, r: RECT, bottom: i32, rgb: u32, alpha: f32, flags: u32) {
+        dw::text_above(&mut self.target(), s, f, r, bottom, rgb, alpha, flags);
+    }
+
     /// `line` at full opacity.
     #[allow(clippy::too_many_arguments)]
     pub fn line_ct(&mut self, s: &str, f: &Font, x: i32, baseline: i32, w: i32, clip: Option<RECT>, rgb: u32, align: u32) -> i32 {

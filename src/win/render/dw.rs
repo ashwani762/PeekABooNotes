@@ -360,6 +360,18 @@ pub fn text(t: &mut Target, s: &str, f: &Font, r: RECT, clip: Option<RECT>, rgb:
     draw(t, l, (r.left as f32, r.top as f32), 0.0, (0.0, 0.0), b, rgb, alpha);
 }
 
+/// `text` with the usual overhang slack around `r`, but nothing drawn below `bottom`
+/// (a cut-off line must not show the tops of the next one).
+#[allow(clippy::too_many_arguments)]
+pub fn text_above(t: &mut Target, s: &str, f: &Font, r: RECT, bottom: i32, rgb: u32, alpha: f32, flags: u32) {
+    if s.is_empty() {
+        return;
+    }
+    let Some(l) = f.layout(s, (r.right - r.left) as f32, (r.bottom - r.top) as f32, flags) else { return };
+    let b = RECT { left: r.left - 2, top: r.top - 2, right: r.right + 2, bottom: (r.bottom + 2).min(bottom) };
+    draw(t, l, (r.left as f32, r.top as f32), 0.0, (0.0, 0.0), b, rgb, alpha);
+}
+
 /// One line whose baseline sits at `baseline`; returns its advance width.
 #[allow(clippy::too_many_arguments)]
 pub fn line(t: &mut Target, s: &str, f: &Font, x: i32, baseline: i32, w: i32, clip: Option<RECT>, rgb: u32, alpha: f32, align: u32) -> i32 {

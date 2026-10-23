@@ -89,14 +89,19 @@ fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u
                 }
             }
             None if !mark.is_empty() => {
-                c.line(mark, f, x, y + f.ascent, tx - x, None, text_rgb, alpha, DT_LEFT);
+                let clip = crate::win::util::rect(x - 2, y - line_h, tx - x + 4, r.bottom - y + line_h);
+                c.line(mark, f, x, y + f.ascent, tx - x, Some(clip), text_rgb, alpha, DT_LEFT);
             }
             None => {}
         }
         let fits = h <= room;
         let flags = if fits { DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS } else { DT_LEFT | DT_WORDBREAK };
-        c.text(text, font, crate::win::util::rect(tx, y, w, h.min(room)), rgb, alpha, flags);
-        if !fits {
+        if fits {
+            c.text(text, font, crate::win::util::rect(tx, y, w, h), rgb, alpha, flags);
+        } else {
+            // Stop at the cut: glyph slack past it would show the tops of the next line
+            // below the fade.
+            c.text_above(text, font, crate::win::util::rect(tx, y, w, room), r.bottom, rgb, alpha, flags);
             return fade_out(Some(c), r, line_h, paper);
         }
         y += h.max(line_h);
