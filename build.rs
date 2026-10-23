@@ -16,7 +16,7 @@ fn exe_dir() -> Option<PathBuf> {
 /// Put the string files beside the exe, in `lang\`, where translators can edit them and
 /// add languages. (The built-in ones are also compiled in, so a lone exe still works.)
 fn copy_strings() {
-    let src = Path::new("src/i18n/strings");
+    let src = Path::new("src/common/i18n/strings");
     println!("cargo:rerun-if-changed={}", src.display());
     let Some(dir) = exe_dir() else { return };
     let dest = dir.join("lang");

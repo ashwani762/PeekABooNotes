@@ -103,7 +103,7 @@ Paste is always plain text, so notes keep a consistent look.
 
 English, German, Spanish, French, Hindi and Japanese are built in. By default PeekABoo Notes follows Windows' preferred display languages: the exact tag, then the base language, then English. Settings › General › Language overrides that. Dates and times are formatted by Windows for the chosen locale.
 
-Interface text lives in Android-style resource files, one per language: `src/i18n/strings/strings.<tag>.xml`.
+Interface text lives in Android-style resource files, one per language: `src/common/i18n/strings/strings.<tag>.xml`.
 
 ```xml
 <resources>
@@ -122,7 +122,7 @@ Interface text lives in Android-style resource files, one per language: `src/i18
 
 **Adding a language**
 1. Copy `strings.en.xml` to `strings.<tag>.xml` (for example `strings.it.xml` or `strings.pt-BR.xml`) and translate the text.
-2. Either add the file to `BUILTIN` in `src/i18n/mod.rs`, or drop it into a `lang` folder next to `peekaboo-notes.exe` (or in the notes folder).
+2. Either add the file to `BUILTIN` in `src/common/i18n/mod.rs`, or drop it into a `lang` folder next to `peekaboo-notes.exe` (or in the notes folder).
 
 Files in `lang` are read at startup and override the built-in strings, so you can try a translation without rebuilding. Every build copies the built-in files to `target\<profile>\lang\`. `cargo test` checks that every built-in language has exactly the keys and placeholders of English.
 
@@ -170,20 +170,13 @@ A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three 
 
 ## Code map
 
+The app is split so other platforms can be added beside Windows: `src/common/` is portable and never calls an operating system directly (a test enforces it), and each platform module (today `src/win/`) supplies the windows, text, editor and system services, plus the handful of functions in `crate::os` that `common` relies on (local time, the Documents folder, preferred languages, locale date formats, a system description).
+
 | Path | Contents |
 |---|---|
-| `src/main.rs` | Entry point and module list |
-| `src/app/` | App state and message loop (`mod.rs`), note lifecycle (`notes.rs`), menus and commands (`menus.rs`), import/export and autostart (`files.rs`), applying settings (`prefs.rs`) |
-| `src/ui/deck/` | The edge deck: state and input (`mod.rs`), geometry and motion (`layout.rs`), painting (`draw.rs`) |
-| `src/ui/note/` | Note windows: lifecycle (`mod.rs`), header and footer (`chrome.rs`), commands and key map (`commands.rs`), lists while typing (`lists.rs`), the editor subclass (`input.rs`) |
-| `src/ui/allnotes/` | All Notes: state and input (`mod.rs`), rows and drag-reorder (`list.rs`), geometry (`layout.rs`), painting (`draw.rs`), the inline editor (`editor.rs`) |
-| `src/ui/settings/` | Settings: state and input (`mod.rs`), page contents (`pages.rs`), geometry (`layout.rs`), painting (`draw.rs`) |
-| `src/ui/` | Also `menu.rs` (popover menus), `toast.rs` (Undo), `ghost.rs` (cards flying between the deck and windows), and note previews (`mod.rs`) |
-| `src/editor/` | RichEdit wrapper (`rich/`: FFI, `format.rs`, `lists.rs`, `markdown.rs`) and the checklist overlay (`checks.rs`) |
-| `src/render/` | Software canvas (`gfx.rs`), DirectWrite text (`dw.rs`), springs and the frame clock (`anim.rs`) |
-| `src/i18n/` | String resources (`mod.rs`, `xml.rs`), locale-aware times (`time.rs`), the language files (`strings/`) |
-| `src/platform/` | Crash reports and dumps (`crash.rs`), the app log (`log.rs`), paths and small helpers (`util.rs`) |
-| `src/store.rs`, `src/theme.rs` | The JSON note store; colours, materials and motion presets |
+| `src/main.rs` | Entry point: picks the platform module |
+| `src/common/` | The portable app, with no OS calls: the note store (`store.rs`), interface strings (`i18n/`), design tokens (`theme.rs`), springs (`anim.rs`), the log (`log.rs`) and small helpers (`util.rs`). What it needs from the OS comes through `crate::os` |
+| `src/win/` | Windows: `os.rs` (what `common` asks of the OS), `app/` (message loop, note lifecycle, menus, import/export, autostart), `ui/` (deck, note windows, All Notes, Settings, menus, toasts, flying cards), `editor/` (RichEdit and the checklist overlay), `render/` (software canvas, DirectWrite, frame clock), `crash.rs`, `theme.rs`, `util.rs` |
 
 ## License
 
