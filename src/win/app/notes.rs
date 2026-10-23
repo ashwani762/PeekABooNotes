@@ -229,32 +229,15 @@ pub fn delete_all(owner: HWND) {
     }
 }
 
-/// "Delete all notes?" with the count, as a system task dialog. Cancel is the default
-/// button, so Enter or Esc never deletes anything.
+/// "Delete All 25 Notes" or Cancel, in a menu at the pointer (on the button that asked):
+/// themed like the rest of the app, and nothing is chosen until one is clicked, so Enter
+/// or Esc never deletes anything.
 fn confirm_delete_all(owner: HWND, n: usize) -> bool {
-    use windows_sys::Win32::UI::Controls::{
-        TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TD_WARNING_ICON, TDCBF_CANCEL_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION, TDF_POSITION_RELATIVE_TO_WINDOW,
-        TaskDialogIndirect,
-    };
-    const ID_DELETE: i32 = 100;
-    let (title, heading, text, ok) =
-        (wide(t!("app_name")), wide(t!("dialog_delete_all_title")), wide(&tn!("dialog_delete_all_text", n)), wide(t!("dialog_delete_all_ok")));
-    let buttons = [TASKDIALOG_BUTTON { nButtonID: ID_DELETE, pszButtonText: ok.as_ptr() }];
-    let mut cfg: TASKDIALOGCONFIG = unsafe { std::mem::zeroed() };
-    cfg.cbSize = size_of::<TASKDIALOGCONFIG>() as u32;
-    cfg.hwndParent = owner;
-    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
-    cfg.dwCommonButtons = TDCBF_CANCEL_BUTTON;
-    cfg.pszWindowTitle = title.as_ptr();
-    cfg.Anonymous1.pszMainIcon = TD_WARNING_ICON;
-    cfg.pszMainInstruction = heading.as_ptr();
-    cfg.pszContent = text.as_ptr();
-    cfg.cButtons = buttons.len() as u32;
-    cfg.pButtons = buttons.as_ptr();
-    cfg.nDefaultButton = IDCANCEL;
-    let mut chosen = 0;
-    let hr = unsafe { TaskDialogIndirect(&cfg, &mut chosen, null_mut(), null_mut()) };
-    hr >= 0 && chosen == ID_DELETE
+    use crate::win::ui::menu::{Item, action, danger};
+    const ID_DELETE: u32 = 1;
+    let items = vec![danger(ID_DELETE, &tn!("menu_delete_all_notes", n), "", IC_DELETE), Item::Separator, action(2, t!("button_cancel"), "", "")];
+    let p = super::menus::cursor();
+    popup(items, p.x, p.y, owner) == ID_DELETE
 }
 
 pub fn undo_delete() {

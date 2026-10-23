@@ -242,12 +242,11 @@
     <string name="settings_delete_all">Supprimer toutes les notes</string>
     <string name="settings_delete_all_sub">Toutes, y compris les notes archivées</string>
     <string name="button_delete_all">Tout supprimer</string>
-    <string name="dialog_delete_all_title">Supprimer toutes les notes ?</string>
-    <plurals name="dialog_delete_all_text">
-        <item quantity="one">%d note sera supprimée, y compris les notes archivées. Vous pourrez encore annuler juste après.</item>
-        <item quantity="other">Les %d notes seront supprimées, y compris les notes archivées. Vous pourrez encore annuler juste après.</item>
+    <plurals name="menu_delete_all_notes">
+        <item quantity="one">Supprimer %d note</item>
+        <item quantity="other">Supprimer les %d notes</item>
     </plurals>
-    <string name="dialog_delete_all_ok">Tout supprimer</string>
+    <string name="button_cancel">Annuler</string>
     <string name="settings_notes_folder_portable">Dossier des notes · Portable</string>
 
     <!-- Tooltips on the icon buttons -->
