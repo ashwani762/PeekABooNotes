@@ -212,6 +212,11 @@
     <string name="shortcut_reopen">Rouvrir la dernière note</string>
     <string name="shortcut_toggle_deck">Afficher ou masquer la pile</string>
     <string name="shortcut_move_deck">Déplacer la pile sur l’autre bord</string>
+    <string name="shortcut_format">Gras, italique, souligné</string>
+    <string name="shortcut_strike">Barré</string>
+    <string name="shortcut_lists">Liste à puces ou numérotée</string>
+    <string name="shortcut_search">Rechercher</string>
+    <string name="shortcut_keep_on_top">Garder au premier plan</string>
     <string name="shortcut_checklist">Liste de tâches</string>
     <string name="shortcut_tick">Cocher ou décocher</string>
     <string name="shortcut_link">Ajouter ou modifier un lien</string>

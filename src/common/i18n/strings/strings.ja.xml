@@ -204,6 +204,11 @@
     <string name="shortcut_reopen">最後のメモを再び開く</string>
     <string name="shortcut_toggle_deck">デッキの表示/非表示</string>
     <string name="shortcut_move_deck">デッキを反対の端へ移動</string>
+    <string name="shortcut_format">太字、斜体、下線</string>
+    <string name="shortcut_strike">取り消し線</string>
+    <string name="shortcut_lists">箇条書きまたは番号付きリスト</string>
+    <string name="shortcut_search">検索</string>
+    <string name="shortcut_keep_on_top">常に手前に表示</string>
     <string name="shortcut_checklist">チェックリスト</string>
     <string name="shortcut_tick">チェックを付ける/外す</string>
     <string name="shortcut_link">リンクを追加・変更</string>

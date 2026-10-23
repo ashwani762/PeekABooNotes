@@ -38,9 +38,27 @@ pub(super) fn row_h(r: &Row) -> f32 {
 }
 
 pub(super) fn place<'a>(w: &Win, groups: &'a [Group]) -> Vec<Item<'a>> {
+    place_to(w, groups).0
+}
+
+/// The top of the page, where its title stays while the rest scrolls under it.
+pub(super) fn header_band(w: &Win) -> f32 {
+    (GROUP_TOP - 8.0) * w.s
+}
+
+/// How far the current page can scroll: its height past the window's.
+pub(super) fn max_scroll(w: &Win) -> f32 {
+    let groups = page(w.page);
+    let end = place_to(w, &groups).1 + w.scroll.value;
+    let (_, ch) = client_size(w.hwnd);
+    (end + PAD * w.s - ch as f32).max(0.0)
+}
+
+/// The page laid out, scrolled; and where it ends.
+fn place_to<'a>(w: &Win, groups: &'a [Group]) -> (Vec<Item<'a>>, f32) {
     let s = w.s;
     let (x0, cw) = content_x(w);
-    let mut y = GROUP_TOP * s;
+    let mut y = GROUP_TOP * s - w.scroll.value;
     let mut out = Vec::new();
     for g in groups {
         if let Some(h) = g.header {
@@ -63,7 +81,7 @@ pub(super) fn place<'a>(w: &Win, groups: &'a [Group]) -> Vec<Item<'a>> {
         }
         y += GROUP_GAP * s;
     }
-    out
+    (out, y - GROUP_GAP * s)
 }
 
 pub(super) fn seg_metrics(w: &Win, labels: &[&str], r: &RECT) -> (Shape, f32) {
@@ -121,6 +139,9 @@ pub(super) fn hit_test(w: &Win, x: i32, y: i32) -> Hit {
                 return Hit::Page(i);
             }
         }
+        return Hit::None;
+    }
+    if (y as f32) < header_band(w) {
         return Hit::None;
     }
     let groups = page(w.page);

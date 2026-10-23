@@ -244,6 +244,8 @@ struct Win {
     /// The last import / export result shown on its button: (button, success, text).
     result: Option<(Key, bool, String)>,
     result_a: Spring,
+    /// How far the page is scrolled down (a long page, like Shortcuts).
+    scroll: Spring,
 }
 
 /// How long a button shows its result before turning back.
@@ -504,6 +506,7 @@ fn on_create(hwnd: HWND) {
         result: None,
         result_a: Spring::unit(0.0, motion::DEFAULT),
         knobs: HashMap::new(),
+        scroll: Spring::px(0.0, motion::SNAPPY),
     };
     sync_knobs(&mut w);
     WIN.with(|c| *c.borrow_mut() = Some(w));
@@ -515,6 +518,7 @@ fn set_page(w: &mut Win, i: usize) {
         return;
     }
     w.page = i;
+    w.scroll.snap(0.0);
     w.side_y.to(i as f32 * SIDE_ROW * w.s);
     // Controls on the new page appear at their values; only the page itself moves.
     w.knobs.clear();
@@ -527,7 +531,7 @@ fn set_page(w: &mut Win, i: usize) {
 pub fn frame(dt: f32) -> bool {
     let r = with(|w| {
         let mut moving = false;
-        for sp in [&mut w.side_y, &mut w.hover_y, &mut w.hover_a, &mut w.page_a, &mut w.press, &mut w.result_a] {
+        for sp in [&mut w.side_y, &mut w.hover_y, &mut w.hover_a, &mut w.page_a, &mut w.press, &mut w.result_a, &mut w.scroll] {
             moving |= sp.step(dt);
         }
         for sp in w.knobs.values_mut() {
@@ -619,7 +623,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 ScreenToClient(hwnd, &mut p);
                 let r = with(|w| match hit_test(w, p.x, p.y) {
                     Hit::None if (p.y as f32) < 44.0 * w.s => HTCAPTION,
-                    Hit::None if (p.x as f32) >= SIDE_W * w.s && (p.y as f32) < GROUP_TOP * w.s - 8.0 * w.s => HTCAPTION,
+                    Hit::None if (p.x as f32) >= SIDE_W * w.s && (p.y as f32) < header_band(w) => HTCAPTION,
                     _ => HTCLIENT,
                 });
                 return r.unwrap_or(HTCLIENT) as LRESULT;
@@ -643,6 +647,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_ERASEBKGND => return 1,
             WM_SIZE => {
                 paint_now(hwnd);
+                return 0;
+            }
+            WM_MOUSEWHEEL => {
+                let notches = ((wp >> 16) as i16) as f32 / 120.0;
+                with(|w| {
+                    let max = max_scroll(w);
+                    if max > 0.0 {
+                        let to = (w.scroll.target - notches * 56.0 * w.s).clamp(0.0, max);
+                        w.scroll.to(to);
+                        anim::wake(Client::Settings);
+                    }
+                });
                 return 0;
             }
             WM_MOUSEMOVE => {

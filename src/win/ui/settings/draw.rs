@@ -50,7 +50,6 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     let rise = (1.0 - a) * 8.0 * s;
     c.begin_batch();
     let (x0, _) = content_x(w);
-    c.line_ct(crate::common::i18n::get(PAGES[w.page].0), &f.title, x0 as i32, (PAGE_BASE * s + rise) as i32, px(300.0), None, p.text, DT_LEFT);
     let groups = page(w.page);
     for it in place(w, &groups) {
         match it {
@@ -73,6 +72,32 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
             Item::Row(pl) => draw_row(w, c, &p, &pl, rise),
         }
     }
+    c.flush();
+    // A long page (Shortcuts) scrolls under its title, which stays put with the close
+    // button; the content fades out at whichever edge has more of it, by a slim thumb.
+    let max = max_scroll(w);
+    if max > 0.0 {
+        let left = (SIDE_W * s) as i32;
+        let band = header_band(w) as i32;
+        let edge = 20.0 * s;
+        let fade = |c: &mut Canvas, past: f32, top: bool| {
+            let k = (past / (12.0 * s)).clamp(0.0, 1.0);
+            for i in 0..edge as i32 {
+                let keep = 1.0 - k * (1.0 - i as f32 / edge).powi(2);
+                let y = if top { band + i } else { ch - 1 - i };
+                c.fade_rect(rect(left, y, cw - left, 1), p.bg, keep);
+            }
+        };
+        c.fade_rect(rect(left, 0, cw - left, band), p.bg, 0.0);
+        fade(c, w.scroll.value, true);
+        fade(c, max - w.scroll.value, false);
+        let (top, track) = (band as f32 + 4.0 * s, ch as f32 - band as f32 - 12.0 * s);
+        let thumb = (track * ch as f32 / (ch as f32 + max)).max(28.0 * s);
+        let ty = top + (track - thumb) * (w.scroll.value / max).clamp(0.0, 1.0);
+        c.shape(&Shape::new(cw as f32 - 7.0 * s, ty, 3.0 * s, thumb, 1.5 * s), p.sub, 0.45, 1.0, 0.0);
+    }
+    c.begin_batch();
+    c.line_ct(crate::common::i18n::get(PAGES[w.page].0), &f.title, x0 as i32, (PAGE_BASE * s + rise) as i32, px(300.0), None, p.text, DT_LEFT);
     c.flush();
     c.fade_rect(rect((SIDE_W * s) as i32, 0, cw, ch), p.bg, a);
 

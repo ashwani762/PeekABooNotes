@@ -212,6 +212,11 @@
     <string name="shortcut_reopen">आख़िरी नोट फिर खोलें</string>
     <string name="shortcut_toggle_deck">डेक दिखाएँ या छिपाएँ</string>
     <string name="shortcut_move_deck">डेक को दूसरे किनारे पर ले जाएँ</string>
+    <string name="shortcut_format">बोल्ड, इटैलिक, रेखांकित</string>
+    <string name="shortcut_strike">काटी गई रेखा</string>
+    <string name="shortcut_lists">बुलेट या क्रमांकित सूची</string>
+    <string name="shortcut_search">खोजें</string>
+    <string name="shortcut_keep_on_top">सबसे ऊपर रखें</string>
     <string name="shortcut_checklist">चेकलिस्ट</string>
     <string name="shortcut_tick">टिक करें या हटाएँ</string>
     <string name="shortcut_link">लिंक जोड़ें या बदलें</string>

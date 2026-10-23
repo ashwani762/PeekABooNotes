@@ -222,6 +222,11 @@
     <string name="shortcut_reopen">Reopen last note</string>
     <string name="shortcut_toggle_deck">Show or hide deck</string>
     <string name="shortcut_move_deck">Move deck to the other edge</string>
+    <string name="shortcut_format">Bold, italic, underline</string>
+    <string name="shortcut_strike">Strikethrough</string>
+    <string name="shortcut_lists">Bulleted or numbered list</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_keep_on_top">Keep on top</string>
     <string name="shortcut_checklist">Checklist</string>
     <string name="shortcut_tick">Tick or untick</string>
     <string name="shortcut_link">Add or change a link</string>

@@ -212,6 +212,11 @@
     <string name="shortcut_reopen">Reabrir la última nota</string>
     <string name="shortcut_toggle_deck">Mostrar u ocultar el mazo</string>
     <string name="shortcut_move_deck">Mover el mazo al otro borde</string>
+    <string name="shortcut_format">Negrita, cursiva, subrayado</string>
+    <string name="shortcut_strike">Tachado</string>
+    <string name="shortcut_lists">Lista con viñetas o numerada</string>
+    <string name="shortcut_search">Buscar</string>
+    <string name="shortcut_keep_on_top">Mantener encima</string>
     <string name="shortcut_checklist">Lista de tareas</string>
     <string name="shortcut_tick">Marcar o desmarcar</string>
     <string name="shortcut_link">Añadir o cambiar un enlace</string>

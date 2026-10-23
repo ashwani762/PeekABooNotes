@@ -212,6 +212,11 @@
     <string name="shortcut_reopen">Letzte Notiz wieder öffnen</string>
     <string name="shortcut_toggle_deck">Stapel ein- oder ausblenden</string>
     <string name="shortcut_move_deck">Stapel an den anderen Rand</string>
+    <string name="shortcut_format">Fett, kursiv, unterstrichen</string>
+    <string name="shortcut_strike">Durchgestrichen</string>
+    <string name="shortcut_lists">Aufzählung oder Nummerierung</string>
+    <string name="shortcut_search">Suchen</string>
+    <string name="shortcut_keep_on_top">Im Vordergrund halten</string>
     <string name="shortcut_checklist">Checkliste</string>
     <string name="shortcut_tick">Abhaken oder zurücksetzen</string>
     <string name="shortcut_link">Link hinzufügen oder ändern</string>
