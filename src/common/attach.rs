@@ -53,9 +53,9 @@ pub fn url(name: &str) -> String {
     out
 }
 
-/// The attachment an address names, if it names one.
-pub fn name_of(url: &str) -> Option<String> {
-    let enc = url.strip_prefix(SCHEME)?.as_bytes();
+/// "%20" and friends back to what they stand for.
+pub fn decode(s: &str) -> Option<String> {
+    let enc = s.as_bytes();
     let mut bytes = Vec::with_capacity(enc.len());
     let mut i = 0;
     while i < enc.len() {
@@ -69,7 +69,12 @@ pub fn name_of(url: &str) -> Option<String> {
         bytes.push(enc[i]);
         i += 1;
     }
-    let name = String::from_utf8(bytes).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+/// The attachment an address names, if it names one.
+pub fn name_of(url: &str) -> Option<String> {
+    let name = decode(url.strip_prefix(SCHEME)?)?;
     // Only a plain file name in the folder: never a way out of it.
     (!name.is_empty() && !name.contains(['/', '\\']) && name != "..").then_some(name)
 }
@@ -79,8 +84,34 @@ pub fn path_of(url: &str) -> Option<PathBuf> {
     name_of(url).map(|n| dir().join(n))
 }
 
-/// "file:///C:/Users/me/Documents/PeekABoo%20Notes/attachments/plan.pdf", for export.
-pub fn file_url(path: &Path) -> String {
+/// Where export puts attachments, beside the Markdown files.
+pub const EXPORT_DIR: &str = "attachments";
+
+/// How exported Markdown points at an attachment: "attachments/Q3%20plan.pdf".
+pub fn export_link(name: &str) -> String {
+    format!("{EXPORT_DIR}/{}", &url(name)[SCHEME.len()..])
+}
+
+/// The local file a Markdown link points at, if it is one that exists: a file:// URL,
+/// or a path relative to the Markdown file's folder `base`. Web addresses are not.
+pub fn local_file(link: &str, base: &Path) -> Option<PathBuf> {
+    let link = link.trim();
+    let lower = link.to_ascii_lowercase();
+    let path = if let Some(rest) = lower.strip_prefix("file:///").map(|_| &link[8..]) {
+        PathBuf::from(decode(rest)?.replace('/', "\\"))
+    } else if lower.contains("://") || lower.starts_with("mailto:") || lower.starts_with(SCHEME) {
+        return None;
+    } else {
+        let rel = decode(link)?;
+        let p = Path::new(&rel);
+        if p.is_absolute() { p.to_path_buf() } else { base.join(p) }
+    };
+    path.is_file().then_some(path)
+}
+
+/// "file:///C:/Users/me/Documents/PeekABoo%20Notes/attachments/plan.pdf".
+#[cfg(test)]
+fn file_url(path: &Path) -> String {
     let s = path.to_string_lossy().replace('\\', "/");
     let mut out = String::from("file:///");
     for b in s.bytes() {
@@ -106,6 +137,20 @@ mod tests {
         assert_eq!(name_of("attachment:..%2Fsecret"), None);
         assert_eq!(name_of("attachment:a%5Cb"), None);
         assert_eq!(name_of("https://x.org"), None);
+    }
+
+    #[test]
+    fn export_links_resolve() {
+        let dir = std::env::temp_dir().join("peekaboo-attach-links");
+        let _ = std::fs::create_dir_all(dir.join(EXPORT_DIR));
+        std::fs::write(dir.join(EXPORT_DIR).join("Q3 plan.txt"), "x").unwrap();
+        let link = export_link("Q3 plan.txt");
+        assert_eq!(link, "attachments/Q3%20plan.txt");
+        assert_eq!(local_file(&link, &dir), Some(dir.join("attachments").join("Q3 plan.txt")));
+        assert_eq!(local_file(&file_url(&dir.join("attachments").join("Q3 plan.txt")), Path::new("C:\\elsewhere")), Some(dir.join("attachments").join("Q3 plan.txt")));
+        assert_eq!(local_file("https://example.com/a.txt", &dir), None);
+        assert_eq!(local_file("attachments/missing.txt", &dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

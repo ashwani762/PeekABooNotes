@@ -113,7 +113,9 @@ pub fn visible(t: &[u16], a: usize, b: usize) -> String {
     }
     out.extend_from_slice(&t[i.min(b)..b]);
     out.retain(|&c| c != ITEM_LINK_NAME as u16);
-    String::from_utf16_lossy(&out)
+    // A chip's paperclip only reads in the icon font: elsewhere, just the name.
+    let s = String::from_utf16_lossy(&out);
+    if s.contains(CLIP) { s.replace(&format!("{CLIP} "), "").replace(CLIP, "") } else { s }
 }
 
 /// Where the shown name of the link `a..b` (as `link_at` gives it) starts.
@@ -164,6 +166,22 @@ pub(super) fn md_links(s: &str) -> (String, Vec<(i32, i32, String)>) {
 /// then its link, named with a zero-width space. The link is invisible because RichEdit
 /// underlines every link, and a line under a picture or a chip looks broken.
 pub const ITEM_LINK_NAME: char = '\u{200B}';
+
+/// The paperclip in front of a file's name (in the icon font, which has it at this
+/// private-use code point; text elsewhere leaves it out).
+pub const CLIP: char = '\u{E723}';
+
+/// Show the paperclips in `a..b` in the icon font `face`.
+pub fn style_clips(h: HWND, a: i32, b: i32, face: &str) {
+    let t = text(h);
+    for i in (a.max(0) as usize..(b as usize).min(t.len())).filter(|&i| t[i] == CLIP as u16) {
+        set_sel(h, i as i32, i as i32 + 1);
+        let mut cf = CharFormat2::new();
+        cf.mask = CFM_FACE;
+        set_face(&mut cf, face);
+        send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+    }
+}
 
 /// The paragraph around `cp`: (start, end).
 fn para(t: &[u16], cp: usize) -> (usize, usize) {

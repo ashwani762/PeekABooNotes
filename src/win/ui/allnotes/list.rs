@@ -279,7 +279,8 @@ pub(super) fn click(l: &mut Lib, hit: Hit) -> Action {
         Hit::New => Action::New,
         Hit::Import => Action::Import,
         Hit::Settings => Action::Settings,
-        Hit::Export => Action::Export(l.rows.iter().map(|r| r.id).collect()),
+        // The selected notes, in the list's order.
+        Hit::Export => Action::Export(l.rows.iter().filter(|r| sel.contains(&r.id)).map(|r| r.id).collect()),
         Hit::Card => open_selected(l),
         Hit::OpenHere => in_window(l).map_or(Action::None, Action::OpenHere),
         Hit::Archive => {

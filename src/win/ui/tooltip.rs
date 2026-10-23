@@ -151,6 +151,11 @@ pub fn mute() {
         with(|t| {
             t.muted = true;
             go_away(t);
+            // At once, not faded: a click may open a dialog or menu whose own message
+            // loop would hold the fade half-way, a ghost over it.
+            t.fade.snap(0.0);
+            t.canvas = None;
+            unsafe { ShowWindow(t.hwnd, SW_HIDE) };
             // A click is not a "just saw a tooltip" moment: the next one waits again.
             t.hidden_at = None;
         });

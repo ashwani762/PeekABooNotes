@@ -136,7 +136,15 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if let Some(st) = state(h) {
                 st.auto = None;
             }
-            // Pressing on an attachment: drag it out, or click to open it.
+            // An attachment: a double-click opens it; a press drags it out, or (let go
+            // where it was) selects it.
+            if msg == WM_LBUTTONDBLCLK
+                && let Some((_, _, url, _)) = link_under(e, x_of(lp), y_of(lp))
+                && super::attach::file_of(&url).is_some()
+            {
+                super::open_link(&url);
+                return 0;
+            }
             if msg == WM_LBUTTONDOWN
                 && let Some((_, _, url, _)) = link_under(e, x_of(lp), y_of(lp))
                 && let Some(path) = super::attach::file_of(&url)
@@ -175,17 +183,23 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             let far = PRESS.with(|p| {
                 p.borrow().as_ref().is_some_and(|(at, _, _)| (x_of(lp) - at.x).abs() > 4 || (y_of(lp) - at.y).abs() > 4)
             });
-            if far && let Some((_, path, _)) = PRESS.with(|p| p.borrow_mut().take()) {
+            if far && let Some((_, path, url)) = PRESS.with(|p| p.borrow_mut().take()) {
                 unsafe { ReleaseCapture() };
                 crate::win::ui::tooltip::mute();
-                super::attach::drag_out(e, &path);
+                super::attach::drag_out(e, &path, &url);
             }
             return 0;
         }
         WM_LBUTTONUP if PRESS.with(|p| p.borrow().is_some()) => {
+            // Taken before letting go of the mouse: losing capture forgets the press.
+            let press = PRESS.with(|p| p.borrow_mut().take());
             unsafe { ReleaseCapture() };
-            if let Some((_, _, url)) = PRESS.with(|p| p.borrow_mut().take()) {
-                super::open_link(&url);
+            if let Some((at, _, _)) = press
+                && let Some((_, b, _, cp)) = link_under(e, at.x, at.y)
+            {
+                // Select it, as Explorer does with a file: it can be cut, copied or deleted.
+                let (start, _) = rich::item_shown(&rich::text(e), cp as usize);
+                rich::set_sel(e, start as i32, b);
             }
             return 0;
         }

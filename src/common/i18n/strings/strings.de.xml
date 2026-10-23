@@ -41,6 +41,8 @@
     <string name="menu_paste">Einfügen</string>
     <string name="menu_select_all">Alles auswählen</string>
     <string name="menu_link">Link</string>
+    <string name="menu_move_here">Hierher verschieben</string>
+    <string name="menu_copy_here">Hierher kopieren</string>
     <string name="link_placeholder">Link einfügen oder eingeben</string>
 
     <!-- Notes -->
@@ -247,5 +249,8 @@
     <string name="tip_more">Mehr</string>
     <string name="tip_close">Schließen</string>
     <string name="tip_import">Notizen importieren</string>
-    <string name="tip_export">Diese Notizen exportieren</string>
+    <plurals name="tip_export">
+        <item quantity="one">Diese Notiz exportieren</item>
+        <item quantity="other">Diese %d Notizen exportieren</item>
+    </plurals>
 </resources>

@@ -50,12 +50,12 @@ pub(super) fn header_tip(l: &Lib, hit: Hit) {
         return;
     };
     let (label, keys) = match hit {
-        Hit::New => (t!("menu_new_note"), crate::common::i18n::keys(&["ctrl", "N"])),
-        Hit::Import => (t!("tip_import"), String::new()),
-        Hit::Export => (t!("tip_export"), String::new()),
-        _ => (t!("menu_settings"), String::new()),
+        Hit::New => (t!("menu_new_note").to_string(), crate::common::i18n::keys(&["ctrl", "N"])),
+        Hit::Import => (t!("tip_import").to_string(), String::new()),
+        Hit::Export => (tn!("tip_export", l.rows.iter().filter(|r| l.sel.contains(&r.id)).count()), String::new()),
+        _ => (t!("menu_settings").to_string(), String::new()),
     };
-    tooltip::hover(l.hwnd, r, label, &keys);
+    tooltip::hover(l.hwnd, r, &label, &keys);
 }
 
 /// The detail pane's buttons: (hit, rect, label, icon glyph).

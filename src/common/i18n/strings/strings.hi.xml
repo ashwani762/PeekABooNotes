@@ -41,6 +41,8 @@
     <string name="menu_paste">चिपकाएँ</string>
     <string name="menu_select_all">सब चुनें</string>
     <string name="menu_link">लिंक</string>
+    <string name="menu_move_here">यहाँ ले जाएँ</string>
+    <string name="menu_copy_here">यहाँ कॉपी करें</string>
     <string name="link_placeholder">लिंक चिपकाएँ या लिखें</string>
 
     <!-- Notes -->
@@ -247,5 +249,8 @@
     <string name="tip_more">और</string>
     <string name="tip_close">बंद करें</string>
     <string name="tip_import">नोट्स आयात करें</string>
-    <string name="tip_export">ये नोट्स निर्यात करें</string>
+    <plurals name="tip_export">
+        <item quantity="one">यह नोट निर्यात करें</item>
+        <item quantity="other">ये %d नोट्स निर्यात करें</item>
+    </plurals>
 </resources>

@@ -49,6 +49,7 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
             name = format!("{base} ({k}).md");
             k += 1;
         }
+        let md = export_attachments(&md, &dir);
         match std::fs::write(dir.join(name), md + "\n") {
             Ok(()) => written += 1,
             Err(e) => failed = Some(e),
@@ -63,6 +64,40 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
     }
     open_path(&dir);
     Some(Ok(written))
+}
+
+/// Copy the attachments exported Markdown `md` points at into `dir`/attachments, so the
+/// files travel with it. A different file already there under the same name gets a
+/// free name, and the link follows it.
+fn export_attachments(md: &str, dir: &std::path::Path) -> String {
+    use crate::common::attach;
+    let prefix = format!("]({}/", attach::EXPORT_DIR);
+    let mut out = md.to_string();
+    let mut from = 0;
+    while let Some(i) = out[from..].find(&prefix).map(|i| from + i) {
+        let start = i + prefix.len();
+        let Some(end) = out[start..].find(')').map(|e| start + e) else { break };
+        from = end;
+        let Some(name) = attach::name_of(&format!("{}{}", attach::SCHEME, &out[start..end])) else { continue };
+        let src = attach::dir().join(&name);
+        let Ok(meta) = std::fs::metadata(&src) else { continue };
+        let target_dir = dir.join(attach::EXPORT_DIR);
+        if std::fs::create_dir_all(&target_dir).is_err() {
+            continue;
+        }
+        let same = std::fs::metadata(target_dir.join(&name)).is_ok_and(|m| m.len() == meta.len());
+        let used = if same { name.clone() } else { attach::free_name(&target_dir, &name) };
+        if !same && let Err(e) = std::fs::copy(&src, target_dir.join(&used)) {
+            log::warn(&format!("export: couldn't copy attachment: {e}"));
+            continue;
+        }
+        if used != name {
+            let link = attach::export_link(&used);
+            out.replace_range(i + 2..end, &link);
+            from = i + 2 + link.len();
+        }
+    }
+    out
 }
 
 /// The system folder picker, opening in `start` when that folder still exists.
@@ -150,6 +185,8 @@ pub fn import(owner: HWND) -> Outcome {
             continue;
         }
         rich::load_markdown(w, text);
+        // Links to files beside it (an export's attachments) come in as attachments.
+        crate::win::ui::note::adopt_files(w, f.parent().unwrap_or(std::path::Path::new(".")));
         let rtf = rich::get_rtf(w);
         let plain = rich::to_markdown(w, false);
         store_mut(|s| s.create(&plain, &rtf));

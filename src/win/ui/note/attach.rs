@@ -27,9 +27,14 @@ use crate::common::attach;
 pub(super) const WM_ATTACH: u32 = WM_APP + 42;
 const CF_HDROP: u16 = 15;
 
+type Pending = (HWND, i32, Vec<PathBuf>, Option<String>);
+
 thread_local! {
-    /// Files waiting for `WM_ATTACH`: (note editor, where to insert, paths).
-    static PENDING: RefCell<Vec<(HWND, i32, Vec<PathBuf>)>> = const { RefCell::new(Vec::new()) };
+    /// Files waiting for `WM_ATTACH`: (note editor, where to insert, paths, the
+    /// attachment's own address when it was dragged here from this same note).
+    static PENDING: RefCell<Vec<Pending>> = const { RefCell::new(Vec::new()) };
+    /// An attachment being dragged out: (its editor, its file, its address).
+    static DRAGGING: RefCell<Option<(HWND, PathBuf, String)>> = const { RefCell::new(None) };
     static LAST_DROP: RefCell<Option<(Vec<PathBuf>, std::time::Instant)>> = const { RefCell::new(None) };
 }
 
@@ -162,20 +167,26 @@ fn item_rtf(name: &str) -> String {
     let url = attach::url(name);
     let link = format!("{{\\field{{\\*\\fldinst{{HYPERLINK \"{url}\"}}}}{{\\fldrslt{{{}}}}}}}", rtf_text(&rich::ITEM_LINK_NAME.to_string()));
     let shown = attach::is_image(name).then(|| picture_rtf(&attach::dir().join(name))).flatten();
-    let shown = shown.unwrap_or_else(|| rtf_text(&format!("\u{1F4CE} {name}")));
+    let shown = shown.unwrap_or_else(|| rtf_text(&format!("{} {name}", rich::CLIP)));
     format!("{shown}{link}")
 }
 
 /// Copy `paths` in and add them to the note in editor `e` at `cp`, each on a line of
 /// its own. Folders are skipped. Returns how many went in.
 pub(super) fn add(e: HWND, cp: i32, paths: &[PathBuf]) -> usize {
-    let mut items = Vec::new();
+    let mut names = Vec::new();
     for p in paths.iter().filter(|p| p.is_file()) {
         match attach::copy_in(p) {
-            Ok(name) => items.push(item_rtf(&name)),
+            Ok(name) => names.push(name),
             Err(err) => crate::common::log::warn(&format!("attach: couldn't copy {}: {err}", p.display())),
         }
     }
+    put(e, cp, &names)
+}
+
+/// Add attachments already in the folder to the note at `cp`, each on its own line.
+fn put(e: HWND, cp: i32, names: &[String]) -> usize {
+    let items: Vec<String> = names.iter().map(|n| item_rtf(n)).collect();
     if items.is_empty() {
         return 0;
     }
@@ -197,6 +208,10 @@ pub(super) fn add(e: HWND, cp: i32, paths: &[PathBuf]) -> usize {
     let before = rich::text(e).len() as i32;
     rich::insert_rtf(e, &rtf);
     let end = cp + rich::text(e).len() as i32 - before;
+    // Body text, whatever the line it went in after (the title's look would carry over).
+    rich::set_sel(e, cp, end);
+    rich::set_body_format(e);
+    rich::style_clips(e, cp, end, super::icon_face());
     rich::fit_pictures(e);
     rich::set_sel(e, end, end);
     items.len()
@@ -212,8 +227,12 @@ pub(super) fn queue(e: HWND, cp: i32, paths: Vec<PathBuf>) {
         return;
     }
     LAST_DROP.with(|l| *l.borrow_mut() = Some((paths.clone(), std::time::Instant::now())));
-    PENDING.with(|p| p.borrow_mut().push((e, cp, paths)));
-    if let Some(note) = note_of(e) {
+    // One of this note's own attachments, dropped back on it: asked about once the drag
+    // is over (see `drag_out`).
+    let own = DRAGGING.with(|d| d.borrow().as_ref().filter(|(de, dp, _)| *de == e && paths.len() == 1 && paths[0] == *dp).map(|d| d.2.clone()));
+    let later = own.is_some();
+    PENDING.with(|p| p.borrow_mut().push((e, cp, paths, own)));
+    if !later && let Some(note) = note_of(e) {
         unsafe { PostMessageW(note, WM_ATTACH, 0, 0) };
     }
 }
@@ -229,17 +248,80 @@ pub(super) fn flush_pending(h: HWND) {
     let e = st.edit;
     let mine: Vec<_> = PENDING.with(|p| {
         let mut p = p.borrow_mut();
-        let (mine, rest): (Vec<_>, Vec<_>) = p.drain(..).partition(|(pe, _, _)| *pe == e);
+        let (mine, rest): (Vec<_>, Vec<_>) = p.drain(..).partition(|(pe, _, _, _)| *pe == e);
         *p = rest;
         mine
     });
     let mut n = 0;
-    for (_, cp, paths) in mine {
-        n += add(e, cp, &paths);
+    for (_, cp, paths, own) in mine {
+        n += match own {
+            Some(url) => move_or_copy(h, e, cp, &paths, &url),
+            None => add(e, cp, &paths),
+        };
     }
     if n > 0 {
         unsafe { SetFocus(e) };
         mark_dirty(h);
+    }
+}
+
+/// Links in editor `e` (just loaded from Markdown in folder `base`) that point at local
+/// files: the files are copied in as attachments. A link alone on its line becomes the
+/// attachment itself (a picture shows); one inside a sentence keeps its words and points
+/// at the copy.
+pub fn adopt_files(e: HWND, base: &Path) {
+    let t = rich::text(e);
+    // From the end, so what's changed never moves what's still to do.
+    for (at, name_at, link) in rich::instructions(&t, 0, t.len()).into_iter().rev() {
+        let Some(file) = attach::local_file(&link, base) else { continue };
+        let Ok(name) = attach::copy_in(&file) else { continue };
+        let t = rich::text(e);
+        let Some((a, b, _)) = rich::link_at(e, name_at as i32) else { continue };
+        let line_start = t[..at].iter().rposition(|&c| c == 13).map_or(0, |i| i + 1);
+        let line_end = t[at..].iter().position(|&c| c == 13).map_or(t.len(), |i| at + i);
+        let alone = rich::visible(&t, line_start, at).trim().is_empty() && rich::visible(&t, b as usize, line_end).trim().is_empty();
+        if alone {
+            rich::set_sel(e, line_start as i32, line_end as i32);
+            rich::replace_sel(e, "");
+            put(e, line_start as i32, &[name]);
+        } else {
+            let shown = b - name_at as i32;
+            rich::remove_link(e, a, b);
+            rich::set_link(e, a, a + shown, &attach::url(&name));
+        }
+    }
+}
+
+/// One of this note's attachments was dragged to another place in it: move it there,
+/// or put a copy there?
+fn move_or_copy(h: HWND, e: HWND, cp: i32, paths: &[PathBuf], url: &str) -> usize {
+    use crate::win::ui::menu;
+    // Where the attachment's line is now (address hidden in it, then the line around it).
+    let t = rich::text(e);
+    let Some(at) = rich::instructions(&t, 0, t.len()).into_iter().find(|l| l.2 == url).map(|l| l.0) else { return add(e, cp, paths) };
+    let (start, end) = {
+        let s = t[..at].iter().rposition(|&c| c == 13).map_or(0, |i| i + 1);
+        let e2 = t[at..].iter().position(|&c| c == 13).map_or(t.len(), |i| at + i);
+        (s as i32, e2 as i32)
+    };
+    if (start..=end).contains(&cp) {
+        return 0; // dropped where it already is
+    }
+    let mut p = POINT { x: 0, y: 0 };
+    unsafe { GetCursorPos(&mut p) };
+    let items = vec![menu::action(1, t!("menu_move_here"), "", "\u{E7C2}"), menu::action(2, t!("menu_copy_here"), "", "\u{E8C8}")];
+    match app::popup(items, p.x, p.y, h) {
+        1 => {
+            let Some(name) = attach::name_of(url) else { return 0 };
+            // Take the line out (with its line break), then put it where it was dropped.
+            let (a, b) = if (end as usize) < t.len() { (start, end + 1) } else { (start.saturating_sub(1).max(0), end) };
+            rich::set_sel(e, a, b);
+            rich::replace_sel(e, "");
+            let cp = if cp > a { cp - (b - a) } else { cp };
+            put(e, cp, &[name])
+        }
+        2 => add(e, cp, paths),
+        _ => 0,
     }
 }
 
@@ -377,14 +459,22 @@ pub(super) fn file_of(url: &str) -> Option<PathBuf> {
 }
 
 /// Drag the file at `path` out of the note (Explorer, the desktop, a mail): a copy.
-pub(super) fn drag_out(e: HWND, path: &Path) {
+pub(super) fn drag_out(e: HWND, path: &Path, url: &str) {
     use windows::Win32::UI::Shell::{BHID_DataObject, IShellItem, SHCreateItemFromParsingName, SHDoDragDrop};
     unsafe {
         let w = wide(&path.to_string_lossy());
         // The same data Explorer offers for the file (the file list among it).
         let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(windows::core::PCWSTR(w.as_ptr()), None) else { return };
         let Ok(data) = item.BindToHandler::<_, IDataObject>(None, &BHID_DataObject) else { return };
+        DRAGGING.with(|d| *d.borrow_mut() = Some((e, path.to_path_buf(), url.to_string())));
         // The shell's own drag image and drop source.
         let _ = SHDoDragDrop(Some(windows::Win32::Foundation::HWND(e as _)), &data, None, DROPEFFECT_COPY | windows::Win32::System::Ole::DROPEFFECT_LINK);
+        DRAGGING.with(|d| d.borrow_mut().take());
+        // Dropped back on its own note: ask now, with the drag over.
+        if PENDING.with(|p| p.borrow().iter().any(|(pe, _, _, own)| *pe == e && own.is_some()))
+            && let Some(note) = note_of(e)
+        {
+            PostMessageW(note, WM_ATTACH, 0, 0);
+        }
     }
 }

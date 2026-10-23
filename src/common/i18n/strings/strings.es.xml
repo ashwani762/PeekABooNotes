@@ -41,6 +41,8 @@
     <string name="menu_paste">Pegar</string>
     <string name="menu_select_all">Seleccionar todo</string>
     <string name="menu_link">Enlace</string>
+    <string name="menu_move_here">Mover aquí</string>
+    <string name="menu_copy_here">Copiar aquí</string>
     <string name="link_placeholder">Pega o escribe un enlace</string>
 
     <!-- Notes -->
@@ -247,5 +249,8 @@
     <string name="tip_more">Más</string>
     <string name="tip_close">Cerrar</string>
     <string name="tip_import">Importar notas</string>
-    <string name="tip_export">Exportar estas notas</string>
+    <plurals name="tip_export">
+        <item quantity="one">Exportar esta nota</item>
+        <item quantity="other">Exportar estas %d notas</item>
+    </plurals>
 </resources>

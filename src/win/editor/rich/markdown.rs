@@ -81,13 +81,14 @@ fn link_from(h: HWND, links: &[(usize, usize, String)], i: usize, b: usize) -> O
     Some((*name, end, url.clone()))
 }
 
-/// An attachment link as Markdown pointing at its file: `![name](file:///...)` for a
-/// picture, `[name](file:///...)` for anything else. None for other links.
+/// An attachment link as Markdown, pointing where export copies the file:
+/// `![name](attachments/name)` for a picture, `[name](attachments/name)` otherwise.
+/// None for other links.
 fn attachment_md(url: &str) -> Option<String> {
     use crate::common::attach;
     let name = attach::name_of(url)?;
-    let file = attach::file_url(&attach::dir().join(&name));
-    Some(if attach::is_image(&name) { format!("![{name}]({file})") } else { format!("[{name}]({file})") })
+    let link = attach::export_link(&name);
+    Some(if attach::is_image(&name) { format!("![{name}]({link})") } else { format!("[{name}]({link})") })
 }
 
 /// `t[a..b]` with links as `[name](url)` and no other marks (the title line).
