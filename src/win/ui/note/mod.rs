@@ -35,6 +35,7 @@ use input::*;
 
 const CLASS: &str = "PeekABooNote";
 const T_SAVE: usize = 1;
+const T_HIDE: usize = 3;
 const SAVE_DELAY_MS: u32 = 250;
 pub const WM_NOTE_CMD: u32 = WM_APP + 40;
 const WM_RESTYLE: u32 = WM_APP + 41;
@@ -629,6 +630,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     // Our own popover menu doesn't count as leaving the note.
                     st.active = (wp & 0xFFFF) as u32 != WA_INACTIVE || crate::win::ui::menu::is_menu(lp as HWND);
                     if st.active {
+                        KillTimer(h, T_HIDE);
                         SetFocus(st.edit);
                         let id = st.id;
                         if app::store(|s| s.d.settings.last_note) != Some(id) {
@@ -637,6 +639,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         }
                     } else {
                         flush(h);
+                        hide_later(h, lp as HWND);
                     }
                     set_controls(h);
                 }
@@ -699,6 +702,10 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             WM_TIMER if wp == T_SAVE => {
                 flush(h);
+                return 0;
+            }
+            WM_TIMER if wp == T_HIDE => {
+                hide_tick(h);
                 return 0;
             }
             WM_TIMER if wp == scrollbar::T_BAR => {

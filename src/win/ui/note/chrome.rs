@@ -160,6 +160,48 @@ pub(super) fn hit_test(h: HWND, lp: LPARAM) -> LRESULT {
     code as LRESULT
 }
 
+/// Whether this note flies back to the deck when you click away: unpinned, a window of
+/// its own, and the setting on.
+fn hides(h: HWND) -> bool {
+    let Some(st) = state(h) else { return false };
+    let id = st.id;
+    !st.embedded && !app::store(|s| s.d.settings.keep_open || s.note(id).is_some_and(|n| n.pinned))
+}
+
+/// The note lost the foreground to `to`: unless that's part of the note (a dialog it
+/// owns), start watching for the moment to go.
+pub(super) fn hide_later(h: HWND, to: HWND) {
+    if !hides(h) || (!to.is_null() && unsafe { GetWindow(to, GW_OWNER) } == h) {
+        return;
+    }
+    unsafe { SetTimer(h, T_HIDE, 300, None) };
+}
+
+/// Go once the pointer is off the note with no button held: someone still pointing at it,
+/// or dragging something onto it from another app, isn't done with it.
+pub(super) fn hide_tick(h: HWND) {
+    let fg = unsafe { GetForegroundWindow() };
+    let ours = fg == h || (!fg.is_null() && unsafe { GetWindow(fg, GW_OWNER) } == h) || crate::win::ui::menu::is_menu(fg);
+    if ours || !hides(h) {
+        unsafe { KillTimer(h, T_HIDE) };
+        return;
+    }
+    let mut p = POINT { x: 0, y: 0 };
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    unsafe {
+        GetCursorPos(&mut p);
+        GetWindowRect(h, &mut r);
+    }
+    let held = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0 || GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000 != 0 };
+    if crate::win::util::pt_in(&r, p.x, p.y) || held {
+        return;
+    }
+    unsafe {
+        KillTimer(h, T_HIDE);
+        PostMessageW(h, WM_CLOSE, 0, 0);
+    }
+}
+
 pub(super) fn click(h: HWND, b: Btn) {
     let Some(st) = state(h) else { return };
     let id = st.id;

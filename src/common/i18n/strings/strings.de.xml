@@ -193,6 +193,8 @@
     <string name="settings_new_notes_sub">In Alle Notizen per Ziehen umsortieren</string>
     <string name="new_notes_top">Oben</string>
     <string name="new_notes_bottom">Unten</string>
+    <string name="settings_hide_unpinned">Notizen beim Wegklicken ausblenden</string>
+    <string name="settings_hide_unpinned_sub">Angeheftete Notizen bleiben offen</string>
     <string name="settings_fullscreen">Über Vollbild-Apps zeigen</string>
     <string name="settings_fullscreen_sub">Stapel auch bei Videos und Spielen im Vollbild</string>
     <string name="settings_deck_footer">Rechtsklick auf eine Notiz und „Im Stapel zeigen“ aus, um sie vom Rand fernzuhalten.</string>

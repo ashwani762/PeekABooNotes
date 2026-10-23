@@ -33,6 +33,11 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 ],
                 footer: Some(t!("settings_color_footer").into()),
             },
+            Group {
+                header: None,
+                rows: vec![row_sub(Key::HideUnpinned, t!("settings_hide_unpinned"), t!("settings_hide_unpinned_sub"), Ctl::Toggle)],
+                footer: None,
+            },
             Group { header: Some(t!("settings_group_preview")), rows: vec![Row { key: None, label: "", sub: None, ctl: Ctl::Preview }], footer: None },
         ],
         2 => vec![

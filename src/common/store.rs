@@ -114,6 +114,9 @@ pub struct Settings {
     /// Where the last export went; the folder picker starts there.
     #[serde(default)]
     pub export_dir: String,
+    /// Unpinned notes stay open when you click away (by default they fly back to the deck).
+    #[serde(default)]
+    pub keep_open: bool,
 }
 
 fn default_note_size() -> u8 {
@@ -145,6 +148,7 @@ impl Default for Settings {
             language: String::new(),
             last_note: None,
             export_dir: String::new(),
+            keep_open: false,
         }
     }
 }

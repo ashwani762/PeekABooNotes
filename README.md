@@ -20,7 +20,7 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 - **Show in Deck** keeps any note active but off the edge.
 
 **Notes**
-- Borderless paper cards that reopen where you left them: same place on screen, same scroll, caret where you stopped. Pin one to keep it on top.
+- Borderless paper cards that reopen where you left them: same place on screen, same scroll, caret where you stopped. Click away and an open note flies back to the deck; pin it to keep it open and on top (Settings can keep every note open instead).
 - Long notes get a slim scroll bar that shows while you scroll; drag it, click the track, or use the wheel anywhere on the note.
 - Bold, italic, underline and strikethrough. The first line is the title, and links are clickable.
 - Bullets, numbers and checklists:

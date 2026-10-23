@@ -193,6 +193,8 @@
     <string name="settings_new_notes_sub">क्रम बदलने के लिए सभी नोट्स में खींचें</string>
     <string name="new_notes_top">ऊपर</string>
     <string name="new_notes_bottom">नीचे</string>
+    <string name="settings_hide_unpinned">बाहर क्लिक करने पर नोट्स छिपाएँ</string>
+    <string name="settings_hide_unpinned_sub">पिन किए गए नोट्स खुले रहते हैं</string>
     <string name="settings_fullscreen">फ़ुल-स्क्रीन ऐप्स पर दिखाएँ</string>
     <string name="settings_fullscreen_sub">वीडियो और गेम फ़ुल-स्क्रीन होने पर भी डेक रखें</string>
     <string name="settings_deck_footer">किसी नोट पर राइट-क्लिक करें और उसे किनारे से हटाने के लिए डेक में दिखाएँ बंद करें।</string>

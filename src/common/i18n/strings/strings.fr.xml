@@ -193,6 +193,8 @@
     <string name="settings_new_notes_sub">Glissez dans Toutes les notes pour trier</string>
     <string name="new_notes_top">En haut</string>
     <string name="new_notes_bottom">En bas</string>
+    <string name="settings_hide_unpinned">Masquer les notes quand vous cliquez ailleurs</string>
+    <string name="settings_hide_unpinned_sub">Les notes épinglées restent ouvertes</string>
     <string name="settings_fullscreen">Afficher sur les apps en plein écran</string>
     <string name="settings_fullscreen_sub">Garder la pile pendant les vidéos et les jeux</string>
     <string name="settings_deck_footer">Clic droit sur une note, puis désactivez Afficher dans la pile pour la retirer du bord.</string>

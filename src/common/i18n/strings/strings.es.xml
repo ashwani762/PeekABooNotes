@@ -193,6 +193,8 @@
     <string name="settings_new_notes_sub">Arrastra en Todas las notas para reordenar</string>
     <string name="new_notes_top">Arriba</string>
     <string name="new_notes_bottom">Abajo</string>
+    <string name="settings_hide_unpinned">Ocultar las notas al hacer clic fuera</string>
+    <string name="settings_hide_unpinned_sub">Las notas fijadas siguen abiertas</string>
     <string name="settings_fullscreen">Mostrar sobre apps a pantalla completa</string>
     <string name="settings_fullscreen_sub">Mantener el mazo sobre vídeos y juegos</string>
     <string name="settings_deck_footer">Haz clic derecho en una nota y desactiva Mostrar en el mazo para quitarla del borde.</string>

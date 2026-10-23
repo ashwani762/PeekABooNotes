@@ -71,6 +71,7 @@ enum Key {
     NoteSize,
     NewColor,
     ReduceMotion,
+    HideUnpinned,
     ShowDeck,
     Edge,
     Cards,
@@ -273,6 +274,7 @@ fn value(w: &Win, k: Key) -> usize {
             Key::NoteSize => (st.note_size as usize).min(2),
             Key::NewColor => st.new_color.and_then(|c| theme::ORDER.iter().position(|&o| o == c)).map_or(0, |p| p + 1),
             Key::ReduceMotion => st.reduce_motion as usize,
+            Key::HideUnpinned => !st.keep_open as usize,
             Key::ShowDeck => !st.deck_hidden as usize,
             Key::Edge => !st.edge_left as usize,
             Key::Cards => CARDS.iter().position(|&c| c == st.deck_max).unwrap_or(1),
@@ -371,6 +373,7 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
             app::update_settings(|s| s.reduce_motion = v == 1);
             app::apply_motion();
         }
+        Key::HideUnpinned => app::update_settings(|s| s.keep_open = v == 0),
         Key::ShowDeck => app::update_settings(|s| s.deck_hidden = v == 0),
         Key::Edge => app::update_settings(|s| s.edge_left = v == 0),
         Key::Cards => app::update_settings(|s| s.deck_max = CARDS[v.min(2)]),

@@ -203,6 +203,8 @@
     <string name="settings_new_notes_sub">Drag notes in All Notes to reorder</string>
     <string name="new_notes_top">Top</string>
     <string name="new_notes_bottom">Bottom</string>
+    <string name="settings_hide_unpinned">Hide notes when you click away</string>
+    <string name="settings_hide_unpinned_sub">Pinned notes stay open</string>
     <string name="settings_fullscreen">Show over full-screen apps</string>
     <string name="settings_fullscreen_sub">Keep the deck while videos and games fill the screen</string>
     <string name="settings_deck_footer">Right-click a note and turn off Show in Deck to keep it off the edge.</string>

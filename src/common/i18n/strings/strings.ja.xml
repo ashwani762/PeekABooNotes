@@ -185,6 +185,8 @@
     <string name="settings_new_notes_sub">「すべてのメモ」でドラッグして並べ替え</string>
     <string name="new_notes_top">上</string>
     <string name="new_notes_bottom">下</string>
+    <string name="settings_hide_unpinned">ほかの場所をクリックしたらメモを隠す</string>
+    <string name="settings_hide_unpinned_sub">固定したメモは開いたままになります</string>
     <string name="settings_fullscreen">全画面アプリの上にも表示</string>
     <string name="settings_fullscreen_sub">動画やゲームが全画面のときもデッキを表示</string>
     <string name="settings_deck_footer">メモを右クリックして「デッキに表示」をオフにすると、端から外せます。</string>
