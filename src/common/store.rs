@@ -111,6 +111,10 @@ pub struct Settings {
     /// The note last worked on, for "Reopen Last Note" (also after a restart).
     #[serde(default)]
     pub last_note: Option<u64>,
+    /// Notes that stay open (pinned, or all with Keep Open) and were open at quit: they
+    /// open again at the next start.
+    #[serde(default)]
+    pub reopen: Vec<u64>,
     /// Where the last export went; the folder picker starts there.
     #[serde(default)]
     pub export_dir: String,
@@ -154,6 +158,7 @@ impl Default for Settings {
             note_size: default_note_size(),
             language: default_language(),
             last_note: None,
+            reopen: Vec::new(),
             export_dir: String::new(),
             keep_open: false,
             mcp: false,
@@ -289,7 +294,12 @@ impl Store {
 
     pub fn remove(&mut self, id: u64) -> Option<(usize, Note)> {
         let i = self.d.notes.iter().position(|n| n.id == id)?;
-        Some((i, self.d.notes.remove(i)))
+        let n = self.d.notes.remove(i);
+        // "Reopen Last Note" moves on to the note edited most recently.
+        if self.d.settings.last_note == Some(id) {
+            self.d.settings.last_note = self.d.notes.iter().filter(|n| !n.archived).max_by_key(|n| n.updated).map(|n| n.id);
+        }
+        Some((i, n))
     }
 
     pub fn insert_at(&mut self, i: usize, n: Note) {

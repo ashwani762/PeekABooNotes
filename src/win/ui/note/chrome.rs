@@ -66,7 +66,7 @@ pub(super) fn layout(h: HWND) {
 pub(super) fn paint(h: HWND) {
     let Some(st) = state(h) else { return };
     let dark = app::dark();
-    let (color, pinned, updated) = app::store(|s| s.note(st.id).map(|n| (n.color, n.pinned, n.updated))).unwrap_or((0, false, 0));
+    let (color, pinned, updated, blank) = app::store(|s| s.note(st.id).map(|n| (n.color, n.pinned, n.updated, n.text.trim().is_empty()))).unwrap_or((0, false, 0, true));
     let paper = theme::paper(color, dark);
     let ink = theme::paper_ink(color, dark);
     let a = crate::win::render::anim::clamp01(st.ctl.value);
@@ -118,9 +118,12 @@ pub(super) fn paint(h: HWND) {
                     }
                 }
             }
-            let fr = rect((18.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (36.0 * s) as i32, (18.0 * s) as i32);
-            let meta = t!("note_edited", crate::common::i18n::time::edited_time(updated));
-            c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a * 0.85, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            // A blank note hasn't been edited yet.
+            if !blank {
+                let fr = rect((18.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (36.0 * s) as i32, (18.0 * s) as i32);
+                let meta = t!("note_edited", crate::common::i18n::time::edited_time(updated));
+                c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a * 0.85, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            }
         }
         c.flush();
         super::scrollbar::paint(h, st, &mut c, ink);

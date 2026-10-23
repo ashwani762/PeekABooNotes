@@ -38,6 +38,8 @@ use input::*;
 const CLASS: &str = "PeekABooNote";
 const T_SAVE: usize = 1;
 const T_HIDE: usize = 3;
+/// Keeps the footer's "Edited 2 minutes ago" current.
+const T_AGE: usize = 4;
 const SAVE_DELAY_MS: u32 = 250;
 pub const WM_NOTE_CMD: u32 = WM_APP + 40;
 const WM_RESTYLE: u32 = WM_APP + 41;
@@ -486,7 +488,10 @@ pub fn flush(h: HWND) {
         }
     });
     app::save();
-    unsafe { SetWindowTextW(h, wide(&title).as_ptr()) };
+    unsafe {
+        SetWindowTextW(h, wide(&title).as_ptr());
+        InvalidateRect(h, std::ptr::null(), 0); // the footer's edited time
+    }
     app::refresh();
 }
 
@@ -611,6 +616,7 @@ fn on_create(h: HWND) {
     st.s = dpi as f32 / 96.0;
     st.icons = Some(Font::new(13.0 * st.s, FW_NORMAL, icon_face()));
     st.meta = Some(Font::new(11.5 * st.s, FW_NORMAL, theme::FACE_SMALL));
+    unsafe { SetTimer(h, T_AGE, 30_000, None) };
     let edit = new_editor(h);
     st.edit = edit;
     let (rtf, text) = app::store(|s| s.note(st.id).map(|n| (n.rtf.clone(), n.text.clone()))).unwrap_or_default();
@@ -797,6 +803,14 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             WM_TIMER if wp == T_SAVE => {
                 flush(h);
+                return 0;
+            }
+            WM_TIMER if wp == T_AGE => {
+                if let Some(st) = state(h)
+                    && !st.embedded
+                {
+                    InvalidateRect(h, std::ptr::null(), 0);
+                }
                 return 0;
             }
             WM_TIMER if wp == T_HIDE => {

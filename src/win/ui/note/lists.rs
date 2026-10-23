@@ -23,6 +23,8 @@ pub(super) fn toggle_check(e: HWND, cp: i32) {
     rich::replace_sel(e, if checked { "\u{2610}" } else { "\u{2611}" });
     rich::set_sel(e, cp + 1, end);
     rich::set_effect(e, CFM_STRIKEOUT, !checked);
+    // A caret before the box would draw inside the circle: keep it after it.
+    let (a, b) = if a == b && a == cp { (cp + 1, cp + 1) } else { (a, b) };
     rich::set_sel(e, a, b);
     rich::style_boxes(e); // completed items turn secondary; reopened ones regain full ink
     crate::win::editor::checks::animate(e, cp, !checked);

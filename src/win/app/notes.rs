@@ -115,6 +115,28 @@ pub fn step_note(id: u64, dir: i32, r: RECT) -> bool {
     true
 }
 
+/// At quit: the open notes that stay open, to bring back next time.
+pub(super) fn remember_open() {
+    let open: Vec<u64> = ui(|u| u.notes.keys().copied().collect());
+    store_mut(|s| {
+        let all = s.d.settings.keep_open;
+        let mut ids: Vec<u64> = open.into_iter().filter(|id| s.note(*id).is_some_and(|n| !n.archived && (all || n.pinned))).collect();
+        ids.sort_unstable();
+        s.d.settings.reopen = ids;
+    });
+}
+
+/// At start: the notes open at quit that stay open, where they were.
+pub(super) fn reopen_at_start() {
+    let ids = store(|s| s.d.settings.reopen.iter().copied().filter(|id| s.note(*id).is_some_and(|n| !n.archived)).collect::<Vec<_>>());
+    for id in ids {
+        note::create(id, placement(id), true);
+    }
+    if !ui(|u| u.notes.is_empty()) {
+        deck::refresh(); // their "open" dots
+    }
+}
+
 pub(super) fn reopen_last() {
     let last = store(|s| s.d.settings.last_note.filter(|id| s.note(*id).is_some_and(|n| !n.archived)));
     match last.or_else(|| store(|s| s.active_ids().first().copied())) {

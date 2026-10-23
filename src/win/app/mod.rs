@@ -210,6 +210,7 @@ const HOTKEYS: [(u32, u8); 6] = [
 
 pub fn quit() {
     let wins: Vec<HWND> = ui(|u| u.notes.values().copied().collect());
+    remember_open();
     // Before the teardown, so a quit that stalls or crashes on the way out shows up.
     log::info(&format!("quitting, {} note windows open", wins.len()));
     for h in wins {
@@ -395,6 +396,7 @@ pub fn run() -> i32 {
             RegisterHotKey(main, id as i32, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, key as u32);
         }
 
+        reopen_at_start();
         // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
         mcp::init(main);
         // Starting up touches far more than an idle deck needs: give it back once settled.
