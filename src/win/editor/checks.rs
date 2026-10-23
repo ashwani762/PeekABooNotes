@@ -100,9 +100,13 @@ pub fn frame(dt: f32) -> bool {
 pub fn paint(e: HWND) {
     let Some(st) = STYLES.with(|m| m.borrow().get(&(e as isize)).copied()) else { return };
     let t = rich::text(e);
+    // Only the boxes on screen (a long checklist has thousands).
+    let (a0, b0) = rich::on_screen(e, &t);
     let boxes: Vec<i32> = t
         .iter()
         .enumerate()
+        .take(b0)
+        .skip(a0)
         .filter(|&(i, &c)| (c == rich::BOX || c == rich::CHECKED) && (i == 0 || t[i - 1] == rich::CR))
         .map(|(i, _)| i as i32)
         .collect();

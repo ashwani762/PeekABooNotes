@@ -187,6 +187,10 @@ pub(super) fn close_marks(out: &mut String, cur: (bool, bool, bool), next: (bool
 
 /// Load plain text / light Markdown into `h`, turning list markers into real formatting.
 pub fn load_markdown(h: HWND, md: &str) {
+    bulk(h, || load_markdown_now(h, md));
+}
+
+fn load_markdown_now(h: HWND, md: &str) {
     enum Kind {
         Plain,
         Bullet,

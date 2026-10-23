@@ -42,6 +42,8 @@ use draw::*;
 
 const CLASS: &str = "PeekABooLibrary";
 const ID_SEARCH: usize = 10;
+/// Makes the card's editor once search typing pauses.
+const T_SYNC: usize = 1;
 /// The filter segments: Notes, Archive, All.
 fn segments() -> [&'static str; 3] {
     [t!("segment_notes"), t!("segment_archive"), t!("segment_all")]
@@ -829,17 +831,27 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             GetWindowTextW(lp as HWND, buf.as_mut_ptr(), 256);
                             let q = from_wide(&buf);
                             with(|l| {
+                                // The list fades in as a search starts or ends, not again with
+                                // every letter: each fade redraws the window many times over.
+                                let started = l.query.is_empty() != q.is_empty();
                                 l.query = q;
                                 l.scroll.snap(0.0);
-                                l.list_a.snap(0.55);
-                                l.list_a.to(1.0);
+                                if started {
+                                    l.list_a.snap(0.55);
+                                    l.list_a.to(1.0);
+                                }
                                 // Typing selects the best match; clearing the search keeps
                                 // the note you found, scrolled into view.
                                 let cleared = l.query.is_empty();
+                                let before = l.sel.last().copied();
                                 if !cleared {
                                     l.sel.clear();
                                 }
                                 rebuild(l);
+                                // Still the best match: its card stays as it is.
+                                if l.sel.last().copied() == before {
+                                    l.detail_a.snap(1.0);
+                                }
                                 if let Some(i) = primary_index(l).filter(|_| cleared) {
                                     let lay = layout(l);
                                     l.sel_y.snap(lay.list_top + i as f32 * lay.row_h);
@@ -852,9 +864,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         }
                         _ => {}
                     }
-                    paint_now(hwnd);
-                    sync_editor();
+                    if code == EN_CHANGE {
+                        // While typing, the best match changes with each letter: its card
+                        // shows the quick preview, and the editor comes once typing pauses
+                        // (making one per letter made every keystroke lag).
+                        if with(|l| wanted_editor(l).map(|w| w.0) != Some(l.editor_id)).unwrap_or(false) {
+                            close_editor();
+                        }
+                        paint_now(hwnd);
+                        SetTimer(hwnd, T_SYNC, 250, None);
+                    } else {
+                        paint_now(hwnd);
+                        sync_editor();
+                    }
                 }
+                return 0;
+            }
+            WM_TIMER if wp == T_SYNC => {
+                KillTimer(hwnd, T_SYNC);
+                sync_editor();
                 return 0;
             }
             WM_SETFOCUS => {

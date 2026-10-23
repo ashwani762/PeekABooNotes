@@ -7,6 +7,10 @@ use super::*;
 
 /// Apply face, size and text colour to everything (and to newly typed text).
 pub fn apply_base_format(h: HWND, text_rgb: u32, bg_rgb: u32) {
+    bulk(h, || base_format_now(h, text_rgb, bg_rgb));
+}
+
+fn base_format_now(h: HWND, text_rgb: u32, bg_rgb: u32) {
     let mut cf = CharFormat2::new();
     // Face, size and colour for everything; weight is left alone so bold survives.
     cf.mask = CFM_FACE | CFM_SIZE | CFM_COLOR | CFM_CHARSET;

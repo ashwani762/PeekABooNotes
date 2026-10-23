@@ -26,6 +26,41 @@ fn range(h: HWND, a: i32, b: i32) -> Option<ITextRange2> {
     unsafe { doc(h)?.Range2(b, a).ok() }
 }
 
+thread_local! {
+    static BULK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Make many changes in a row as one: drawing, layout, change notifications and undo
+/// recording wait until they're all made. One at a time, the ten thousand lines of a long
+/// list took RichEdit seconds. Nests (only the outermost call holds and releases).
+pub fn bulk<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
+    if BULK.with(|b| b.replace(b.get() + 1)) > 0 {
+        let r = f();
+        BULK.with(|b| b.set(b.get() - 1));
+        return r;
+    }
+    let d = doc(h);
+    let mask = send(h, EM_GETEVENTMASK, 0, 0);
+    send(h, EM_SETEVENTMASK, 0, 0);
+    if let Some(d) = &d {
+        unsafe {
+            let _ = d.Freeze();
+            let _ = d.Undo(tomSuspend.0);
+        }
+    }
+    let r = f();
+    if let Some(d) = &d {
+        unsafe {
+            let _ = d.Undo(tomResume.0);
+            let _ = d.Unfreeze();
+        }
+    }
+    send(h, EM_SETEVENTMASK, 0, mask);
+    BULK.with(|b| b.set(0));
+    r
+}
+
 /// The font size (points) of the character at `cp`, without touching the selection.
 pub fn size_at(h: HWND, cp: i32) -> Option<f32> {
     range(h, cp, cp + 1).and_then(|r| unsafe { r.GetFont().ok()?.GetSize().ok() })

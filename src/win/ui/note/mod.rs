@@ -582,12 +582,14 @@ fn apply_theme(h: HWND) {
     let bg = theme::paper(color, dark);
     let was = st.loading;
     st.loading = true;
-    rich::apply_base_format(st.edit, theme::PAPER_TEXT, bg);
-    rich::style_title(st.edit);
-    rich::set_box_colors(st.edit, bg, theme::paper_subtext(color, dark), theme::PAPER_TEXT);
-    crate::win::editor::checks::set_style(st.edit, theme::paper_ink(color, dark), bg, st.s);
-    rich::style_boxes(st.edit);
-    rich::color_named_links(st.edit);
+    rich::bulk(st.edit, || {
+        rich::apply_base_format(st.edit, theme::PAPER_TEXT, bg);
+        rich::style_title(st.edit);
+        rich::set_box_colors(st.edit, bg, theme::paper_subtext(color, dark), theme::PAPER_TEXT);
+        crate::win::editor::checks::set_style(st.edit, theme::paper_ink(color, dark), bg, st.s);
+        rich::style_boxes(st.edit);
+        rich::color_named_links(st.edit);
+    });
     st.loading = was;
     if !st.embedded {
         theme::set_border_color(h, mix(theme::color(color).ink, bg, 0.78));
@@ -621,12 +623,15 @@ fn on_create(h: HWND) {
     let edit = new_editor(h);
     st.edit = edit;
     let (rtf, text) = app::store(|s| s.note(st.id).map(|n| (n.rtf.clone(), n.text.clone()))).unwrap_or_default();
-    if !rtf.is_empty() {
-        rich::set_rtf(edit, &rtf);
-    } else if !text.is_empty() {
-        rich::load_markdown(edit, &text);
-    }
-    apply_theme(h);
+    // In bulk: a long note's thousands of format changes are laid out once, at the end.
+    rich::bulk(edit, || {
+        if !rtf.is_empty() {
+            rich::set_rtf(edit, &rtf);
+        } else if !text.is_empty() {
+            rich::load_markdown(edit, &text);
+        }
+        apply_theme(h);
+    });
     rich::send(edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
     connect_editor(h, edit);
     unsafe {

@@ -8,8 +8,8 @@
 
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, SendMessageW};
 
 mod format;
 mod lists;
@@ -40,6 +40,8 @@ pub const EM_PASTESPECIAL: u32 = WM_USER + 64;
 pub const EM_SETBKGNDCOLOR: u32 = WM_USER + 67;
 pub const EM_SETCHARFORMAT: u32 = WM_USER + 68;
 pub const EM_SETEVENTMASK: u32 = WM_USER + 69;
+const EM_GETEVENTMASK: u32 = WM_USER + 59;
+const EM_EXLIMITTEXT: u32 = WM_USER + 53;
 pub const EM_SETPARAFORMAT: u32 = WM_USER + 71;
 pub const EM_STREAMIN: u32 = WM_USER + 73;
 pub const EM_STREAMOUT: u32 = WM_USER + 74;
@@ -362,6 +364,19 @@ pub fn char_from_pos(h: HWND, x: i32, y: i32) -> i32 {
     send(h, EM_CHARFROMPOS, 0, &p as *const _ as isize) as i32
 }
 
+/// The text on screen, as a range of `t` (the editor's text): from the start of the first
+/// paragraph showing to just past the last character showing. Overlays that draw over
+/// the text only need to look there, not through a whole long note.
+pub fn on_screen(h: HWND, t: &[u16]) -> (usize, usize) {
+    let mut rc: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetClientRect(h, &mut rc) };
+    let first = char_from_pos(h, 0, 0).clamp(0, t.len() as i32);
+    let last = char_from_pos(h, rc.right, rc.bottom).clamp(0, t.len() as i32);
+    let a = para_start(t, first) as usize;
+    let b = t[last as usize..].iter().position(|&c| c == CR).map_or(t.len(), |i| last as usize + i);
+    (a.min(b), b)
+}
+
 pub fn pos_from_char(h: HWND, cp: i32) -> POINT {
     let mut p = POINT { x: 0, y: 0 };
     send(h, EM_POSFROMCHAR, &mut p as *mut _ as usize, cp as isize);
@@ -419,6 +434,9 @@ const BULLET_START: i32 = 40;
 pub fn setup(h: HWND) {
     send(h, EM_SETOPTIONS, ECOOP_OR, ECO_AUTOVSCROLL | ECO_SELECTIONBAR);
     send(h, EM_AUTOURLDETECT, 1, 0);
+    // RichEdit takes typing only up to 32,767 characters unless told otherwise: past that,
+    // a long note silently stopped accepting keys.
+    send(h, EM_EXLIMITTEXT, 0, i32::MAX as isize);
     send(h, EM_SETTYPOGRAPHYOPTIONS, TO_ADVANCEDTYPOGRAPHY, TO_ADVANCEDTYPOGRAPHY as isize);
 }
 
