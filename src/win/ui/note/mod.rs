@@ -324,7 +324,8 @@ fn view_of(edit: HWND) -> [i32; 3] {
 fn open_at_place(h: HWND) {
     let Some(st) = state(h) else { return };
     let edit = st.edit;
-    let view = app::store(|s| s.note(st.id).and_then(|n| n.view));
+    // A window reopens where it was left; All Notes' card always shows a note from its title.
+    let view = if st.embedded { None } else { app::store(|s| s.note(st.id).and_then(|n| n.view)) };
     let len = rich::text(edit).len() as i32;
     unsafe { SendMessageW(edit, WM_SETREDRAW, 0, 0) };
     match view {
@@ -471,7 +472,8 @@ pub fn flush(h: HWND) {
     let Some(st) = state(h) else { return };
     unsafe { KillTimer(h, T_SAVE) };
     let (id, edit) = (st.id, st.edit);
-    let view = Some(view_of(edit));
+    // The place to reopen at is the note window's: the card in All Notes leaves it be.
+    let view = if st.embedded { app::store(|s| s.note(id).and_then(|n| n.view)) } else { Some(view_of(edit)) };
     if !st.dirty {
         // Only moved around: keep the place (not the "edited" time) when it changed.
         if app::store(|s| s.note(id).map(|n| n.view)) != Some(view) {
