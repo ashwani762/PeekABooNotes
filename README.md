@@ -25,6 +25,7 @@ A slim pill sits on the screen edge, one colour capsule per note. Point at it an
 - Bold, italic, underline and strikethrough. The first line is the title.
 - Links: addresses you type are clickable, and Ctrl+K (or pasting an address over selected text) turns any words into a link. Hovering one shows where it goes; export writes it as `[words](address)` and import reads it back.
 - Files: drop files on a note (or paste files copied in Explorer) and they are copied into the `attachments` folder beside your notes. Pictures show inline, scaled down so the note stays light; other files show as a paperclip and their name. Click one to open it, hover for its name, or drag it out to copy the file anywhere.
+- A note holds up to 100,000 characters (about 16,000 words). Typing and pasting stop there, and the note says it's full; longer files aren't imported.
 - Bullets, numbers and checklists:
   - Typing `- `, `* `, `1. ` or `[] ` at the start of a line converts it; Backspace right after reverts.
   - Tab and Shift+Tab nest items; numbers go 1. → a. → i.
