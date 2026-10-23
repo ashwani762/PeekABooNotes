@@ -253,6 +253,11 @@ const T_RESULT: usize = 7;
 const RESULT_MS: u32 = 2600;
 
 thread_local! {
+    /// A result whose time ran out while another window was in front.
+    static RESULT_WAITS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+thread_local! {
     static WIN: RefCell<Option<Win>> = const { RefCell::new(None) };
 }
 
@@ -343,6 +348,7 @@ fn choose_language() {
 /// dialog shows nothing.
 fn show_result(hwnd: HWND, k: Key, outcome: app::Outcome, plural: &str) {
     let Some(r) = outcome else { return };
+    RESULT_WAITS.with(|r| r.set(false));
     let text = match r {
         Ok(n) => crate::common::i18n::plural(plural, n as i64, &[&n]),
         Err(()) => t!("result_failed").to_string(),
@@ -778,8 +784,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_TIMER if wp == T_RESULT => {
                 KillTimer(hwnd, T_RESULT);
-                with(|w| w.result_a.to(0.0));
-                anim::wake(Client::Settings);
+                // Export shows its folder on top: the ✓ waits (looking twice a second)
+                // until Settings is back in front, then gets its full time there.
+                let front = GetForegroundWindow() == hwnd;
+                if !front {
+                    RESULT_WAITS.with(|r| r.set(true));
+                    SetTimer(hwnd, T_RESULT, 500, None);
+                } else if RESULT_WAITS.with(|r| r.replace(false)) {
+                    SetTimer(hwnd, T_RESULT, RESULT_MS, None);
+                } else {
+                    with(|w| w.result_a.to(0.0));
+                    anim::wake(Client::Settings);
+                }
                 return 0;
             }
             WM_DESTROY => {
