@@ -24,7 +24,8 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
 ## Notes that feel like paper
 
 - **Write, don't format.** Type `- `, `1. ` or `[] ` and you have a list or a checklist. Tab nests, Enter steps out. Bold, italic, underline and strikethrough are a keystroke away.
-- **Quotes, code and tables.** Type `> ` for a quote or ```` ``` ```` for a code block, add a table from the right-click menu, and centre or right-align any line or picture. All of it exports as plain Markdown.
+- **Quotes, code and tables.** Type `> ` for a quote or ```` ``` ```` for a code block, add a table from the right-click menu, and centre or right-align any line or picture. A quote can hold a list or a checklist, and sit under a list item. All of it exports as plain Markdown.
+- **Undo that remembers.** Ctrl+Z goes back through what you typed, and on through the last twenty saved versions of the note: after closing and reopening it, or after an assistant changed it. Ctrl+Y comes forward again.
 - **Checklists you'll enjoy ticking.** Circles fill with a little spring, and done items quietly strike through.
 - **Links that just work.** Type an address and it's a link. Select words and press Ctrl+K to name one.
 - **Pictures and files.** Drop them on a note: pictures show inline, files as a paperclip you can open or drag back out.
