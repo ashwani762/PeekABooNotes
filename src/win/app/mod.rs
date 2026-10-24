@@ -62,6 +62,19 @@ pub const NC_PASTE: u32 = 220;
 pub const NC_SELECT_ALL: u32 = 221;
 pub const NC_DECK: u32 = 222;
 pub const NC_LINK: u32 = 223;
+pub const NC_ALIGN_LEFT: u32 = 224;
+pub const NC_ALIGN_CENTER: u32 = 225;
+pub const NC_ALIGN_RIGHT: u32 = 226;
+pub const NC_QUOTE: u32 = 227;
+pub const NC_CODE: u32 = 228;
+pub const NC_TABLE: u32 = 229;
+pub const NC_ROW_ABOVE: u32 = 230;
+pub const NC_ROW_BELOW: u32 = 231;
+pub const NC_COL_LEFT: u32 = 232;
+pub const NC_COL_RIGHT: u32 = 233;
+pub const NC_ROW_DELETE: u32 = 234;
+pub const NC_COL_DELETE: u32 = 235;
+pub const NC_TABLE_DELETE: u32 = 236;
 pub const NC_COLOR0: u32 = 300;
 
 // App commands (tray menu, hotkeys).

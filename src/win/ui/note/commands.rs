@@ -30,6 +30,24 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
         }
         NC_PASTE => paste(h),
         NC_SELECT_ALL => rich::set_sel(e, 0, -1),
+        NC_ALIGN_LEFT => fmt(&|| rich::set_alignment(e, rich::PFA_LEFT)),
+        NC_ALIGN_CENTER => fmt(&|| rich::set_alignment(e, rich::PFA_CENTER)),
+        NC_ALIGN_RIGHT => fmt(&|| rich::set_alignment(e, rich::PFA_RIGHT)),
+        NC_QUOTE => fmt(&|| rich::still(e, || block_command(e, rich::Block::Quote))),
+        NC_CODE => fmt(&|| rich::still(e, || block_command(e, rich::Block::Code))),
+        NC_TABLE => fmt(&|| rich::still(e, || block_command(e, rich::Block::Table))),
+        NC_ROW_ABOVE | NC_ROW_BELOW | NC_COL_LEFT | NC_COL_RIGHT | NC_ROW_DELETE | NC_COL_DELETE | NC_TABLE_DELETE => fmt(&|| {
+            let (a, _) = rich::sel(e);
+            rich::still(e, || match cmd {
+                NC_ROW_ABOVE => rich::insert_row(e, a, false),
+                NC_ROW_BELOW => rich::insert_row(e, a, true),
+                NC_COL_LEFT => rich::insert_column(e, a, false),
+                NC_COL_RIGHT => rich::insert_column(e, a, true),
+                NC_ROW_DELETE => rich::delete_row(e, a),
+                NC_COL_DELETE => rich::delete_column(e, a),
+                _ => rich::delete_block(e, a),
+            });
+        }),
         NC_LINK => link_command(h),
         NC_CLOSE | NC_NEXT | NC_PREV if st.embedded => unsafe {
             let parent = GetParent(h);
@@ -55,6 +73,50 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
             app::note_command(id, cmd);
         }
     }
+}
+
+/// Quote, code or table at the caret. A quote or code block there already is taken apart
+/// (or turned into the other); otherwise the selected paragraphs go into a new one, or an
+/// empty one opens below the title. A table always starts empty.
+pub(super) fn block_command(e: HWND, kind: rich::Block) {
+    use rich::Block;
+    let (a, b) = rich::sel(e);
+    let t = rich::text(e);
+    if let Some((have, ..)) = rich::cell_at(e, &t, a) {
+        if have == Block::Table || kind == Block::Table {
+            return;
+        }
+        let Some((start, end)) = rich::unwrap(e, a) else { return };
+        if have != kind {
+            rich::wrap(e, start, end, kind);
+        }
+        return;
+    }
+    let (ps, pe) = (rich::para_start(&t, a), rich::para_end(&t, b.max(a)));
+    // The title stays the title: a block goes below it.
+    if ps == 0 {
+        if pe as usize >= t.len() {
+            rich::set_sel(e, pe, pe);
+            rich::insert_text(e, "\r");
+        }
+        let at = pe + 1;
+        let cell = rich::insert_block(e, at, kind, if kind == Block::Table { 2 } else { 1 }, if kind == Block::Table { 3 } else { 1 });
+        rich::set_sel(e, cell, cell);
+        return;
+    }
+    if kind == Block::Table {
+        // An empty line becomes the table; after anything else, it goes below.
+        let at = if ps == pe { ps } else { pe + 1 };
+        if at as usize > t.len() || (ps != pe && pe as usize >= t.len()) {
+            rich::set_sel(e, pe, pe);
+            rich::insert_text(e, "\r");
+        }
+        let over = if ps == pe && t.get(ps as usize) == Some(&rich::CR) { 1 } else { 0 };
+        let cell = rich::insert_block_over(e, at, over, kind, 2, 3);
+        rich::set_sel(e, cell, cell);
+        return;
+    }
+    rich::wrap(e, ps, pe, kind);
 }
 
 /// Ctrl+K: link the selection (or edit the link at the caret). An address on the
@@ -170,6 +232,12 @@ pub(super) fn key_cmd(vk: u16, ctrl: bool, shift: bool) -> Option<u32> {
         (true, true, v) if v == k('P') => NC_PIN,
         (true, false, v) if v == k('W') => NC_CLOSE,
         (true, false, v) if v == k('K') => NC_LINK,
+        (true, false, v) if v == k('L') => NC_ALIGN_LEFT,
+        (true, false, v) if v == k('E') => NC_ALIGN_CENTER,
+        (true, false, v) if v == k('R') => NC_ALIGN_RIGHT,
+        (true, false, VK_OEM_7) => NC_QUOTE,
+        (true, true, v) if v == k('M') => NC_CODE,
+        (true, true, v) if v == k('T') => NC_TABLE,
         (true, false, v) if v == k('N') => NC_NEW,
         (true, false, v) if v == k('V') => NC_PASTE,
         (false, true, VK_INSERT) => NC_PASTE,

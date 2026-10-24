@@ -41,6 +41,13 @@
     <string name="menu_paste">चिपकाएँ</string>
     <string name="menu_select_all">सब चुनें</string>
     <string name="menu_link">लिंक</string>
+    <string name="menu_row_above">ऊपर पंक्ति जोड़ें</string>
+    <string name="menu_row_below">नीचे पंक्ति जोड़ें</string>
+    <string name="menu_col_left">बाईं ओर कॉलम जोड़ें</string>
+    <string name="menu_col_right">दाईं ओर कॉलम जोड़ें</string>
+    <string name="menu_row_delete">पंक्ति हटाएँ</string>
+    <string name="menu_col_delete">कॉलम हटाएँ</string>
+    <string name="menu_table_delete">तालिका हटाएँ</string>
     <string name="menu_move_here">यहाँ ले जाएँ</string>
     <string name="menu_copy_here">यहाँ कॉपी करें</string>
     <string name="link_placeholder">लिंक चिपकाएँ या लिखें</string>

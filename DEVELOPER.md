@@ -37,7 +37,7 @@ The app is split so other platforms can be added beside Windows: `src/common/` i
 |---|---|
 | `src/main.rs` | Entry point: picks the platform module |
 | `src/common/` | The portable app: the note store (`store.rs`), interface strings (`i18n/`), search (`search.rs`), attachments (`attach.rs`), emoji (`emoji.rs`), the MCP protocol and tools (`mcp.rs`), the zip writer (`zip.rs`), design tokens (`theme.rs`), springs (`anim.rs`), the log (`log.rs`) and small helpers (`util.rs`) |
-| `src/win/` | Windows: `os.rs` (what `common` asks of the OS), `app/` (message loop, note lifecycle, menus, import, export and share, autostart, the MCP pipe), `ui/` (deck, note windows, All Notes, Settings, menus, toasts, tooltips, flying cards), `editor/` (RichEdit, links, and the checklist and colour-emoji overlays), `render/` (software canvas, DirectWrite, frame clock), `crash.rs`, `theme.rs`, `util.rs` |
+| `src/win/` | Windows: `os.rs` (what `common` asks of the OS), `app/` (message loop, note lifecycle, menus, import, export and share, autostart, the MCP pipe), `ui/` (deck, note windows, All Notes, Settings, menus, toasts, tooltips, flying cards), `editor/` (RichEdit, links, quotes, code blocks and tables, and the checklist, colour-emoji and header-fade overlays), `render/` (software canvas, DirectWrite, frame clock), `crash.rs`, `theme.rs`, `util.rs` |
 | `src/bin/peekaboo-mcp.rs` | The MCP bridge: stdin/stdout to the app's pipe |
 
 ### The editor
@@ -47,6 +47,8 @@ Notes are Windows' RichEdit (Msftedit), with a few things layered on:
 - **Lists and checklists** are paragraph formats; a checklist item starts with a ☐/☑ placeholder that the checklist overlay draws as a circle.
 - **Colour emoji** are drawn over RichEdit's monochrome glyphs by an overlay. Emoji variation selectors (U+FE0F) are kept out of the control as hidden private-use stand-ins, because RichEdit stops drawing list bullets once one is in a document.
 - **Links** are RichEdit's named links (a hidden `HYPERLINK "url"` field before the shown text). RichEdit's own address spotting is off, because it picks those links' colour itself (white on paper dimmed for dark mode); typed and pasted addresses become named links when a space, Tab or Enter ends them, or the note opens.
+- **Quotes, code blocks and tables** are RichEdit table rows (`rich/blocks.rs`), so RichEdit draws, edits and stores them: a quote is one cell with a bar down its left border, a code block one shaded cell in Cascadia Mono (Consolas without it), a table any number of cells in a light grid with a tinted first row. Which is which is the cell margin it was made with (`\trgaph` in the RTF); borders a block doesn't show are drawn in the colour around it, since RichEdit outlines borderless cells in grey. Colours follow the note and the theme, and cells are refitted to the note's width when it's resized. RichEdit keeps an empty paragraph between two blocks; Markdown export skips it. Several-step changes (a new block, a checkbox) go through `rich::still`, which holds the view still and lets one Ctrl+Z take the whole change back.
+- **Alignment** (left, centre, right) is RichEdit's paragraph alignment; a picture is a paragraph of its own, so it aligns the same way.
 - **Bulk changes** (loading a note, applying a theme) freeze layout, drawing, notifications and undo until they're done, so a long note is laid out once instead of once per paragraph.
 - The overlays look only at the text on screen, so they cost the same in a long note as in a short one.
 
@@ -74,7 +76,7 @@ There is no network access and no telemetry.
 ## Import, export and share
 
 - **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)".
-- **Import** reads `.md` and `.txt` files and turns their Markdown into real formatting: headings, `**bold**`, `_italic_`, `~~strike~~`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists and `[links](https://...)`. Plain text that only looks like a marker is written escaped (`\- not a list`) and comes back as text.
+- **Import** reads `.md` and `.txt` files and turns their Markdown into real formatting: `**bold**`, `_italic_`, `~~strike~~`, `<u>underline</u>`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists, `[links](https://...)`, `> ` quotes, fenced code blocks, pipe tables (`:---:` and `---:` align a column) and `<p align="center">` / `"right"` lines. Headings below the title come in as plain text. Plain text that only looks like a marker is written escaped (`\- not a list`) and comes back as text.
 - **Attachments** go along: export copies them into an `attachments` folder beside the Markdown and links them relatively (`![photo.jpg](attachments/photo.jpg)`); import copies linked local files back in.
 - **Readable anywhere:** plain UTF-8; lines end in Markdown's line break (two spaces) so viewers keep them apart as the note has them; an address that links to itself is written as just the address.
 - **Share** writes the same files for the selected notes into one zip (stored, not compressed) under `%TEMP%\PeekABoo Share` and hands it to the Windows share sheet; without one, Explorer shows the zip.
@@ -125,7 +127,11 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 | Ctrl+Shift+8 / 7 | Bulleted / numbered list |
 | Ctrl+Shift+L | Checklist |
 | Ctrl+Enter | Tick or untick the checklist item |
-| Tab / Shift+Tab | Indent / outdent a list item |
+| Tab / Shift+Tab | Indent / outdent a list item; in a table, next / previous cell (Tab in the last cell adds a row); in a code block, indent / outdent the line |
+| Ctrl+L / E / R | Align left / centre / right |
+| Ctrl+' | Quote |
+| Ctrl+Shift+M | Code block |
+| Ctrl+Shift+T | Table |
 | Ctrl+K | Link the selected text, or change the link at the caret |
 | Ctrl+. | Next colour |
 | Ctrl+Shift+P | Keep on top |

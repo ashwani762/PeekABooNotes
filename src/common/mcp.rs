@@ -111,7 +111,7 @@ const TOOLS: &str = r#"[
  {
   "name": "create_note",
   "title": "Create a note",
-  "description": "Creates a note from Markdown. The first line is its title. Supported: **bold**, _italic_, ~~strike~~, - bullets, 1. numbers, - [ ] / - [x] checklist items, [links](https://...), and files on this computer as ![name](C:/path/picture.png) or [name](C:/path/file.pdf), which are copied in as attachments.",
+  "description": "Creates a note from Markdown. The first line is its title. Supported: **bold**, _italic_, ~~strike~~, <u>underline</u>, - bullets, 1. numbers, - [ ] / - [x] checklist items, > quotes, ``` code blocks ```, | tables | with a | --- | row (:---: centres a column), <p align=\"center\">centred</p> or align=\"right\" lines, [links](https://...), and files on this computer as ![name](C:/path/picture.png) or [name](C:/path/file.pdf), which are copied in as attachments. Other headings come in as plain text.",
   "inputSchema": {
    "type": "object",
    "properties": {

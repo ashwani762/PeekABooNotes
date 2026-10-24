@@ -41,6 +41,13 @@
     <string name="menu_paste">Pegar</string>
     <string name="menu_select_all">Seleccionar todo</string>
     <string name="menu_link">Enlace</string>
+    <string name="menu_row_above">Insertar fila encima</string>
+    <string name="menu_row_below">Insertar fila debajo</string>
+    <string name="menu_col_left">Insertar columna a la izquierda</string>
+    <string name="menu_col_right">Insertar columna a la derecha</string>
+    <string name="menu_row_delete">Eliminar fila</string>
+    <string name="menu_col_delete">Eliminar columna</string>
+    <string name="menu_table_delete">Eliminar tabla</string>
     <string name="menu_move_here">Mover aquí</string>
     <string name="menu_copy_here">Copiar aquí</string>
     <string name="link_placeholder">Pega o escribe un enlace</string>

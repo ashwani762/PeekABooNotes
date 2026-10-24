@@ -13,6 +13,25 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
     let mut start = 0usize;
     let mut numbers = [0usize; MAX_LEVEL as usize + 1];
     while start <= t.len() {
+        // Two blocks always have an empty paragraph between them (RichEdit won't let two
+        // tables touch): that's their gap, not a blank line.
+        if t.get(start) == Some(&CR) && start >= 2 && t[start - 2] == ROW_END && t.get(start + 1) == Some(&ROW_START) {
+            start += 1;
+            continue;
+        }
+        // Quotes, code blocks and tables go out whole.
+        if t.get(start) == Some(&ROW_START)
+            && let Some((kind, rows)) = block_at(h, &t, start as i32)
+        {
+            out.push_str(&block_md(h, &t, kind, &rows, inline));
+            out.push('\n');
+            numbers = [0; MAX_LEVEL as usize + 1];
+            start = rows.last().map_or(t.len(), |r| r.end);
+            if start >= t.len() {
+                break;
+            }
+            continue;
+        }
         let end = t[start..].iter().position(|&c| c == CR).map(|i| start + i).unwrap_or(t.len());
         set_sel(h, start as i32, start as i32);
         let mut pf = ParaFormat2::new();
@@ -46,6 +65,17 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
                 body_start += 1;
             }
         }
+        // A centred or right-aligned line keeps its alignment on the way out.
+        let align = if inline && start > 0 && num == 0 && !task {
+            match pf.alignment {
+                PFA_CENTER => Some("center"),
+                PFA_RIGHT => Some("right"),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let line_start = out.len();
         out.push_str(&prefix);
         // Plain text that only looks like a list or heading ("- not a list", typed and
         // reverted with Backspace) is escaped, so it comes back as text.
@@ -67,6 +97,12 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         } else {
             out.push_str(&visible(&t, body_start, end));
         }
+        if let Some(a) = align
+            && out.len() > line_start
+        {
+            out.insert_str(line_start, &format!("<p align=\"{a}\">"));
+            out.push_str("</p>");
+        }
         out.push('\n');
         if end >= t.len() {
             break;
@@ -78,6 +114,77 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         out = out.replace("- [ ] ", "[ ] ").replace("- [x] ", "[x] ");
     }
     out.trim_end().to_string()
+}
+
+/// The block starting at `cp` as the light text has it: (kind, how many lines, where it
+/// ends in `t`).
+pub fn light_block(h: HWND, t: &[u16], cp: usize) -> Option<(Block, usize, usize)> {
+    let (kind, rows) = block_at(h, t, cp as i32)?;
+    let lines = block_md(h, t, kind, &rows, false).lines().count();
+    Some((kind, lines, rows.last().map_or(t.len(), |r| r.end)))
+}
+
+/// A quote, code block or table as Markdown (`inline`: with marks and links).
+fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> String {
+    // A cell's paragraphs: (start, end) in `t`.
+    let paras = |a: usize, b: usize| {
+        let mut out = Vec::new();
+        let mut s = a;
+        for i in a..=b {
+            if i == b || t.get(i) == Some(&CR) {
+                out.push((s, i));
+                s = i + 1;
+            }
+        }
+        out
+    };
+    let text_of = |a: usize, b: usize| if inline { inline_md(h, t, a, b) } else { visible(t, a, b) };
+    let mut out = String::new();
+    match kind {
+        Block::Quote => {
+            let (a, b) = cells(t, rows[0]).first().copied().unwrap_or((rows[0].start, rows[0].start));
+            let lines: Vec<String> = paras(a, b).into_iter().map(|(x, y)| format!("> {}", text_of(x, y)).trim_end().to_string()).collect();
+            out.push_str(&lines.join("\n"));
+        }
+        Block::Code => {
+            let (a, b) = cells(t, rows[0]).first().copied().unwrap_or((rows[0].start, rows[0].start));
+            out.push_str("```\n");
+            for (x, y) in paras(a, b) {
+                out.push_str(&unmark_str(&t[x..y]).replace('\u{B}', "\n"));
+                out.push('\n');
+            }
+            out.push_str("```");
+        }
+        Block::Table => {
+            for (n, row) in rows.iter().enumerate() {
+                let cs = cells(t, *row);
+                let line: Vec<String> = cs
+                    .iter()
+                    .map(|&(a, b)| paras(a, b).into_iter().map(|(x, y)| text_of(x, y).replace('|', "\\|")).collect::<Vec<_>>().join("<br>"))
+                    .collect();
+                out.push_str(&format!("| {} |\n", line.join(" | ")));
+                if n == 0 {
+                    // Each column's alignment, from its header cell.
+                    let seps: Vec<&str> = cs
+                        .iter()
+                        .map(|&(a, _)| {
+                            set_sel(h, a as i32, a as i32);
+                            let mut pf = ParaFormat2::new();
+                            send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+                            match pf.alignment {
+                                PFA_CENTER => ":---:",
+                                PFA_RIGHT => "---:",
+                                _ => "---",
+                            }
+                        })
+                        .collect();
+                    out.push_str(&format!("| {} |\n", seps.join(" | ")));
+                }
+            }
+            out.pop();
+        }
+    }
+    out
 }
 
 /// Where a link that starts at a hidden instruction ends: (where its name starts, where
@@ -247,11 +354,37 @@ fn load_markdown_now(h: HWND, md: &str) {
         Number,
         Task(bool),
     }
-    let mut lines: Vec<(Kind, i32, String, Runs, Links)> = Vec::new();
+    let mut lines: Vec<(Kind, i32, String, Runs, Links, u16)> = Vec::new();
+    // Quotes, code and tables: an empty line holds each one's place until the text is in.
+    let mut fills: Vec<(usize, Fill)> = Vec::new();
+    let norm = md.replace("\r\n", "\n");
     // A file's final newline (and any blank lines after the text) is not an empty item.
-    for raw in md.replace("\r\n", "\n").trim_end().split('\n') {
+    let src: Vec<&str> = norm.trim_end().split('\n').collect();
+    let mut i = 0;
+    while i < src.len() {
         // Trailing spaces only ever mean a line break (`hard_breaks`), which a line is anyway.
-        let raw = raw.trim_end();
+        let raw = src[i].trim_end();
+        i += 1;
+        let l = raw.trim_start();
+        if let Some((fill, used)) = block_from(l, &src[i..]) {
+            // A blank line on either side of a block is Markdown's way to set it apart (a
+            // table needs one), not an empty paragraph: blocks have their own space.
+            if lines.last().is_some_and(|(_, _, s, ..)| s.is_empty()) && fills.last().is_none_or(|(at, _)| *at != lines.len() - 1) {
+                lines.pop();
+            }
+            fills.push((lines.len(), fill));
+            lines.push((Kind::Plain, 0, String::new(), Vec::new(), Vec::new(), PFA_LEFT));
+            i += used;
+            if src.get(i).is_some_and(|n| n.trim().is_empty()) {
+                i += 1;
+            }
+            continue;
+        }
+        // A centred or right-aligned line, as `to_markdown` writes one.
+        let (raw, align) = match aligned(l) {
+            Some((inner, a)) => (inner, a),
+            None => (raw, PFA_LEFT),
+        };
         let l = raw.trim_start();
         // Two spaces (or a tab) per nesting level, as `to_markdown` writes them.
         let indent: usize = raw[..raw.len() - l.len()].chars().map(|c| if c == '\t' { 2 } else { 1 }).sum();
@@ -275,33 +408,7 @@ fn load_markdown_now(h: HWND, md: &str) {
                 _ => (Kind::Plain, raw),
             }
         };
-        let (text, mut runs) = inline_marks(rest);
-        // Links last: marks may sit inside their names. Removing the link syntax moves
-        // what follows it, so the runs move with it.
-        let (text, mut links) = {
-            let (plain, links) = md_links(&text);
-            let units = |s: &str| s.encode_utf16().count() as i32;
-            let (old, new) = (units(&text), units(&plain));
-            if old != new {
-                // Map each UTF-16 position of `text` to its place in `plain`.
-                let mut map = vec![0i32; old as usize + 1];
-                let (o, p): (Vec<u16>, Vec<u16>) = (text.encode_utf16().collect(), plain.encode_utf16().collect());
-                let (mut i, mut j) = (0usize, 0usize);
-                while i < o.len() {
-                    map[i] = j as i32;
-                    if j < p.len() && o[i] == p[j] {
-                        j += 1;
-                    }
-                    i += 1;
-                }
-                map[o.len()] = p.len() as i32;
-                for r in &mut runs {
-                    r.0 = map[r.0 as usize];
-                    r.1 = map[r.1 as usize];
-                }
-            }
-            (plain, links)
-        };
+        let (text, mut runs, mut links) = parse_inline(rest);
         let mark = match k {
             Kind::Task(true) => "\u{2611} ",
             Kind::Task(false) => "\u{2610} ",
@@ -317,19 +424,25 @@ fn load_markdown_now(h: HWND, md: &str) {
             l.1 += shift;
         }
         let level = if matches!(k, Kind::Plain) { 0 } else { (indent / 2).min(MAX_LEVEL as usize) as i32 };
-        lines.push((k, level, format!("{mark}{text}"), runs, links));
+        lines.push((k, level, format!("{mark}{text}"), runs, links, align));
     }
-    let joined: Vec<&str> = lines.iter().map(|(_, _, s, _, _)| s.as_str()).collect();
+    let joined: Vec<&str> = lines.iter().map(|(_, _, s, _, _, _)| s.as_str()).collect();
     set_sel(h, 0, -1);
     insert_text(h, &joined.join("\r"));
     // Start clean: a reused control keeps the last document's list and character formats.
     set_sel(h, 0, -1);
     set_numbering(h, 0);
+    set_alignment(h, PFA_LEFT);
     set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
     let mut pos = 0i32;
-    let mut links = Vec::new();
-    for (k, level, s, runs, line_links) in &lines {
-        links.extend(line_links.iter().map(|(a, b, url)| (pos + a, pos + b, url.clone())));
+    // Everything that inserts text (links' hidden instructions, blocks), by position.
+    let mut later: Vec<(i32, Later)> = Vec::new();
+    let mut fills = fills.into_iter().peekable();
+    for (n, (k, level, s, runs, line_links, align)) in lines.iter().enumerate() {
+        later.extend(line_links.iter().map(|(a, b, url)| (pos + a, Later::Link(pos + b, url.clone()))));
+        if let Some((_, fill)) = fills.next_if(|(at, _)| *at == n) {
+            later.push((pos, Later::Block(fill)));
+        }
         let len = s.encode_utf16().count() as i32;
         set_sel(h, pos, pos);
         match k {
@@ -340,6 +453,10 @@ fn load_markdown_now(h: HWND, md: &str) {
                 set_effect(h, CFM_STRIKEOUT, true);
             }
             _ => {}
+        }
+        if *align != PFA_LEFT {
+            set_sel(h, pos, pos);
+            set_alignment(h, *align);
         }
         for _ in 0..*level {
             set_sel(h, pos, pos);
@@ -362,11 +479,222 @@ fn load_markdown_now(h: HWND, md: &str) {
         }
         pos += len + 1;
     }
-    // Each link adds hidden text before its name: from the end, so the rest stay put.
+    // Each adds text: from the end, so the rest stay put.
+    later.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+    for (at, l) in later {
+        match l {
+            Later::Link(b, url) => {
+                set_link(h, at, b, &url);
+            }
+            Later::Block(fill) => put_block(h, at, &fill),
+        }
+    }
+    set_sel(h, 0, 0);
+}
+
+/// A paragraph's text with its inline marks and links taken out: (text, runs, links).
+type Inline = (String, Runs, Links);
+
+/// A block's content, read from Markdown.
+enum Fill {
+    Quote(Vec<Inline>),
+    Code(Vec<String>),
+    /// Rows of cells (each cell's paragraphs), and each column's alignment.
+    Table(Vec<Vec<Vec<Inline>>>, Vec<u16>),
+}
+
+enum Later {
+    Link(i32, String),
+    Block(Fill),
+}
+
+/// Strip a line's marks and links: its text, (start, end, effect) runs and links.
+fn parse_inline(rest: &str) -> Inline {
+    let (text, mut runs) = inline_marks(rest);
+    // Links last: marks may sit inside their names. Removing the link syntax moves
+    // what follows it, so the runs move with it.
+    let (plain, links) = md_links(&text);
+    let units = |s: &str| s.encode_utf16().count() as i32;
+    let (old, new) = (units(&text), units(&plain));
+    if old != new {
+        // Map each UTF-16 position of `text` to its place in `plain`.
+        let mut map = vec![0i32; old as usize + 1];
+        let (o, p): (Vec<u16>, Vec<u16>) = (text.encode_utf16().collect(), plain.encode_utf16().collect());
+        let (mut i, mut j) = (0usize, 0usize);
+        while i < o.len() {
+            map[i] = j as i32;
+            if j < p.len() && o[i] == p[j] {
+                j += 1;
+            }
+            i += 1;
+        }
+        map[o.len()] = p.len() as i32;
+        for r in &mut runs {
+            r.0 = map[r.0 as usize];
+            r.1 = map[r.1 as usize];
+        }
+    }
+    (plain, runs, links)
+}
+
+/// `<p align="center">…</p>` (or right, or left): the inside and its alignment.
+fn aligned(l: &str) -> Option<(&str, u16)> {
+    let rest = l.strip_prefix("<p align=\"")?;
+    let (word, rest) = rest.split_once("\">")?;
+    let inner = rest.strip_suffix("</p>")?;
+    let a = match word {
+        "center" => PFA_CENTER,
+        "right" => PFA_RIGHT,
+        "left" => PFA_LEFT,
+        _ => return None,
+    };
+    Some((inner, a))
+}
+
+/// A block starting at line `l`, with the lines after it in `next`: what it holds, and
+/// how many of `next` it takes.
+fn block_from(l: &str, next: &[&str]) -> Option<(Fill, usize)> {
+    // ``` code, to the closing fence (or the end).
+    if l.starts_with("```") {
+        let body: Vec<String> = next.iter().take_while(|n| !n.trim().starts_with("```")).map(|n| n.trim_end().to_string()).collect();
+        let used = (body.len() + 1).min(next.len());
+        return Some((Fill::Code(body), used));
+    }
+    // > quote lines, together.
+    let quoted = |s: &str| {
+        let t = s.trim();
+        t.strip_prefix("> ").or(t.strip_prefix('>')).map(|r| r.to_string())
+    };
+    if let Some(first) = quoted(l) {
+        let mut paras = vec![parse_inline(&first)];
+        for n in next {
+            match quoted(n) {
+                Some(q) => paras.push(parse_inline(&q)),
+                None => break,
+            }
+        }
+        let used = paras.len() - 1;
+        return Some((Fill::Quote(paras), used));
+    }
+    // | a | b | with a | --- | --- | line under it.
+    if l.starts_with('|') {
+        let aligns = separator(next.first()?)?;
+        let mut rows = vec![table_cells(l)];
+        for n in &next[1..] {
+            let t = n.trim();
+            if !t.starts_with('|') {
+                break;
+            }
+            rows.push(table_cells(t));
+        }
+        let used = rows.len();
+        let cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(aligns.len()).max(1);
+        let cells: Vec<Vec<Vec<Inline>>> = rows
+            .iter()
+            .map(|r| (0..cols).map(|c| r.get(c).map(|s| s.split("<br>").map(parse_inline).collect()).unwrap_or_else(|| vec![parse_inline("")])).collect())
+            .collect();
+        let mut aligns = aligns;
+        aligns.resize(cols, PFA_LEFT);
+        return Some((Fill::Table(cells, aligns), used));
+    }
+    None
+}
+
+/// The cells of a table line `| a | b |`, without their pipes (`\|` is a pipe in a cell).
+fn table_cells(l: &str) -> Vec<String> {
+    let t = l.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = t.strip_suffix('|').filter(|r| !r.ends_with('\\')).unwrap_or(t);
+    let mut out = vec![String::new()];
+    let mut chars = t.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                out.last_mut().unwrap().push('|');
+                chars.next();
+            }
+            '|' => out.push(String::new()),
+            c => out.last_mut().unwrap().push(c),
+        }
+    }
+    out.into_iter().map(|c| c.trim().to_string()).collect()
+}
+
+/// A table's `| --- | :---: | ---: |` line: each column's alignment, or None if `l` isn't one.
+fn separator(l: &str) -> Option<Vec<u16>> {
+    let cells = table_cells(l);
+    cells
+        .iter()
+        .map(|c| {
+            let dashes = c.trim_matches(':');
+            if dashes.is_empty() || !dashes.chars().all(|ch| ch == '-') {
+                return None;
+            }
+            Some(match (c.starts_with(':'), c.ends_with(':')) {
+                (true, true) => PFA_CENTER,
+                (false, true) => PFA_RIGHT,
+                _ => PFA_LEFT,
+            })
+        })
+        .collect()
+}
+
+/// Build `fill` in place of the empty paragraph at `at`.
+fn put_block(h: HWND, at: i32, fill: &Fill) {
+    let (kind, rows, cols) = match fill {
+        Fill::Quote(_) => (Block::Quote, 1, 1),
+        Fill::Code(_) => (Block::Code, 1, 1),
+        Fill::Table(r, a) => (Block::Table, r.len().max(1), a.len().max(1)),
+    };
+    // In place of the placeholder's paragraph mark (the block ends in its own), so no
+    // empty line is left: RichEdit won't fold one into a block that follows.
+    let t = text(h);
+    let over = if t.get(at as usize) == Some(&CR) { 1 } else { 0 };
+    insert_block_over(h, at, over, kind, rows, cols);
+    let t = text(h);
+    let Some((_, rs)) = block_at(h, &t, at) else { return };
+    let all: Vec<(usize, usize)> = rs.iter().flat_map(|r| cells(&t, *r)).collect();
+    // From the last cell up, so the ones before stay put.
+    for (n, &(a, _)) in all.iter().enumerate().rev() {
+        match fill {
+            Fill::Quote(paras) => fill_cell(h, a as i32, paras, PFA_LEFT),
+            Fill::Code(lines) => {
+                set_sel(h, a as i32, a as i32);
+                insert_text(h, &lines.join("\r"));
+            }
+            Fill::Table(rows, aligns) => {
+                let (r, c) = (n / cols, n % cols);
+                if let Some(paras) = rows.get(r).and_then(|row| row.get(c)) {
+                    fill_cell(h, a as i32, paras, aligns.get(c).copied().unwrap_or(PFA_LEFT));
+                }
+            }
+        }
+    }
+    style_blocks(h);
+}
+
+/// Paragraphs into the (empty) cell at `at`, with their marks and links.
+fn fill_cell(h: HWND, at: i32, paras: &[Inline], align: u16) {
+    let joined: Vec<&str> = paras.iter().map(|p| p.0.as_str()).collect();
+    set_sel(h, at, at);
+    insert_text(h, &joined.join("\r"));
+    let mut pos = at;
+    let mut links = Vec::new();
+    for (s, runs, ls) in paras {
+        if align != PFA_LEFT {
+            set_sel(h, pos, pos);
+            set_alignment(h, align);
+        }
+        for &(a, b, effect) in runs {
+            set_sel(h, pos + a, pos + b);
+            set_effect(h, effect, true);
+        }
+        links.extend(ls.iter().map(|(a, b, url)| (pos + a, pos + b, url.clone())));
+        pos += s.encode_utf16().count() as i32 + 1;
+    }
     for (a, b, url) in links.iter().rev() {
         set_link(h, *a, *b, url);
     }
-    set_sel(h, 0, 0);
 }
 
 /// Character-format runs within a line: (start, end, effect) in UTF-16 units.

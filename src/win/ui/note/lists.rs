@@ -100,7 +100,8 @@ pub(super) fn toggle_task_lines(e: HWND) {
     rich::style_boxes(e);
 }
 
-/// "- ", "* ", "1. ", "[] " / "[ ] " at the start of a line become real lists.
+/// "- ", "* ", "1. ", "[] " / "[ ] " at the start of a line become real lists, and "> "
+/// a quote.
 pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
     let (a, b) = rich::sel(e);
     if a != b {
@@ -112,6 +113,16 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
         return false;
     }
     let prefix = String::from_utf16_lossy(&t[ps as usize..a as usize]);
+    if prefix == ">" && ps > 0 && rich::cell_at(e, &t, a).is_none() {
+        rich::still(e, || {
+            rich::set_sel(e, ps, a);
+            rich::replace_sel(e, "");
+            let t = rich::text(e);
+            rich::wrap(e, ps, rich::para_end(&t, ps), rich::Block::Quote);
+        });
+        mark_dirty(h);
+        return true;
+    }
     let kind = match prefix.as_str() {
         "-" | "*" => (AutoKind::List, PFN_BULLET),
         "1." => (AutoKind::List, PFN_ARABIC),
@@ -165,8 +176,106 @@ pub(super) fn revert_auto(h: HWND, e: HWND) -> bool {
     true
 }
 
+/// Enter in a quote or code block makes a new line in it; on an empty last line it leaves
+/// the block instead (an empty block goes altogether), as an empty list item ends a
+/// list. A code line starts indented like the one before. "```" alone on a line opens a
+/// code block. None when Enter is RichEdit's to handle.
+pub(super) fn block_enter(e: HWND) -> Option<bool> {
+    use rich::Block;
+    let (a, b) = rich::sel(e);
+    if a != b {
+        return None;
+    }
+    let t = rich::text(e);
+    let (ps, pe) = (rich::para_start(&t, a), rich::para_end(&t, a));
+    if let Some((kind, rows, ca, cb)) = rich::cell_at(e, &t, a) {
+        if kind == Block::Table {
+            return None;
+        }
+        if ps == pe && pe as usize == cb {
+            rich::still(e, || {
+                if ca == cb {
+                    rich::delete_block(e, a);
+                } else {
+                    // The empty line goes, and the caret moves on below the block.
+                    rich::set_sel(e, ps - 1, ps);
+                    rich::replace_sel(e, "");
+                    let end = rows.last().map_or(0, |r| r.end) as i32 - 1;
+                    rich::set_sel(e, end, end);
+                }
+            });
+            return Some(true);
+        }
+        if kind == Block::Code {
+            let indent: String = t[ps as usize..pe as usize].iter().take_while(|&&c| c == b' ' as u16).map(|_| ' ').collect();
+            rich::still(e, || {
+                rich::replace_sel(e, &format!("\r{indent}"));
+                // Only the last line keeps the air below it.
+                rich::style_blocks(e);
+            });
+            return Some(true);
+        }
+        return None;
+    }
+    if ps > 0 && pe == a && String::from_utf16_lossy(&t[ps as usize..pe as usize]).trim() == "```" {
+        rich::still(e, || {
+            rich::set_sel(e, ps, pe);
+            rich::replace_sel(e, "");
+            let over = if rich::text(e).get(ps as usize) == Some(&rich::CR) { 1 } else { 0 };
+            let cell = rich::insert_block_over(e, ps, over, Block::Code, 1, 1);
+            rich::set_sel(e, cell, cell);
+        });
+        return Some(true);
+    }
+    None
+}
+
+/// Tab in a quote or code block: code indents by four spaces (Shift+Tab takes up to four
+/// back); a quote ignores it (RichEdit would give it a second row). False elsewhere: in a
+/// table Tab moves between cells.
+pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
+    let (a, b) = rich::sel(e);
+    let t = rich::text(e);
+    match rich::cell_at(e, &t, a) {
+        Some((rich::Block::Code, ..)) => {
+            let ps = rich::para_start(&t, a);
+            if shift {
+                let n = t[ps as usize..].iter().take(4).take_while(|&&c| c == b' ' as u16).count() as i32;
+                if n > 0 {
+                    rich::set_sel(e, ps, ps + n);
+                    rich::replace_sel(e, "");
+                    rich::set_sel(e, (a - n).max(ps), (b - n).max(ps));
+                }
+            } else {
+                rich::replace_sel(e, "    ");
+            }
+            true
+        }
+        Some((rich::Block::Quote, ..)) => true,
+        _ => false,
+    }
+}
+
+/// Backspace at the very start of a quote or code block takes the block apart, leaving
+/// its text as ordinary paragraphs.
+pub(super) fn block_backspace(e: HWND) -> bool {
+    let (a, b) = rich::sel(e);
+    let t = rich::text(e);
+    match rich::cell_at(e, &t, a) {
+        Some((rich::Block::Quote | rich::Block::Code, _, ca, _)) if a == b && a as usize == ca => {
+            rich::still(e, || rich::unwrap(e, a));
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Enter continues checklists and ends lists on an empty item.
 pub(super) fn handle_enter(h: HWND, e: HWND) -> bool {
+    if let Some(done) = block_enter(e) {
+        mark_dirty(h);
+        return done;
+    }
     let (a, b) = rich::sel(e);
     let t = rich::text(e);
     let ps = rich::para_start(&t, a);
@@ -231,4 +340,129 @@ pub(super) fn checkbox_at(e: HWND, x: i32, y: i32) -> Option<i32> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::commands::block_command;
+    use super::*;
+    use rich::{Block, CELL, CR, ROW_END, ROW_START};
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, ES_MULTILINE, WS_POPUP};
+
+    fn editor(s: &str) -> HWND {
+        let h = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(h);
+        rich::insert_text(h, s);
+        h
+    }
+
+    /// The text, with `/` for paragraph ends, `|` cell ends, `[` `]` rows, `^` the caret.
+    fn plain(h: HWND) -> String {
+        let (a, _) = rich::sel(h);
+        let mut out = String::new();
+        for (i, &c) in rich::text(h).iter().enumerate() {
+            if i as i32 == a {
+                out.push('^');
+            }
+            out.push(match c {
+                CR => '/',
+                CELL => '|',
+                ROW_START => '[',
+                ROW_END => ']',
+                c => char::from_u32(c as u32).unwrap_or('?'),
+            });
+        }
+        if a as usize >= rich::text(h).len() {
+            out.push('^');
+        }
+        out
+    }
+
+    fn caret(h: HWND, s: &str) {
+        let at = plain(h).replace('^', "").find(s).unwrap() as i32;
+        rich::set_sel(h, at, at);
+    }
+
+    #[test]
+    fn quote_and_code_commands() {
+        let h = editor("Title\rone\rtwo\rend");
+        caret(h, "one");
+        block_command(h, Block::Quote);
+        assert_eq!(plain(h).replace('^', ""), "Title/[/one|]/two/end");
+        // Again: back to text.
+        caret(h, "one");
+        block_command(h, Block::Quote);
+        assert_eq!(plain(h).replace('^', ""), "Title/one/two/end");
+        // Two lines into code, then code into a quote.
+        let a = plain(h).replace('^', "").find("one").unwrap() as i32;
+        let b = plain(h).replace('^', "").find("two").unwrap() as i32 + 1;
+        rich::set_sel(h, a, b);
+        block_command(h, Block::Code);
+        assert_eq!(plain(h).replace('^', ""), "Title/[/one/two|]/end");
+        caret(h, "two");
+        block_command(h, Block::Quote);
+        assert_eq!(plain(h).replace('^', ""), "Title/[/one/two|]/end");
+        let t = rich::text(h);
+        assert_eq!(rich::block_at(h, &t, 8).map(|b| b.0), Some(Block::Quote));
+        // On the title: an empty block below it, the caret in it.
+        let h = editor("Title");
+        block_command(h, Block::Code);
+        assert_eq!(plain(h), "Title/[/^|]/");
+        // A table on an empty line takes its place.
+        let h = editor("Title\r\rend");
+        rich::set_sel(h, 6, 6);
+        block_command(h, Block::Table);
+        assert_eq!(plain(h), "Title/[/^|||]/[/|||]/end");
+    }
+
+    #[test]
+    fn one_undo_per_block_command() {
+        let h = editor("Title\rone\rtwo\rend");
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        caret(h, "one");
+        rich::still(h, || block_command(h, Block::Quote));
+        assert_eq!(plain(h).replace('^', ""), "Title/[/one|]/two/end");
+        assert!(rich::undo_group(h));
+        assert_eq!(plain(h).replace('^', ""), "Title/one/two/end");
+    }
+
+    #[test]
+    fn keys_in_blocks() {
+        let h = editor("Title\r    a\rend");
+        caret(h, "    a");
+        block_command(h, Block::Code);
+        // Enter keeps the indent.
+        caret(h, "a|");
+        let at = rich::sel(h).0 + 1;
+        rich::set_sel(h, at, at);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/    a/    ^|]/end");
+        // Tab and Shift+Tab.
+        assert!(block_tab(h, false));
+        assert_eq!(plain(h), "Title/[/    a/        ^|]/end");
+        assert!(block_tab(h, true));
+        assert_eq!(plain(h), "Title/[/    a/    ^|]/end");
+        // An empty last line: Enter leaves the block.
+        let (a, _) = rich::sel(h);
+        rich::set_sel(h, a - 4, a);
+        rich::replace_sel(h, "");
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/    a|]/^end");
+        // Backspace at the start of the block takes it apart.
+        caret(h, "    a");
+        assert!(block_backspace(h));
+        assert_eq!(plain(h).replace('^', ""), "Title/    a/end");
+        // ``` and Enter opens a code block.
+        let h = editor("Title\r```");
+        rich::set_sel(h, 9, 9);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/^|]/");
+        // Enter in an empty block takes it away.
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h).replace('^', ""), "Title/");
+    }
 }

@@ -11,11 +11,13 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, SendMessageW};
 
+mod blocks;
 mod format;
 mod lists;
 mod links;
 mod markdown;
 mod selectors;
+pub use blocks::*;
 pub use format::*;
 pub use links::*;
 pub use lists::*;
@@ -75,8 +77,13 @@ pub const SCF_SELECTION: usize = 0x0001;
 pub const SCF_ALL: usize = 0x0004;
 
 pub const PFM_STARTINDENT: u32 = 0x0001;
+pub const PFM_ALIGNMENT: u32 = 0x0008;
+pub const PFA_LEFT: u16 = 1;
+pub const PFA_RIGHT: u16 = 2;
+pub const PFA_CENTER: u16 = 3;
 pub const PFM_OFFSET: u32 = 0x0004;
 pub const PFM_NUMBERING: u32 = 0x0020;
+pub const PFM_SPACEBEFORE: u32 = 0x0040;
 pub const PFM_SPACEAFTER: u32 = 0x0080;
 pub const PFM_LINESPACING: u32 = 0x0100;
 pub const PFM_NUMBERINGSTYLE: u32 = 0x2000;
@@ -93,7 +100,9 @@ const ECO_AUTOVSCROLL: isize = 0x0040;
 const ECO_SELECTIONBAR: isize = 0x0100_0000;
 const TO_ADVANCEDTYPOGRAPHY: usize = 1;
 const CF_UNICODETEXT: usize = 13;
-const GT_DEFAULT: u32 = 0;
+/// The text as RichEdit holds it: a table keeps its row and cell marks (by default they
+/// come out as tabs, and every position after one is off).
+const GT_RAWTEXT: u32 = 4;
 const GTL_PRECISE: u32 = 2;
 const GTL_NUMCHARS: u32 = 8;
 const ST_DEFAULT: u32 = 0;
@@ -301,7 +310,7 @@ pub fn text(h: HWND) -> Vec<u16> {
     let mut buf = vec![0u16; len + 1];
     let gt = GetTextEx {
         cb: ((len + 1) * 2) as u32,
-        flags: GT_DEFAULT,
+        flags: GT_RAWTEXT,
         codepage: CP_UTF16,
         default_char: std::ptr::null(),
         used_default: null_mut(),
@@ -402,14 +411,15 @@ pub fn set_scroll_y(h: HWND, y: i32) {
     send(h, EM_SETSCROLLPOS, 0, &p as *const _ as isize);
 }
 
+/// Where the paragraph holding `cp` starts. The end of a table cell ends a paragraph too.
 pub fn para_start(t: &[u16], cp: i32) -> i32 {
     let cp = (cp.max(0) as usize).min(t.len());
-    t[..cp].iter().rposition(|&c| c == CR).map(|i| i as i32 + 1).unwrap_or(0)
+    t[..cp].iter().rposition(|&c| c == CR || c == CELL).map(|i| i as i32 + 1).unwrap_or(0)
 }
 
 pub fn para_end(t: &[u16], cp: i32) -> i32 {
     let cp = (cp.max(0) as usize).min(t.len());
-    t[cp..].iter().position(|&c| c == CR).map(|i| (cp + i) as i32).unwrap_or(t.len() as i32)
+    t[cp..].iter().position(|&c| c == CR || c == CELL).map(|i| (cp + i) as i32).unwrap_or(t.len() as i32)
 }
 
 pub fn char_format(h: HWND, scope: usize) -> CharFormat2 {
@@ -423,6 +433,14 @@ pub fn set_effect(h: HWND, mask: u32, on: bool) {
     cf.mask = mask;
     cf.effects = if on { mask } else { 0 };
     send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+}
+
+/// Align the paragraphs in the selection: `PFA_LEFT`, `PFA_CENTER` or `PFA_RIGHT`.
+pub fn set_alignment(h: HWND, align: u16) {
+    let mut pf = ParaFormat2::new();
+    pf.mask = PFM_ALIGNMENT;
+    pf.alignment = align;
+    send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
 }
 
 pub fn toggle_effect(h: HWND, mask: u32) {

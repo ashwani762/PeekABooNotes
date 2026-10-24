@@ -22,7 +22,7 @@ fn doc(h: HWND) -> Option<ITextDocument2> {
     unk.cast().ok()
 }
 
-fn range(h: HWND, a: i32, b: i32) -> Option<ITextRange2> {
+pub(super) fn range(h: HWND, a: i32, b: i32) -> Option<ITextRange2> {
     unsafe { doc(h)?.Range2(b, a).ok() }
 }
 
@@ -63,13 +63,15 @@ pub fn bulk<R>(h: HWND, f: impl FnOnce() -> R) -> R {
 
 /// Run `f`, which moves the selection about to format text, with the view held still:
 /// nothing is drawn until it's done, and the scroll position is put back, so the note
-/// doesn't jump or flash. Unlike `bulk`, it stays undoable.
+/// doesn't jump or flash. Unlike `bulk`, it stays undoable, and `undo_group` takes it
+/// back in one.
 pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     if BULK.with(|b| b.get()) > 0 {
         return f();
     }
     let d = doc(h);
     let y = scroll_y(h);
+    let before = text(h);
     if let Some(d) = &d {
         unsafe {
             let _ = d.Freeze();
@@ -82,7 +84,35 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
             let _ = d.Unfreeze();
         }
     }
+    let after = text(h);
+    if after != before {
+        LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after)));
+    }
     r
+}
+
+/// A change `still` made: the editor, its text before and after.
+type Group = (isize, Vec<u16>, Vec<u16>);
+
+thread_local! {
+    static LAST_GROUP: std::cell::RefCell<Option<Group>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Ctrl+Z straight after a change made through `still` (a quote, a table, a checkbox):
+/// undo all of its steps, back to the text before it, not just the last one. False when
+/// anything has changed since.
+pub fn undo_group(h: HWND) -> bool {
+    const EM_UNDO: u32 = 0x00C7;
+    let Some((e, before, after)) = LAST_GROUP.with(|g| g.borrow_mut().take()) else { return false };
+    if e != h as isize || text(h) != after {
+        return false;
+    }
+    for _ in 0..32 {
+        if send(h, EM_UNDO, 0, 0) == 0 || text(h) == before {
+            break;
+        }
+    }
+    true
 }
 
 /// The font size (points) of the character at `cp`, without touching the selection.

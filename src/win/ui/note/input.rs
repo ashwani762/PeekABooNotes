@@ -115,7 +115,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 return 0;
             }
             if ctrl && !shift && !alt && vk == b'Z' as u16 {
-                if undo_toggle(e) {
+                if undo_toggle(e) || rich::undo_group(e) {
                     mark_dirty(h);
                     st.swallow = true;
                     return 0;
@@ -129,8 +129,18 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     unsafe { PostMessageW(h, WM_NOTE_CMD, cmd as usize, 0) };
                     return 0;
                 }
+                if vk == VK_BACK && !ctrl && block_backspace(e) {
+                    st.swallow = true;
+                    mark_dirty(h);
+                    return 0;
+                }
                 if vk == VK_BACK && !ctrl && revert_auto(h, e) {
                     st.swallow = true;
+                    return 0;
+                }
+                if vk == VK_TAB && !ctrl && block_tab(e, shift) {
+                    st.swallow = true;
+                    mark_dirty(h);
                     return 0;
                 }
                 if vk == VK_TAB && !ctrl && rich::nest(e, if shift { -1 } else { 1 }) {
@@ -287,11 +297,16 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         WM_NCDESTROY => unsafe {
             crate::win::editor::checks::forget(e);
             crate::win::editor::fade::forget(e);
+            rich::forget_block_colors(e);
             RemoveWindowSubclass(e, Some(edit_proc), 1);
         },
         _ => {}
     }
     let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+    // Quotes, code and tables stay as wide as the text column.
+    if msg == WM_SIZE {
+        rich::style_blocks(e);
+    }
     // RichEdit draws outside WM_PAINT too (typing, selecting, scrolling): put the
     // checkboxes back over their placeholder glyphs after anything that may have drawn.
     let drew = matches!(

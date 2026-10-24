@@ -51,6 +51,13 @@
     <string name="menu_paste">Paste</string>
     <string name="menu_select_all">Select All</string>
     <string name="menu_link">Link</string>
+    <string name="menu_row_above">Insert Row Above</string>
+    <string name="menu_row_below">Insert Row Below</string>
+    <string name="menu_col_left">Insert Column Left</string>
+    <string name="menu_col_right">Insert Column Right</string>
+    <string name="menu_row_delete">Delete Row</string>
+    <string name="menu_col_delete">Delete Column</string>
+    <string name="menu_table_delete">Delete Table</string>
     <string name="menu_move_here">Move Here</string>
     <string name="menu_copy_here">Copy Here</string>
     <string name="link_placeholder">Paste or type a link</string>

@@ -17,7 +17,9 @@ pub fn edit_menu(e: HWND) -> Vec<menu::Item> {
     use menu::{Item, Tool, ToolStyle, action};
     let (a, b) = rich::sel(e);
     let selected = a != b;
-    vec![
+    let t = rich::text(e);
+    let in_table = rich::block_at(e, &t, a).is_some_and(|(k, _)| k == rich::Block::Table);
+    let mut v = vec![
         Item::Tools(vec![
             Tool { id: NC_BOLD, glyph: "B", style: ToolStyle::Bold },
             Tool { id: NC_ITALIC, glyph: "I", style: ToolStyle::Italic },
@@ -27,6 +29,14 @@ pub fn edit_menu(e: HWND) -> Vec<menu::Item> {
             Tool { id: NC_NUMBERS, glyph: "1.", style: ToolStyle::Plain },
             Tool { id: NC_TASK, glyph: "\u{E930}", style: ToolStyle::Icon },
         ]),
+        Item::Tools(vec![
+            Tool { id: NC_ALIGN_LEFT, glyph: "\u{E8E4}", style: ToolStyle::Icon },
+            Tool { id: NC_ALIGN_CENTER, glyph: "\u{E8E3}", style: ToolStyle::Icon },
+            Tool { id: NC_ALIGN_RIGHT, glyph: "\u{E8E2}", style: ToolStyle::Icon },
+            Tool { id: NC_QUOTE, glyph: "\u{201C}", style: ToolStyle::Bold },
+            Tool { id: NC_CODE, glyph: "\u{E943}", style: ToolStyle::Icon },
+            Tool { id: NC_TABLE, glyph: "\u{E80A}", style: ToolStyle::Icon },
+        ]),
         Item::Separator,
         action(NC_CUT, t!("menu_cut"), &crate::common::i18n::keys(&["ctrl", "X"]), IC_CUT).enabled(selected),
         action(NC_COPY, t!("menu_copy"), &crate::common::i18n::keys(&["ctrl", "C"]), IC_COPY).enabled(selected),
@@ -34,7 +44,22 @@ pub fn edit_menu(e: HWND) -> Vec<menu::Item> {
         action(NC_SELECT_ALL, t!("menu_select_all"), &crate::common::i18n::keys(&["ctrl", "A"]), IC_SELECT),
         Item::Separator,
         action(NC_LINK, t!("menu_link"), &crate::common::i18n::keys(&["ctrl", "K"]), IC_LINK),
-    ]
+    ];
+    // In a table: its rows and columns.
+    if in_table {
+        v.extend([
+            Item::Separator,
+            action(NC_ROW_ABOVE, t!("menu_row_above"), "", ""),
+            action(NC_ROW_BELOW, t!("menu_row_below"), "", ""),
+            action(NC_COL_LEFT, t!("menu_col_left"), "", ""),
+            action(NC_COL_RIGHT, t!("menu_col_right"), "", ""),
+            Item::Separator,
+            action(NC_ROW_DELETE, t!("menu_row_delete"), "", ""),
+            action(NC_COL_DELETE, t!("menu_col_delete"), "", ""),
+            menu::danger(NC_TABLE_DELETE, t!("menu_table_delete"), "", IC_DELETE),
+        ]);
+    }
+    v
 }
 
 /// A note's own menu: its colour, place and fate. From the note window itself (`in_note`:

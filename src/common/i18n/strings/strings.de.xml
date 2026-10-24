@@ -41,6 +41,13 @@
     <string name="menu_paste">Einfügen</string>
     <string name="menu_select_all">Alles auswählen</string>
     <string name="menu_link">Link</string>
+    <string name="menu_row_above">Zeile darüber einfügen</string>
+    <string name="menu_row_below">Zeile darunter einfügen</string>
+    <string name="menu_col_left">Spalte links einfügen</string>
+    <string name="menu_col_right">Spalte rechts einfügen</string>
+    <string name="menu_row_delete">Zeile löschen</string>
+    <string name="menu_col_delete">Spalte löschen</string>
+    <string name="menu_table_delete">Tabelle löschen</string>
     <string name="menu_move_here">Hierher verschieben</string>
     <string name="menu_copy_here">Hierher kopieren</string>
     <string name="link_placeholder">Link einfügen oder eingeben</string>

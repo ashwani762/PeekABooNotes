@@ -370,11 +370,26 @@ pub fn flight_content(h: HWND, text: &str) -> crate::win::ui::ghost::Content {
         return whole;
     }
     let t = rich::text(st.edit);
+    // `para` counts lines of `text`: a quote, code block or table is as many as it's
+    // written in, and is stepped over whole.
     let (mut cp, mut para) = (0usize, 0usize);
     while rich::pos_from_char(st.edit, cp as i32).y < 0 {
+        if t.get(cp) == Some(&rich::ROW_START)
+            && let Some((_, lines, end)) = rich::light_block(st.edit, &t, cp)
+        {
+            cp = end;
+            para += lines;
+            continue;
+        }
+        let gap = cp >= 2 && t[cp - 2] == rich::ROW_END && t.get(cp + 1) == Some(&rich::ROW_START);
         let Some(i) = t[cp..].iter().position(|&c| c == rich::CR) else { return whole };
         cp += i + 1;
-        para += 1;
+        if !gap {
+            para += 1;
+        }
+        if cp >= t.len() {
+            return whole;
+        }
     }
     let y = rich::pos_from_char(st.edit, cp as i32).y as f32;
     let body_top = header_h(st.s) as f32 + 2.0 * st.s + y;
@@ -599,6 +614,8 @@ fn apply_theme(h: HWND) {
         rich::set_box_colors(st.edit, bg, theme::paper_subtext(color, dark), theme::PAPER_TEXT);
         crate::win::editor::checks::set_style(st.edit, theme::paper_ink(color, dark), bg, st.s);
         rich::style_boxes(st.edit);
+        rich::set_block_colors(st.edit, bg, theme::PAPER_TEXT, dark);
+        rich::style_blocks(st.edit);
         rich::color_named_links(st.edit);
     });
     st.loading = was;
