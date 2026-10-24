@@ -591,7 +591,8 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
         } else if let Some(r) = t.strip_prefix("[x] ") {
             format!("●  {r}")
         } else if let Some(r) = t.strip_prefix("- ") {
-            format!("•  {r}")
+            // The editor's bullet for the level: • ◦ ▪.
+            format!("{}  {r}", ['•', '◦', '▪'][level % 3])
         } else if let Some(r) = t[digits..].strip_prefix(". ").filter(|_| digits > 0) {
             format!("{}. {r}", list_number(t[..digits].parse().unwrap_or(1), level))
         } else {
@@ -615,7 +616,7 @@ pub fn summary_line(l: &str) -> std::borrow::Cow<'_, str> {
         return cells.into_iter().map(cell_text).filter(|c| !c.is_empty()).collect::<Vec<_>>().join(" \u{b7} ").into();
     }
     let l = unescaped(l).or(quoted(l)).unwrap_or(l);
-    l.trim().trim_start_matches(['○', '●', '•', ' ']).into()
+    l.trim().trim_start_matches(['○', '●', '•', '◦', '▪', ' ']).into()
 }
 
 /// What a search looks through besides the title: everything after the title line as

@@ -614,6 +614,7 @@ fn apply_theme(h: HWND) {
         rich::set_box_colors(st.edit, bg, theme::paper_subtext(color, dark), theme::PAPER_TEXT);
         crate::win::editor::checks::set_style(st.edit, theme::paper_ink(color, dark), bg, st.s);
         rich::style_boxes(st.edit);
+        rich::style_bullets(st.edit);
         rich::set_block_colors(st.edit, bg, theme::PAPER_TEXT, dark);
         rich::style_blocks(st.edit);
         rich::color_named_links(st.edit);

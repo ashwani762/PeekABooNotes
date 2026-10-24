@@ -42,7 +42,7 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         let mut body_start = start;
         let mut prefix = "  ".repeat(level);
         match num {
-            PFN_BULLET => prefix.push_str("- "),
+            n if is_bullet(n) => prefix.push_str("- "),
             PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN => {
                 numbers[level] += 1;
                 for n in numbers.iter_mut().skip(level + 1) {

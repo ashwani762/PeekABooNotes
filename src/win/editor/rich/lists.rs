@@ -51,7 +51,49 @@ pub(super) fn normalize_lists(h: HWND) {
 
 pub fn toggle_numbering(h: HWND, kind: u16) {
     let cur = numbering(h);
-    set_numbering(h, if cur == kind { 0 } else { kind });
+    let same = cur == kind || (is_bullet(cur) && is_bullet(kind));
+    set_numbering(h, if same { 0 } else { kind });
+}
+
+/// Bullets by nesting level, as in Notes: • then ◦ then ▪, and round again.
+const BULLETS: [u16; 3] = [PFN_BULLET, 0x25E6, 0x25AA];
+
+/// Whether `numbering` is a bullet (of any level) rather than a number.
+pub fn is_bullet(numbering: u16) -> bool {
+    BULLETS.contains(&numbering)
+}
+
+/// The bullet for nesting level `level`.
+pub fn bullet_for(level: i32) -> u16 {
+    BULLETS[level.max(0) as usize % BULLETS.len()]
+}
+
+/// Give every bulleted paragraph the bullet for its level. RichEdit draws any character
+/// as a bullet, but its RTF keeps only the plain one: this puts the others back once a
+/// note is loaded.
+pub fn style_bullets(h: HWND) {
+    let t = text(h);
+    let (a, b) = sel(h);
+    let mut ps = 0usize;
+    loop {
+        set_sel(h, ps as i32, ps as i32);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        if is_bullet(pf.numbering) {
+            let want = bullet_for(level_of(pf.start_indent, BULLET_START));
+            if pf.numbering != want {
+                let mut n = ParaFormat2::new();
+                n.mask = PFM_NUMBERING;
+                n.numbering = want;
+                send(h, EM_SETPARAFORMAT, 0, &n as *const _ as isize);
+            }
+        }
+        match t[ps..].iter().position(|&c| c == CR) {
+            Some(i) if ps + i + 1 < t.len() => ps += i + 1,
+            _ => break,
+        }
+    }
+    set_sel(h, a, b);
 }
 
 /// First-line indent of a list paragraph at nesting level 0: bullets/numbers or checklists.
@@ -133,6 +175,11 @@ pub fn nest(h: HWND, delta: i32) -> bool {
         // Numbered lists count each level on its own, styled like Notes: 1. a. i.
         let mut cur = ParaFormat2::new();
         send(h, EM_GETPARAFORMAT, 0, &mut cur as *mut _ as isize);
+        // Bullets change with the level too: • ◦ ▪.
+        if is_bullet(cur.numbering) {
+            pf.mask |= PFM_NUMBERING;
+            pf.numbering = bullet_for(next);
+        }
         if matches!(cur.numbering, PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN) {
             pf.mask |= PFM_NUMBERING | PFM_NUMBERINGSTYLE | PFM_NUMBERINGSTART;
             pf.numbering = [PFN_ARABIC, PFN_LCLETTER, PFN_LCROMAN][next as usize % 3];
@@ -164,5 +211,61 @@ pub fn fix_caret_indent(h: HWND) {
         pf = ParaFormat2::new();
         pf.mask = PFM_STARTINDENT | PFM_OFFSET;
         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, ES_MULTILINE, WS_POPUP};
+
+    fn editor() -> HWND {
+        let h = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        setup(h);
+        h
+    }
+
+    /// The bullet of each paragraph after the title, 0 for none.
+    fn bullets(h: HWND) -> Vec<u16> {
+        let t = text(h);
+        let mut out = Vec::new();
+        for (i, &c) in t.iter().enumerate() {
+            if c == CR && i + 1 < t.len() {
+                set_sel(h, i as i32 + 1, i as i32 + 1);
+                out.push(numbering(h));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn bullets_by_level() {
+        let h = editor();
+        let md = "T\n- one\n  - two\n    - three\n      - four\n- five";
+        load_markdown(h, md);
+        assert_eq!(bullets(h), vec![PFN_BULLET, 0x25E6, 0x25AA, PFN_BULLET, PFN_BULLET]);
+        assert_eq!(to_markdown(h, true), format!("# {md}"));
+        // Tab and Shift+Tab change the mark with the level.
+        let t = String::from_utf16_lossy(&text(h));
+        let five = t.find("five").unwrap() as i32;
+        set_sel(h, five, five);
+        nest(h, 1);
+        assert_eq!(bullets(h)[4], 0x25E6);
+        nest(h, -1);
+        assert_eq!(bullets(h)[4], PFN_BULLET);
+        // A bulleted list is one kind, whatever its level: the toolbar takes it off.
+        set_sel(h, five, five);
+        nest(h, 1);
+        toggle_numbering(h, PFN_BULLET);
+        assert_eq!(bullets(h)[4], 0);
+        // RTF keeps only the plain bullet; loading puts the others back.
+        load_markdown(h, md);
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        style_bullets(h2);
+        assert_eq!(bullets(h2), vec![PFN_BULLET, 0x25E6, 0x25AA, PFN_BULLET, PFN_BULLET]);
     }
 }

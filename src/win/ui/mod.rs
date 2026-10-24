@@ -165,7 +165,7 @@ fn fade_out(c: Option<&mut Canvas>, r: RECT, line_h: i32, paper: u32) -> (i32, b
 
 /// Split a preview line into its list marker ("•  ", "○  ", "1. ", "a. ") and its text.
 fn split_marker(t: &str) -> (&str, &str) {
-    for m in ["•  ", "○  ", "●  "] {
+    for m in ["•  ", "◦  ", "▪  ", "○  ", "●  "] {
         if t.starts_with(m) {
             return t.split_at(m.len());
         }
