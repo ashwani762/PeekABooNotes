@@ -35,10 +35,12 @@ mod editor;
 mod list;
 mod layout;
 mod draw;
+mod kbd;
 use editor::*;
 use list::*;
 use layout::*;
 use draw::*;
+use kbd::*;
 
 const CLASS: &str = "PeekABooLibrary";
 const ID_SEARCH: usize = 10;
@@ -86,6 +88,25 @@ enum Hit {
     Card,
     /// Bring the selected note back from its own window to edit it here.
     OpenHere,
+}
+
+/// Where the keyboard is: the child controls (the search field, the note editor) or one
+/// of the window's own drawn controls. The segments and the swatches are one Tab stop
+/// each; Left and Right move within them.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Focus {
+    Search,
+    Segments,
+    List,
+    Elsewhere,
+    Archive,
+    Delete,
+    Editor,
+    OpenHere,
+    Swatches,
+    New,
+    Share,
+    Settings,
 }
 
 struct Row {
@@ -235,6 +256,12 @@ struct Lib {
     sel: Vec<u64>, // the last entry is the primary selection
     anchor: Option<u64>,
     focus_search: bool,
+    /// The drawn control with the keys while the window itself has focus, and the swatch
+    /// it's on when that's the swatches.
+    kbd: Focus,
+    swatch_k: usize,
+    /// The focus ring shows: the keyboard moved focus since the last click.
+    cues: bool,
     hover: Hit,
     pressed: Hit,
     tracking: bool,
@@ -497,6 +524,7 @@ enum Action {
     Settings,
     OpenHere(u64),
     ClearSearch,
+    Focus(Focus),
     Reorder(Vec<u64>),
     Close,
     Min,
@@ -540,6 +568,7 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 unsafe { SetWindowTextW(s, wide("").as_ptr()) };
             }
         }
+        Action::Focus(f) => focus_to(hwnd, f),
         Action::Open(id, from) => {
             if from.is_some() {
                 app::open_note_from(id, from)
@@ -569,19 +598,38 @@ fn perform_inner(hwnd: HWND, a: Action) {
     }
 }
 
-/// Keys for the search box and list that must be seen before the EDIT consumes them.
+/// Keys for the search box and list that must be seen before the EDIT consumes them,
+/// and Ctrl+Tab out of the note editor (plain Tab there indents lists).
 pub fn pre_translate(msg: &MSG) -> bool {
     if msg.message != WM_KEYDOWN {
         return false;
     }
-    let Some((hwnd, search)) = with(|l| (l.hwnd, l.search)) else { return false };
-    if msg.hwnd != hwnd && msg.hwnd != search {
+    let Some((hwnd, search, editor)) = with(|l| (l.hwnd, l.search, l.editor)) else { return false };
+    let vk = msg.wParam as u16;
+    let (ctrl, shift) = (key_down(VK_CONTROL), key_down(VK_SHIFT));
+    let in_editor = !editor.is_null() && (msg.hwnd == editor || unsafe { IsChild(editor, msg.hwnd) } != 0);
+    if in_editor {
+        if vk != VK_TAB || !ctrl {
+            return false;
+        }
+    } else if msg.hwnd != hwnd && msg.hwnd != search {
         return false;
     }
-    let vk = msg.wParam as u16;
-    let ctrl = key_down(VK_CONTROL);
+    // The window's own drawn controls have the keys, not the search field.
+    let own = msg.hwnd == hwnd;
+    let mut repaint = false;
     let action = with(|l| -> Option<Action> {
+        if own && !ctrl && matches!(vk, VK_SPACE | VK_RETURN)
+            && let Some(a) = activate(l)
+        {
+            return Some(a);
+        }
         match vk {
+            VK_TAB => Some(next_focus(l, shift).map_or(Action::None, Action::Focus)),
+            VK_LEFT | VK_RIGHT if own && nudge(l, if vk == VK_LEFT { -1 } else { 1 }) => {
+                repaint = true;
+                Some(Action::None)
+            }
             VK_DOWN => {
                 move_selection(l, 1);
                 Some(Action::None)
@@ -600,11 +648,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
                     Some(Action::Close)
                 }
             }
-            VK_DELETE if msg.hwnd == hwnd => Some(Action::Delete(l.sel.clone())),
-            VK_TAB => {
-                unsafe { SetFocus(if msg.hwnd == search { hwnd } else { search }) };
-                Some(Action::None)
-            }
+            // As in a note window: Ctrl+Shift+Del and Ctrl+Shift+A, from the search field too.
+            VK_DELETE if own || (ctrl && shift) => Some(Action::Delete(l.sel.clone())),
+            _ if ctrl && shift && vk == b'A' as u16 => Some(if l.sel.is_empty() { Action::None } else { click(l, Hit::Archive) }),
             _ if ctrl && vk == b'F' as u16 => {
                 unsafe {
                     SetFocus(l.search);
@@ -631,6 +677,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
     match action {
         Some(a) => {
             perform(hwnd, a);
+            if repaint {
+                paint_now(hwnd);
+            }
             true
         }
         None => false,
@@ -666,6 +715,9 @@ fn on_create(hwnd: HWND) {
         sel: Vec::new(),
         anchor: None,
         focus_search: false,
+        kbd: Focus::List,
+        swatch_k: 0,
+        cues: false,
         hover: Hit::None,
         pressed: Hit::None,
         tracking: false,
@@ -919,11 +971,27 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_SETFOCUS => {
-                if let Some((search, empty)) = with(|l| (l.search, l.rows.is_empty()))
-                    && empty {
-                        SetFocus(search);
+                // Back from the search field or the note (Esc there): the list has the keys,
+                // or with no list, the search field.
+                let empty = with(|l| {
+                    if matches!(l.kbd, Focus::Search | Focus::Editor) {
+                        l.kbd = Focus::List;
                     }
+                    (l.rows.is_empty() && l.kbd == Focus::List).then_some(l.search)
+                });
+                if let Some(Some(search)) = empty {
+                    SetFocus(search);
+                }
+                paint_now(hwnd);
                 return 0;
+            }
+            WM_KILLFOCUS => {
+                paint_now(hwnd);
+                return 0;
+            }
+            WM_PARENTNOTIFY if matches!((wp & 0xFFFF) as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN) => {
+                // A click in the search field or the note hides the focus ring, as one here does.
+                with(|l| l.cues = false);
             }
             WM_CHAR => {
                 // Typing while the list has focus goes to the search field.
@@ -989,6 +1057,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 let action = with(|l| {
                     let hit = hit_test(l, x, y);
                     l.pressed = hit;
+                    // A click hides the focus ring, and the keys go back to the list (or
+                    // the segments, when they were clicked): never to a button out of sight.
+                    l.cues = false;
+                    l.kbd = if matches!(hit, Hit::Segment(_)) { Focus::Segments } else { Focus::List };
                     match hit {
                         Hit::Search => {
                             SetFocus(l.search);
@@ -1063,6 +1135,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_RBUTTONUP => {
                 let (x, y) = (x_of(lp), y_of(lp));
+                with(|l| {
+                    l.cues = false;
+                    l.kbd = Focus::List;
+                });
                 let action = with(|l| match hit_test(l, x, y) {
                     Hit::Row(i) => {
                         let id = l.rows[i].id;

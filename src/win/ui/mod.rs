@@ -5,6 +5,7 @@
 
 pub mod allnotes;
 pub mod deck;
+pub mod focus;
 pub mod linkbox;
 pub mod ghost;
 pub mod menu;

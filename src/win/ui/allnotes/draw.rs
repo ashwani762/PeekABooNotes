@@ -4,6 +4,7 @@
 //! Painting: the list, the detail card and the window chrome.
 
 use super::*;
+use crate::win::ui::focus;
 
 pub(super) fn paint_now(h: HWND) {
     unsafe {
@@ -40,6 +41,8 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     let px = |v: f32| (v * s).round() as i32;
     c.clear(0xFF00_0000 | p.window);
     c.begin_batch(); // all text below is drawn in one Direct2D pass at the end
+    let ring = ring_on(l);
+    let ring_hit = ring.map(|f| hit_of(l, f));
     c.rrect(0.0, 0.0, lay.list_w, lay.h as f32, 0.0, p.list, 1.0);
     if lay.wide {
         c.rrect(lay.list_w, 0.0, 1.0, lay.h as f32, 0.0, p.line, 1.0);
@@ -66,6 +69,9 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             _ => "\u{E713}",
         };
         icon(c, glyph, &f.icons, r, p.text);
+        if ring_hit == Some(hit) {
+            focus::ring(c, &shape_of(r, 8.0 * s), p.focus, 1.0, s);
+        }
     }
 
     // Search field (with focus ring) — the EDIT control sits on top of it.
@@ -98,6 +104,9 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         }
         c.line_ct(name, if on { &f.seg_on } else { &f.seg }, x, seg_base, seg_w as i32, None, if on { p.text } else { p.sub }, DT_CENTER);
     }
+    if ring == Some(Focus::Segments) {
+        focus::ring(c, &sg, p.focus, 1.0, s);
+    }
 
     // List.
     let top = lay.list_top;
@@ -123,6 +132,9 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
                 c.shape(&sh, p.hover.0, a * la, 1.0, 0.0);
             }
             c.text_ct(&link, &f.count, r, None, mix(p.list, p.focus, la), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if ring == Some(Focus::Elsewhere) {
+                focus::ring(c, &shape_of(r, 8.0 * s), p.focus, la, s);
+            }
         } else {
             let sr = rect(px(32.0), y + px(10.0), (lay.list_w - 64.0 * s) as i32, px(40.0));
             c.text_ct(&sub, &f.count, sr, None, mix(p.list, p.sub, la), DT_CENTER | DT_WORDBREAK);
@@ -135,6 +147,13 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         let y = l.hover_y.value - l.scroll.value + slide;
         if y + lay.row_h > top && y < bottom {
             c.shape(&row_shape(y), p.hover.0, p.hover.1 * l.hover_a.value * la, 1.0, 0.0);
+        }
+    }
+    if ring == Some(Focus::List) && primary_index(l).is_some() {
+        // Around the selected row, while it's clear of the header above the list.
+        let y = l.sel_y.value - l.scroll.value + slide;
+        if y >= top && y < bottom {
+            focus::ring(c, &Shape::new(row_x, y, row_w, lay.row_h - 2.0 * s, 10.0 * s), p.focus, la, s);
         }
     }
     let primary = l.sel.last().copied();
@@ -291,6 +310,7 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         return;
     }
     let a = clamp01(l.detail_a.value);
+    let ring_hit = ring_on(l).map(|f| hit_of(l, f));
     let lift = 0.0;
     let primary_row = primary_index(l).map(|i| &l.rows[i]);
     // Toolbar: state chip on the left, actions on the right, one shared baseline.
@@ -326,6 +346,9 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         let x0 = r.left + ((r.right - r.left) - (iw + gap + tw)) / 2;
         icon(c, glyph, &f.button_icon, rect(x0, r.top, iw, r.bottom - r.top), ink);
         c.line_ct(label, &f.button, x0 + iw + gap, label_base, tw + 2, None, ink, DT_LEFT);
+        if ring_hit == Some(hit) {
+            focus::ring(c, &sh, p.focus, 1.0, s);
+        }
     }
     let mut card = lay.card;
     card.y += lift;
@@ -356,6 +379,9 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         c.shape(&sh, p.field.0, a * p.field.1 * if down { 2.4 } else if hot { 1.7 } else { 1.0 }, 1.0, 0.0);
         let base = (b.top + b.bottom) / 2 + f.button.cap / 2;
         c.line_ct(t!("button_open_here"), &f.button, b.left, base, b.right - b.left, None, mix(p.window, p.text, a), DT_CENTER);
+        if ring_hit == Some(Hit::OpenHere) {
+            focus::ring(c, &sh, p.focus, a, s);
+        }
         return;
     }
     let paper = theme::paper(r.color, dark);
@@ -411,5 +437,13 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
             let ring = Shape::new(sh.x - 4.0 * s, sh.y - 4.0 * s, sh.w + 8.0 * s, sh.h + 8.0 * s, 100.0);
             c.shape(&ring, theme::PAPER_TEXT, 0.55 * a, 1.0, 1.6 * s);
         }
+        if ring_hit == Some(Hit::Swatch(k)) {
+            focus::ring(c, &sh, p.focus, a, s);
+        }
     }
+}
+
+/// A button's rectangle as a shape with corners of radius `r`.
+pub(super) fn shape_of(b: RECT, r: f32) -> Shape {
+    Shape::new(b.left as f32, b.top as f32, (b.right - b.left) as f32, (b.bottom - b.top) as f32, r)
 }

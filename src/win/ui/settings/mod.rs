@@ -29,9 +29,11 @@ use crate::win::util::{WM_MOUSELEAVE, data_dir, mix, pt_in, rect, wide, x_of, y_
 mod pages;
 mod layout;
 mod draw;
+mod kbd;
 use pages::*;
 use layout::*;
 use draw::*;
+use kbd::*;
 
 const CLASS: &str = "PeekABooSettings";
 const W: f32 = 720.0;
@@ -224,6 +226,13 @@ enum Hit {
     Ctl(Key, usize),
 }
 
+/// Where the keyboard is: the page list, or the control of one setting.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Focus {
+    Pages,
+    Ctl(Key),
+}
+
 struct Win {
     hwnd: HWND,
     s: f32,
@@ -232,6 +241,11 @@ struct Win {
     page: usize,
     hover: Hit,
     pressed: Hit,
+    /// The control with the keys, and the swatch it's on when that's the swatches.
+    kbd: Focus,
+    swatch_k: usize,
+    /// The focus ring shows: the keyboard moved focus since the last click.
+    cues: bool,
     tracking: bool,
     startup: bool,
     side_y: Spring,
@@ -402,7 +416,12 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
             // Which app? Each wants its own form of the same setup.
             let items = app::MCP_CLIENTS.iter().enumerate().map(|(i, name)| crate::win::ui::menu::action(i as u32 + 1, name, "", "")).collect();
             let mut p = POINT { x: 0, y: 0 };
-            unsafe { GetCursorPos(&mut p) };
+            match with(|w| menu_anchor(w, k)).flatten() {
+                Some(at) => p = at,
+                None => unsafe {
+                    GetCursorPos(&mut p);
+                },
+            }
             let choice = app::popup(items, p.x, p.y, hwnd);
             if choice > 0 {
                 let copied = crate::win::util::set_clipboard_text(&app::mcp_setup_for(choice as usize - 1));
@@ -410,6 +429,18 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
             }
         }
     }
+}
+
+/// Set `k` to `v`, from a click or a key: the control moves first so it answers at once,
+/// then the work is done.
+fn change(hwnd: HWND, k: Key, v: usize) {
+    with(|w| {
+        if let Some(sp) = w.knobs.get_mut(&k) {
+            sp.to(v as f32);
+        }
+    });
+    apply(hwnd, k, v);
+    refresh();
 }
 
 /// Re-read every value (a setting may have changed from the tray or a hotkey).
@@ -502,6 +533,9 @@ fn on_create(hwnd: HWND) {
         page: 0,
         hover: Hit::None,
         pressed: Hit::None,
+        kbd: Focus::Pages,
+        swatch_k: 0,
+        cues: false,
         tracking: false,
         startup: app::startup_enabled(),
         side_y: Spring::px(0.0, motion::MOMENTUM),
@@ -693,6 +727,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 let page_hit = with(|w| {
                     let hit = hit_test(w, x, y);
                     w.pressed = hit;
+                    // A click hides the focus ring and gives the keys to what it hit.
+                    w.cues = false;
+                    match hit {
+                        Hit::Page(_) => w.kbd = Focus::Pages,
+                        Hit::Ctl(k, i) => {
+                            w.kbd = Focus::Ctl(k);
+                            w.swatch_k = i;
+                        }
+                        _ => {}
+                    }
                     w.press.snap(0.0);
                     w.press.to(1.0);
                     anim::wake(Client::Settings);
@@ -729,16 +773,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     Some((_, true)) => {
                         PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     }
-                    Some((Some((k, v)), _)) => {
-                        // Move the control first so it answers at once, then do the work.
-                        with(|w| {
-                            if let Some(sp) = w.knobs.get_mut(&k) {
-                                sp.to(v as f32);
-                            }
-                        });
-                        apply(hwnd, k, v);
-                        refresh();
-                    }
+                    Some((Some((k, v)), _)) => change(hwnd, k, v),
                     _ => {}
                 }
                 paint_now(hwnd);
@@ -750,19 +785,42 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     VK_ESCAPE => {
                         PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     }
-                    VK_UP | VK_DOWN | VK_TAB => {
+                    VK_TAB => {
+                        with(|w| move_focus(w, crate::win::util::key_down(VK_SHIFT), true));
+                    }
+                    // In the page list they turn the page; on the page they go row to row.
+                    VK_UP | VK_DOWN => {
                         with(|w| {
-                            let back = vk == VK_UP || (vk == VK_TAB && crate::win::util::key_down(VK_SHIFT));
-                            let n = PAGES.len();
-                            let i = if back { (w.page + n - 1) % n } else { (w.page + 1) % n };
-                            set_page(w, i);
+                            let back = vk == VK_UP;
+                            if w.kbd == Focus::Pages {
+                                let n = PAGES.len();
+                                set_page(w, if back { (w.page + n - 1) % n } else { (w.page + 1) % n });
+                            } else {
+                                move_focus(w, back, false);
+                            }
                         });
+                    }
+                    VK_LEFT | VK_RIGHT => {
+                        if let Some(Some((k, v))) = with(|w| nudge(w, if vk == VK_LEFT { -1 } else { 1 })) {
+                            change(hwnd, k, v);
+                        }
+                    }
+                    VK_SPACE | VK_RETURN => {
+                        if let Some(Some((k, v))) = with(activate) {
+                            change(hwnd, k, v);
+                            paint_now(hwnd);
+                        }
                     }
                     _ if vk == b'W' as u16 && crate::win::util::key_down(VK_CONTROL) => {
                         PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     }
                     _ => {}
                 }
+                return 0;
+            }
+            // The ring shows only while this window has the keys.
+            WM_SETFOCUS | WM_KILLFOCUS => {
+                paint_now(hwnd);
                 return 0;
             }
             WM_SETTINGCHANGE => {

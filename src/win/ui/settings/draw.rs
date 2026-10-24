@@ -4,6 +4,7 @@
 //! Painting Settings: sidebar, groups, controls and the note preview.
 
 use super::*;
+use crate::win::ui::focus;
 
 thread_local! {
     /// The preview's fonts for the current typography and scale. Made on every paint, each
@@ -117,6 +118,9 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     let mut sel = side_item(w, 0);
     sel.y = SIDE_TOP * s + w.side_y.value;
     c.shape(&sel, if dark { 0xFFFFFF } else { 0x000000 }, if dark { 0.10 } else { 0.075 }, 1.0, 0.0);
+    if ring_on(w) == Some(Focus::Pages) {
+        focus::ring(c, &sel, p.accent, 1.0, s);
+    }
     for (i, (name, glyph, tint)) in PAGES.iter().enumerate() {
         let it = side_item(w, i);
         let tile = Shape::new(it.x + 6.0 * s, it.y + (it.h - 22.0 * s) / 2.0, 22.0 * s, 22.0 * s, 6.0 * s);
@@ -186,11 +190,18 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
     let knob = row.key.and_then(|k| w.knobs.get(&k)).map(|sp| sp.value).unwrap_or(0.0);
     let pressed = |sub: usize| row.key.is_some_and(|k| w.pressed == Hit::Ctl(k, sub) && w.hover == w.pressed);
     let hovered = |sub: usize| row.key.is_some_and(|k| w.hover == Hit::Ctl(k, sub));
+    let focused = row.key.is_some_and(|k| ring_on(w) == Some(Focus::Ctl(k)));
+    let ring = |c: &mut Canvas, sh: &Shape| {
+        if focused {
+            focus::ring(c, sh, p.accent, 1.0, s);
+        }
+    };
     match &row.ctl {
         Ctl::Toggle => {
             let t = clamp01(knob);
             let sh = toggle_shape(w, &r);
             c.shape(&sh, mix(p.track, p.accent, t), 1.0, 1.0, 0.0);
+            ring(c, &sh);
             // The knob stretches while pressed, like a finger squashing it.
             let d = sh.h - 4.0 * s;
             let kw = d + if pressed(0) { 6.0 * s * clamp01(w.press.value) } else { 0.0 };
@@ -201,6 +212,7 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
         Ctl::Seg(labels) => {
             let (sh, item) = seg_metrics(w, labels, &r);
             c.shape(&sh, p.field.0, p.field.1, 1.0, 0.0);
+            ring(c, &sh);
             let pos = knob.clamp(0.0, labels.len() as f32 - 1.0);
             let pill = Shape::new(sh.x + 2.0 * s + pos * item, sh.y + 2.0 * s, item, sh.h - 4.0 * s, 6.5 * s);
             c.card(&pill, p.pill, 1.0, 0x000000, 0.04, 0.35, s);
@@ -233,6 +245,10 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
             let step = (SWATCH + SWATCH_GAP) * s;
             let ring = Shape::new(x + pos * step - 3.0 * s, y - 3.0 * s, SWATCH * s + 6.0 * s, SWATCH * s + 6.0 * s, SWATCH * s / 2.0 + 3.0 * s);
             c.shape(&ring, p.text, 0.55, 1.0, 1.6 * s);
+            if focused {
+                let (x, y) = swatch_x(w, &r, w.swatch_k);
+                focus::ring(c, &Shape::new(x, y, SWATCH * s, SWATCH * s, SWATCH * s / 2.0), p.accent, 1.0, s);
+            }
         }
         Ctl::Button(label) => {
             let mut sh = button_shape(w, label, &r);
@@ -262,6 +278,7 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
                 _ => (p.field.0, p.field.1 * k, p.text),
             };
             c.shape(&sh, fill, fa, 1.0, 0.0);
+            ring(c, &sh);
             // Cross-fade by mixing toward the button's own colour (the canvas is opaque).
             let face = mix(p.group, fill, fa.min(1.0));
             // One after the other, never overlapping: the label is gone by the time the
@@ -286,6 +303,7 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
             let sh = choice_shape(w, &r);
             let k = if pressed(0) { 2.4 } else if hovered(0) { 1.6 } else { 1.0 };
             c.shape(&sh, p.field.0, p.field.1 * k, 1.0, 0.0);
+            ring(c, &sh);
             let label = language_label();
             c.line_ct(&label, &f.button, (sh.x + 12.0 * s) as i32, mid + f.button.cap / 2, (sh.w - 36.0 * s) as i32, None, p.text, DT_LEFT);
             let chev = rect((sh.x + sh.w - 26.0 * s) as i32, sh.y as i32, (16.0 * s) as i32, sh.h as i32);
