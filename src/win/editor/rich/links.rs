@@ -81,13 +81,18 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     let r = f();
     set_scroll_y(h, y);
     if let Some(d) = &d {
+        // A caret put back far from the change scrolls into view as the display thaws,
+        // on screen at once, past the scroll position set while it was frozen: hold
+        // drawing until it is set again, so that never shows.
+        const WM_SETREDRAW: u32 = 0x000B;
+        send(h, WM_SETREDRAW, 0, 0);
         unsafe {
             let _ = d.Unfreeze();
         }
+        set_scroll_y(h, y);
+        send(h, WM_SETREDRAW, 1, 0);
+        unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(h, std::ptr::null(), 0) };
     }
-    // A caret put back far from the change scrolls into view as the display thaws, past
-    // the scroll position set while it was frozen: set it again.
-    set_scroll_y(h, y);
     let after = text(h);
     if after != before {
         LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after, caret)));
