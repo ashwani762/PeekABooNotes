@@ -22,6 +22,26 @@ pub fn rtf_to_text(rtf: &str) -> String {
     rich::to_markdown(w, false)
 }
 
+/// Notes saved before previews showed pictures and files have only their names in their
+/// light text: bring it up to date from their rich text, once, without touching when
+/// they were edited.
+pub(super) fn refresh_light_text() {
+    let stale: Vec<(u64, String)> =
+        store(|s| s.d.notes.iter().filter(|n| n.rtf.contains(crate::common::attach::SCHEME) && !n.text.contains("](attachment:")).map(|n| (n.id, n.rtf.clone())).collect());
+    if stale.is_empty() {
+        return;
+    }
+    for (id, rtf) in stale {
+        let text = rtf_to_text(&rtf);
+        store_mut(|s| {
+            if let Some(n) = s.note_mut(id) {
+                n.text = text;
+            }
+        });
+    }
+    save();
+}
+
 pub(super) fn rtf_to_markdown(rtf: &str) -> String {
     let w = ui(|u| u.worker);
     rich::set_rtf(w, rtf);

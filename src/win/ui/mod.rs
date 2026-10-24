@@ -15,12 +15,13 @@ pub mod tooltip;
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use windows_sys::Win32::Foundation::RECT;
-use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_WORDBREAK};
+use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK};
 
 use crate::common::store::{self, Align};
-use crate::win::render::gfx::{Canvas, Font, Shape};
+use crate::win::render::gfx::{Canvas, Font, Image, Shape};
 use crate::win::util::{mix, rect};
 
 /// A note's preview body (from `store::body_of`) in `r`, on paper `color`: list markers
@@ -76,6 +77,11 @@ fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u
                 Block::Quote(q) => quote(cc, &p, q, y),
                 Block::Code(code) => code_block(cc, &p, code, y),
                 Block::Table { header, align, rows } => table(cc, &p, header, &align, rows, y),
+                Block::Picture(name) => match thumb(name, &p) {
+                    Some(img) => picture(cc, &p, &img, y),
+                    None => file_chip(cc, &p, name, y),
+                },
+                Block::File(name) => file_chip(cc, &p, name, y),
                 Block::Empty => Some(0),
             };
             match used {
@@ -197,6 +203,10 @@ enum Block<'a> {
     Code(&'a [&'a str]),
     /// No header row when the preview starts partway into the table (`store::body_from`).
     Table { header: Option<&'a str>, align: Vec<Align>, rows: &'a [&'a str] },
+    /// A picture attachment, by name.
+    Picture(&'a str),
+    /// Any other attached file, by name.
+    File(&'a str),
     /// A code block with nothing in it, or a table with no rows: nothing to show.
     Empty,
 }
@@ -204,6 +214,9 @@ enum Block<'a> {
 /// The block starting at line `i`, and the line after it; None for an ordinary line.
 fn block_at<'a>(lines: &'a [&'a str], i: usize) -> Option<(Block<'a>, usize)> {
     let l = lines[i];
+    if let Some((pic, name)) = store::attachment_line(l) {
+        return Some((if pic { Block::Picture(name) } else { Block::File(name) }, i + 1));
+    }
     let run = |from: usize, is: fn(&str) -> bool| from + lines[from..].iter().take_while(|l| is(l)).count();
     if store::is_fence(l) {
         // Unclosed, it runs to the end (a preview can stop partway into one).
@@ -339,10 +352,64 @@ fn table(c: Option<&mut Canvas>, p: &Pass, header: Option<&str>, align: &[Align]
     (h <= bottom - y).then_some(h)
 }
 
+/// Pictures in previews: at most as wide as the text, and this tall (DIPs).
+const PICTURE_H: f32 = 120.0;
+
+/// Attachment `name` decoded to fit the preview, from a small cache: previews are drawn
+/// on every frame of an animation. None if it can't be read (it's then shown as a file).
+fn thumb(name: &str, p: &Pass) -> Option<Rc<Image>> {
+    let (w, h) = ((p.r.right - p.r.left).max(1), (PICTURE_H * p.s).round() as i32);
+    let key = (name.to_string(), w, h);
+    if let Some(hit) = THUMBS.with(|t| t.borrow().iter().find(|e| e.0 == key).map(|e| e.1.clone())) {
+        return hit;
+    }
+    let img = crate::win::ui::note::thumbnail(name, w as u32, h as u32).map(|(tw, th, px)| Rc::new(Image::from_pixels(tw as i32, th as i32, px)));
+    THUMBS.with(|t| {
+        let mut t = t.borrow_mut();
+        if t.len() >= 12 {
+            t.remove(0);
+        }
+        t.push((key, img.clone()));
+    });
+    img
+}
+
+/// A picture with softly rounded corners. Returns the height used, or None when it ran
+/// past the bottom (drawn down to there).
+fn picture(c: Option<&mut Canvas>, p: &Pass, img: &Image, y: i32) -> Option<i32> {
+    let h = img.h;
+    let Some(c) = c else { return Some(h) };
+    let shown = h.min(p.r.bottom - y);
+    let clip = Shape::new(p.r.left as f32, y as f32, img.w as f32, shown as f32, 6.0 * p.s);
+    c.image(img, p.r.left as f32, y as f32, &clip, p.alpha);
+    (h <= p.r.bottom - y).then_some(h)
+}
+
+/// A file as the note shows it: a paperclip and its name on a soft pill. Returns the height
+/// used, or None when it doesn't fit.
+fn file_chip(c: Option<&mut Canvas>, p: &Pass, name: &str, y: i32) -> Option<i32> {
+    let h = p.line_h + (6.0 * p.s).round() as i32;
+    let Some(c) = c else { return Some(h) };
+    if h > p.r.bottom - y {
+        return None;
+    }
+    let icon = block_font(p.f, Variant::Icon);
+    let pad = (8.0 * p.s).round() as i32;
+    let iw = icon.measure("\u{E723}").0;
+    let w = (pad + iw + (5.0 * p.s) as i32 + p.f.measure(name).0 + pad).min(p.r.right - p.r.left);
+    c.rrect(p.r.left as f32, y as f32, w as f32, h as f32, h as f32 / 2.0, mix(p.paper, p.ink, if p.dark { 0.12 } else { 0.07 }), p.alpha);
+    let x = p.r.left + pad;
+    c.text("\u{E723}", &icon, rect(x, y, iw, h), p.text, p.alpha, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    let tx = x + iw + (5.0 * p.s) as i32;
+    c.text(name, p.f, rect(tx, y, (p.r.left + w - pad - tx).max(1), h), p.text, p.alpha, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    Some(h)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Variant {
     Code,
     Header,
+    Icon,
 }
 
 thread_local! {
@@ -351,6 +418,8 @@ thread_local! {
     /// alive, so no other font can come to look like it (`Font::same`).
     static VARIANTS: RefCell<Vec<(Font, Variant, Font)>> = const { RefCell::new(Vec::new()) };
     static MONO: Cell<Option<&'static str>> = const { Cell::new(None) };
+    /// Recently shown pictures, by (name, most width, most height).
+    static THUMBS: RefCell<Vec<((String, i32, i32), Option<Rc<Image>>)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn block_font(f: &Font, v: Variant) -> Font {
@@ -360,6 +429,7 @@ fn block_font(f: &Font, v: Variant) -> Font {
     let made = match v {
         Variant::Code => Font::new(f.size() * 0.9, 400, mono_face()),
         Variant::Header => f.variant(f.size(), 600),
+        Variant::Icon => Font::new(f.size() * 0.95, 400, crate::win::ui::note::icon_face()),
     };
     VARIANTS.with(|m| {
         let mut m = m.borrow_mut();

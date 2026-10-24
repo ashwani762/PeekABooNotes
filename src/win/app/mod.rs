@@ -403,6 +403,7 @@ pub fn run() -> i32 {
             u.main = main;
             u.worker = worker;
         });
+        refresh_light_text();
 
         note::register();
         deck::create();

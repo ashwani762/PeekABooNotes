@@ -94,6 +94,8 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
             // inside other marks: **~~bread~~**).
             let done = task && t[start] == CHECKED;
             out.push_str(&if done { body.replace("~~", "") } else { body });
+        } else if let Some(md) = light_attachment(h, &t, body_start, end) {
+            out.push_str(&md);
         } else {
             out.push_str(&visible(&t, body_start, end));
         }
@@ -185,6 +187,19 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
         }
     }
     out
+}
+
+/// A picture or file on its own line, as the light text keeps it, so previews can show
+/// it: `![name](attachment:name)` or `[name](attachment:name)`. None for other lines.
+fn light_attachment(h: HWND, t: &[u16], a: usize, b: usize) -> Option<String> {
+    use crate::common::attach;
+    // Only lines with a link at their end can be one: most lines are told apart cheaply.
+    if !t[a..b].contains(&(ITEM_LINK_NAME as u16)) {
+        return None;
+    }
+    let (_, _, url) = item_link(h, t, a)?;
+    let name = attach::name_of(&url)?;
+    Some(if attach::is_image(&name) { format!("![{name}]({url})") } else { format!("[{name}]({url})") })
 }
 
 /// Where a link that starts at a hidden instruction ends: (where its name starts, where

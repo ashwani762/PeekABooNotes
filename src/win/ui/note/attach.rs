@@ -44,6 +44,44 @@ thread_local! {
 /// sharp display at high scaling, unless the original is smaller.
 const MAX_SHOW: f32 = 240.0;
 
+/// The picture attachment `name`, fitted into `max_w` x `max_h` px (never enlarged) and
+/// turned upright: (width, height, premultiplied BGRA pixels). For previews.
+pub fn thumbnail(name: &str, max_w: u32, max_h: u32) -> Option<(u32, u32, Vec<u32>)> {
+    unsafe {
+        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
+        let wide_path = wide(&attach::dir().join(name).to_string_lossy());
+        let decoder = wic.CreateDecoderFromFilename(windows::core::PCWSTR(wide_path.as_ptr()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand).ok()?;
+        let frame = decoder.GetFrame(0).ok()?;
+        let (mut w, mut h) = (0u32, 0u32);
+        frame.GetSize(&mut w, &mut h).ok()?;
+        if w == 0 || h == 0 || max_w == 0 || max_h == 0 {
+            return None;
+        }
+        let mut source: IWICBitmapSource = frame.cast().ok()?;
+        if let Some(t) = orientation(&frame) {
+            let r = wic.CreateBitmapFlipRotator().ok()?;
+            r.Initialize(&source, t).ok()?;
+            if t == WICBitmapTransformRotate90 || t == WICBitmapTransformRotate270 {
+                std::mem::swap(&mut w, &mut h);
+            }
+            source = r.cast().ok()?;
+        }
+        let fit = (max_w as f32 / w as f32).min(max_h as f32 / h as f32).min(1.0);
+        let (tw, th) = (((w as f32 * fit).round() as u32).max(1), ((h as f32 * fit).round() as u32).max(1));
+        if (tw, th) != (w, h) {
+            let s = wic.CreateBitmapScaler().ok()?;
+            s.Initialize(&source, tw, th, WICBitmapInterpolationModeHighQualityCubic).ok()?;
+            source = s.cast().ok()?;
+        }
+        let conv = wic.CreateFormatConverter().ok()?;
+        conv.Initialize(&source, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom).ok()?;
+        let mut bytes = vec![0u8; (tw * th * 4) as usize];
+        conv.CopyPixels(std::ptr::null(), tw * 4, &mut bytes).ok()?;
+        let px = bytes.as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)).collect();
+        Some((tw, th, px))
+    }
+}
+
 /// The picture at `path` as an RTF `\pict` group: scaled down, turned upright, and
 /// re-encoded (PNG where it may be transparent, JPEG for photos), so a note stays light.
 pub fn picture_rtf(path: &Path) -> Option<String> {

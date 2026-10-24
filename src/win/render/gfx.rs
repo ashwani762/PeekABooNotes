@@ -648,21 +648,31 @@ impl Canvas {
                 if a <= 0.0 {
                     continue;
                 }
-                // Both premultiplied; the picture is opaque.
+                // Both premultiplied: the picture over what's there, by its own opacity
+                // too (a window's picture is opaque; a PNG may not be).
                 let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
                 let k = (a * 256.0) as u32;
-                let ch = |sh: u32| ((((s >> sh) & 0xFF) * k + ((dst >> sh) & 0xFF) * (256 - k)) >> 8) << sh;
+                let keep = 256 - k * (s >> 24) / 255;
+                let ch = |sh: u32| ((((s >> sh) & 0xFF) * k + ((dst >> sh) & 0xFF) * keep) >> 8) << sh;
                 px[row + pxx as usize] = ch(24) | ch(16) | ch(8) | ch(0);
             }
         }
     }
 }
 
-/// A picture of a window, for animating it as it opens or closes.
+/// A picture: of a window, for animating it as it opens or closes, or of a note's
+/// attachment, for its preview.
 pub struct Image {
     pub w: i32,
     pub h: i32,
     px: Vec<u32>,
+}
+
+impl Image {
+    /// From `w` x `h` premultiplied BGRA pixels.
+    pub fn from_pixels(w: i32, h: i32, px: Vec<u32>) -> Image {
+        Image { w, h, px }
+    }
 }
 
 #[link(name = "user32")]

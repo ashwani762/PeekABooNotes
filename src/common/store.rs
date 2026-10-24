@@ -443,11 +443,29 @@ pub fn unescaped(line: &str) -> Option<&str> {
     line.trim_start().strip_prefix('\\').filter(|r| looks_like_marker(r))
 }
 
+/// A picture or file on a line of its own, as a note's light text has it
+/// (`![name](attachment:name)`, `[name](attachment:name)`): whether it's a picture, and its
+/// name.
+pub fn attachment_line(l: &str) -> Option<(bool, &str)> {
+    let t = l.trim();
+    let (picture, rest) = match t.strip_prefix("![") {
+        Some(r) => (true, r),
+        None => (false, t.strip_prefix('[')?),
+    };
+    let (name, url) = rest.split_once("](")?;
+    let url = url.strip_suffix(')')?;
+    url.starts_with(crate::common::attach::SCHEME).then_some((picture, name))
+}
+
 /// Strip a leading list marker ("- ", "1. ", "[ ] " ...) or quote mark ("> ") from a line.
-/// A code fence or a table's separator row has no text at all.
+/// A code fence or a table's separator row has no text at all; a picture or file line is
+/// its name.
 pub fn strip_marker(line: &str) -> &str {
     if let Some(r) = unescaped(line) {
         return r;
+    }
+    if let Some((_, name)) = attachment_line(line) {
+        return name;
     }
     if is_fence(line) || table_align(line).is_some() {
         return "";
@@ -572,9 +590,9 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
             out.push_str("```\n");
             continue;
         }
-        // A code block's lines are its text exactly; quotes and tables are laid out from
-        // their syntax.
-        if code || quoted(l).is_some() || table_cells(l).is_some() {
+        // A code block's lines are its text exactly; quotes, tables, pictures and files are
+        // laid out from their syntax.
+        if code || quoted(l).is_some() || table_cells(l).is_some() || attachment_line(l).is_some() {
             out.push_str(l);
             out.push('\n');
             continue;
@@ -609,6 +627,9 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
 /// fences and table syntax aside, and list glyphs too.
 pub fn summary_line(l: &str) -> std::borrow::Cow<'_, str> {
     let l = l.trim();
+    if let Some((_, name)) = attachment_line(l) {
+        return name.into();
+    }
     if is_fence(l) || table_align(l).is_some() {
         return "".into();
     }
@@ -663,6 +684,18 @@ fn list_number(n: usize, level: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn attachment_lines() {
+        assert_eq!(attachment_line("![sunset.jpg](attachment:sunset.jpg)"), Some((true, "sunset.jpg")));
+        assert_eq!(attachment_line("[Q3 plan.pdf](attachment:Q3%20plan.pdf)"), Some((false, "Q3 plan.pdf")));
+        assert_eq!(attachment_line("[site](https://example.com)"), None);
+        let text = "Trip\n![sunset.jpg](attachment:sunset.jpg)\n[plan.pdf](attachment:plan.pdf)\nend";
+        assert_eq!(body_of(text), "![sunset.jpg](attachment:sunset.jpg)\n[plan.pdf](attachment:plan.pdf)\nend");
+        assert_eq!(strip_marker("[plan.pdf](attachment:plan.pdf)"), "plan.pdf");
+        assert_eq!(summary_line("![sunset.jpg](attachment:sunset.jpg)"), "sunset.jpg");
+        assert_eq!(title_of("![sunset.jpg](attachment:sunset.jpg)\nmore"), "sunset.jpg");
+    }
+
 
     #[test]
     fn breaks_lines_for_previewers() {
