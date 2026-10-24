@@ -27,6 +27,7 @@ mod attach;
 pub use attach::{adopt_files, thumbnail};
 mod chrome;
 mod commands;
+pub mod history;
 mod lists;
 mod input;
 mod scrollbar;
@@ -505,6 +506,14 @@ pub fn flush(h: HWND) {
     let rtf = rich::get_rtf(edit);
     let text = app::rtf_to_text(&rtf);
     let title = title_of(&text);
+    // The version it was saved as before, for Ctrl+Z past what the editor itself holds
+    // (not when it's a step through those versions that's being saved).
+    if !RESTORING.with(|r| r.get())
+        && let Some(before) = app::store(|s| s.note(id).map(|n| n.rtf.clone()))
+        && before != rtf
+    {
+        history::saved(id, &before);
+    }
     app::store_mut(|s| {
         if let Some(n) = s.note_mut(id) {
             n.rtf = rtf;
@@ -519,6 +528,38 @@ pub fn flush(h: HWND) {
         InvalidateRect(h, std::ptr::null(), 0); // the footer's edited time
     }
     app::refresh();
+}
+
+thread_local! {
+    /// Saving a version stepped to through `history`, which isn't a version of its own.
+    static RESTORING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Ctrl+Z (`back`) or redo once the editor's own history is spent: step through the
+/// note's saved versions instead (see `history`). False when there's none to go to.
+pub(super) fn step_history(h: HWND, back: bool) -> bool {
+    flush(h);
+    let Some(st) = state(h) else { return false };
+    let id = st.id;
+    let Some(current) = app::store(|s| s.note(id).map(|n| n.rtf.clone())) else { return false };
+    let Some(rtf) = (if back { history::back(id, &current) } else { history::forward(id, &current) }) else { return false };
+    let (a, _) = rich::sel(st.edit);
+    let y = rich::scroll_y(st.edit);
+    st.loading = true;
+    rich::bulk(st.edit, || {
+        rich::set_rtf(st.edit, &rtf);
+        apply_theme(h);
+    });
+    rich::send(st.edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+    let len = rich::text(st.edit).len() as i32;
+    rich::set_sel(st.edit, a.min(len), a.min(len));
+    rich::set_scroll_y(st.edit, y);
+    st.loading = false;
+    st.dirty = true;
+    RESTORING.with(|r| r.set(true));
+    flush(h);
+    RESTORING.with(|r| r.set(false));
+    true
 }
 
 /// Close without saving (the note is being deleted or archived by the caller).
@@ -632,8 +673,13 @@ fn new_editor(h: HWND) -> HWND {
     let style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL) as u32;
     let edit = unsafe { CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), style, 0, 0, 10, 10, h, 100 as _, app::hinst(), null_mut()) };
     rich::setup(edit);
+    // A long history: RichEdit's default would be 100 steps.
+    rich::send(edit, rich::EM_SETUNDOLIMIT, UNDO_STEPS, 0);
     edit
 }
+
+/// How many changes Ctrl+Z can take back in a note.
+const UNDO_STEPS: usize = 110;
 
 /// Start listening to editor `edit` (once its content is in).
 fn connect_editor(h: HWND, edit: HWND) {

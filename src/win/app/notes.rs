@@ -319,6 +319,10 @@ pub fn undo_delete() {
 
 pub fn finalize_delete() {
     ui(|u| {
+        // Gone for good: their saved versions too.
+        for (_, n) in &u.pending {
+            crate::win::ui::note::history::forget(n.id);
+        }
         u.pending.clear();
         u.unarchive.clear();
     });

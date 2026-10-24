@@ -257,7 +257,8 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
     for (kind, rows) in blocks(h, t) {
         for (i, &row) in rows.iter().enumerate() {
             let Some((r, old)) = get(h, row) else { continue };
-            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), total);
+            // The cells' padding reaches out past their edges: keep the right border in view.
+            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), total - 2 * r.margin);
             let cells: Vec<CellParms> = widths
                 .iter()
                 .map(|&w| match kind {
@@ -291,11 +292,11 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
             for &row in &rows {
                 let Some(row) = super::blocks::rows(&t).into_iter().find(|x| x.start == row.start) else { continue };
                 for (ca, cb) in cells(&t, row) {
-                    if ca == cb {
-                        set_sel(h, ca as i32, ca as i32);
-                    } else {
-                        set_sel(h, ca as i32, cb as i32);
+                    // Already so: leave it, or every restyle would be a step for Undo.
+                    if code_styled(h, ca as i32, cb as i32, c(ink)) {
+                        continue;
                     }
+                    set_sel(h, ca as i32, cb as i32);
                     let mut cf = CharFormat2::new();
                     cf.mask = CFM_FACE | CFM_SIZE | CFM_COLOR | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT;
                     set_face(&mut cf, mono_face());
@@ -319,6 +320,27 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
         }
     }
     set_sel(h, a, b);
+}
+
+/// Whether the code cell text from `a` to `b` already has the code look: the monospace
+/// face at its size in `ink`, plain, with air above its first line and below its last.
+fn code_styled(h: HWND, a: i32, b: i32, ink: u32) -> bool {
+    set_sel(h, a, b);
+    let cf = char_format(h, SCF_SELECTION);
+    let all = CFM_FACE | CFM_SIZE | CFM_COLOR | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT;
+    let face = String::from_utf16_lossy(&cf.face[..cf.face.iter().position(|&c| c == 0).unwrap_or(cf.face.len())]);
+    let plain = cf.mask & all == all && cf.effects & (CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT) == 0;
+    if !plain || face != mono_face() || cf.height != body_size() * 9 / 10 || cf.color != ink {
+        return false;
+    }
+    let para = |at: i32| {
+        set_sel(h, at, at);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        (pf.space_before, pf.space_after)
+    };
+    let (first, last) = (para(a), para(b));
+    first.0 == CODE_AIR && last.1 == CODE_AIR && (a == b || text(h)[a as usize..b as usize].contains(&CR) == (first.1 == 0))
 }
 
 // ---------------------------------------------------------------- making blocks
@@ -402,6 +424,16 @@ pub fn wrap(h: HWND, a: i32, b: i32, kind: Block) {
     pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET;
     send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     style_blocks(h);
+    // The line left below the block, when there's nothing on it, is plain text (it was a
+    // list item when one was wrapped).
+    let t = text(h);
+    if let Some((_, rows)) = block_at(h, &t, cell)
+        && let Some(end) = rows.last().map(|r| r.end as i32)
+        && para_start(&t, end) == para_end(&t, end)
+    {
+        set_sel(h, end, end);
+        set_numbering(h, 0);
+    }
     set_sel(h, cell + len, cell + len);
 }
 
@@ -686,5 +718,16 @@ mod tests {
         let light = to_markdown(h, false);
         assert!(light.contains("> quoted bold words\n> second\n```\nfn main() {"), "{light}");
         assert!(light.contains("| Name | Qty |\n| --- | ---: |\n| Eggs | 12 |\n| Milk | 1 a\\|b |\nCentered\nend"), "{light}");
+    }
+
+    #[test]
+    fn links_survive_rtf() {
+        let md = "T\nPlain with a [link](https://example.com).";
+        let h = editor();
+        load_markdown(h, md);
+        assert_eq!(to_markdown(h, true), format!("# {md}"), "before storing");
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        assert_eq!(to_markdown(h2, true), format!("# {md}"), "after storing:\n{}", get_rtf(h));
     }
 }

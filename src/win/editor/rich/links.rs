@@ -72,6 +72,7 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     let d = doc(h);
     let y = scroll_y(h);
     let before = text(h);
+    let caret = sel(h);
     if let Some(d) = &d {
         unsafe {
             let _ = d.Freeze();
@@ -86,13 +87,13 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     }
     let after = text(h);
     if after != before {
-        LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after)));
+        LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after, caret)));
     }
     r
 }
 
-/// A change `still` made: the editor, its text before and after.
-type Group = (isize, Vec<u16>, Vec<u16>);
+/// A change `still` made: the editor, its text before and after, and the selection before.
+type Group = (isize, Vec<u16>, Vec<u16>, (i32, i32));
 
 thread_local! {
     static LAST_GROUP: std::cell::RefCell<Option<Group>> = const { std::cell::RefCell::new(None) };
@@ -103,7 +104,7 @@ thread_local! {
 /// anything has changed since.
 pub fn undo_group(h: HWND) -> bool {
     const EM_UNDO: u32 = 0x00C7;
-    let Some((e, before, after)) = LAST_GROUP.with(|g| g.borrow_mut().take()) else { return false };
+    let Some((e, before, after, caret)) = LAST_GROUP.with(|g| g.borrow_mut().take()) else { return false };
     if e != h as isize || text(h) != after {
         return false;
     }
@@ -112,6 +113,8 @@ pub fn undo_group(h: HWND) -> bool {
             break;
         }
     }
+    // Where it was, not wherever RichEdit's last undone step left it.
+    set_sel(h, caret.0, caret.1);
     true
 }
 

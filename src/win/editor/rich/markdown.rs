@@ -251,7 +251,7 @@ fn char_len(t: &[u16], i: usize, b: usize) -> usize {
 
 pub(super) fn inline_md(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let mut out = String::new();
-    let cur = marks(h, t, a, b, NO_MARKS, &mut out);
+    let cur = marks(h, t, a, b, NO_MARKS, &mut out, false);
     close_marks(&mut out, cur, NO_MARKS);
     out
 }
@@ -268,13 +268,15 @@ fn blank(c: u16) -> bool {
 }
 
 /// The marks on the character at `i`.
-fn marks_at(h: HWND, i: usize, n: usize) -> Marks {
+/// The marks on the character at `i`. In a link's text (`link`) underline isn't one: it's
+/// how links look (RichEdit writes it into the RTF for them).
+fn marks_at(h: HWND, i: usize, n: usize, link: bool) -> Marks {
     set_sel(h, i as i32, (i + n) as i32);
     let e = char_format(h, SCF_SELECTION).effects;
-    (e & CFM_BOLD != 0, e & CFM_ITALIC != 0, e & CFM_STRIKEOUT != 0, e & CFM_UNDERLINE != 0)
+    (e & CFM_BOLD != 0, e & CFM_ITALIC != 0, e & CFM_STRIKEOUT != 0, e & CFM_UNDERLINE != 0 && !link)
 }
 
-fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut String) -> Marks {
+fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut String, link: bool) -> Marks {
     let links = instructions(t, a, b);
     let mut i = a;
     while i < b {
@@ -287,7 +289,7 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut Strin
             // An address that links to itself goes out as just the address.
             let shown = unmark_str(&t[name..end]);
             if looks_like_url(&shown) && normalize_url(&shown) == url {
-                cur = marks(h, t, name, end, cur, out);
+                cur = marks(h, t, name, end, cur, out, true);
                 i = end;
                 continue;
             }
@@ -297,7 +299,7 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut Strin
                 shown_end -= 1;
             }
             out.push('[');
-            cur = marks(h, t, name, shown_end, cur, out);
+            cur = marks(h, t, name, shown_end, cur, out, true);
             out.push_str(&format!("]({url})"));
             out.push_str(&unmark_str(&t[shown_end..end]));
             i = end;
@@ -308,16 +310,16 @@ fn marks(h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut Strin
         // `**bold **_italic_` (a mark that closes after a space isn't one), while a bold
         // phrase stays one run, `**two words**`.
         let st = if blank(t[i]) {
-            let next = (i + n..b).find(|&j| !blank(t[j])).map(|j| marks_at(h, j, char_len(t, j, b)));
+            let next = (i + n..b).find(|&j| !blank(t[j])).map(|j| marks_at(h, j, char_len(t, j, b), link));
             match next {
                 Some(nx) => {
-                    let here = marks_at(h, i, n);
+                    let here = marks_at(h, i, n, link);
                     (here.0 && cur.0 && nx.0, here.1 && cur.1 && nx.1, here.2 && cur.2 && nx.2, here.3 && cur.3 && nx.3)
                 }
                 None => NO_MARKS,
             }
         } else {
-            marks_at(h, i, n)
+            marks_at(h, i, n, link)
         };
         if st != cur {
             close_marks(out, cur, st);

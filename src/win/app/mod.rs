@@ -176,6 +176,12 @@ const IC_PASTE: &str = "\u{E77F}";
 const IC_SELECT: &str = "\u{E8B3}";
 const IC_BACK: &str = "\u{E72B}";
 const IC_FORWARD: &str = "\u{E72A}";
+const IC_UP: &str = "\u{E74A}";
+const IC_DOWN: &str = "\u{E74B}";
+/// A table's row and column: a panel with a band across its foot, one with a band down
+/// its side.
+const IC_ROW: &str = "\u{E90E}";
+const IC_COLUMN: &str = "\u{E90C}";
 const IC_UNDO: &str = "\u{E7A7}";
 const IC_REFRESH: &str = "\u{E72C}";
 const IC_POWER: &str = "\u{E7E8}";

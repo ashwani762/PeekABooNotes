@@ -52,13 +52,13 @@ pub fn edit_menu(e: HWND) -> Vec<menu::Item> {
     if in_table {
         v.extend([
             Item::Separator,
-            action(NC_ROW_ABOVE, t!("menu_row_above"), "", ""),
-            action(NC_ROW_BELOW, t!("menu_row_below"), "", ""),
-            action(NC_COL_LEFT, t!("menu_col_left"), "", ""),
-            action(NC_COL_RIGHT, t!("menu_col_right"), "", ""),
+            action(NC_ROW_ABOVE, t!("menu_row_above"), "", IC_UP),
+            action(NC_ROW_BELOW, t!("menu_row_below"), "", IC_DOWN),
+            action(NC_COL_LEFT, t!("menu_col_left"), "", IC_BACK),
+            action(NC_COL_RIGHT, t!("menu_col_right"), "", IC_FORWARD),
             Item::Separator,
-            action(NC_ROW_DELETE, t!("menu_row_delete"), "", ""),
-            action(NC_COL_DELETE, t!("menu_col_delete"), "", ""),
+            action(NC_ROW_DELETE, t!("menu_row_delete"), "", IC_ROW),
+            action(NC_COL_DELETE, t!("menu_col_delete"), "", IC_COLUMN),
             menu::danger(NC_TABLE_DELETE, t!("menu_table_delete"), "", IC_DELETE),
         ]);
     }

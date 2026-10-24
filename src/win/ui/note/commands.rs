@@ -113,6 +113,15 @@ pub(super) fn block_command(e: HWND, kind: rich::Block) {
         }
         let over = if ps == pe && t.get(ps as usize) == Some(&rich::CR) { 1 } else { 0 };
         let cell = rich::insert_block_over(e, at, over, kind, 2, 3);
+        // A new line made for it below a list item is plain text, not another item.
+        let t = rich::text(e);
+        if let Some((_, rows)) = rich::block_at(e, &t, cell)
+            && let Some(end) = rows.last().map(|r| r.end as i32)
+            && rich::para_start(&t, end) == rich::para_end(&t, end)
+        {
+            rich::set_sel(e, end, end);
+            rich::set_numbering(e, 0);
+        }
         rich::set_sel(e, cell, cell);
         return;
     }

@@ -86,6 +86,9 @@ fn text_menu(h: HWND, e: HWND, mut p: POINT) {
     }
 }
 
+const EM_CANUNDO: u32 = 0x00C6;
+const EM_CANREDO: u32 = 0x0400 + 85;
+
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
     let h = parent as HWND;
     match msg {
@@ -109,13 +112,19 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if !matches!(vk, VK_BACK | VK_SHIFT | VK_CONTROL | VK_MENU) {
                 st.auto = None;
             }
-            if ctrl && shift && !alt && vk == b'Z' as u16 {
-                unsafe { DefSubclassProc(e, rich::EM_REDO, 0, 0) };
+            // Redo: the editor's own, then the note's saved versions (see `history`).
+            if ctrl && !alt && ((shift && vk == b'Z' as u16) || (!shift && vk == b'Y' as u16)) {
+                if rich::send(e, EM_CANREDO, 0, 0) != 0 {
+                    unsafe { DefSubclassProc(e, rich::EM_REDO, 0, 0) };
+                } else {
+                    super::step_history(h, false);
+                }
                 st.swallow = true;
                 return 0;
             }
             if ctrl && !shift && !alt && vk == b'Z' as u16 {
-                if undo_toggle(e) || rich::undo_group(e) {
+                // Past what the editor holds, the note's saved versions (see `history`).
+                if undo_toggle(e) || rich::undo_group(e) || (rich::send(e, EM_CANUNDO, 0, 0) == 0 && super::step_history(h, true)) {
                     mark_dirty(h);
                     st.swallow = true;
                     return 0;

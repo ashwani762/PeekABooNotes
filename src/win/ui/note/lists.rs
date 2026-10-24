@@ -192,15 +192,17 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
         if kind == Block::Table {
             return None;
         }
-        if ps == pe && pe as usize == cb {
+        // Empty, or holding just the indent the last Enter gave it.
+        let blank = t[ps as usize..pe as usize].iter().all(|&c| c == b' ' as u16);
+        if blank && pe as usize == cb {
             rich::still(e, || {
-                if ca == cb {
+                if ps as usize == ca {
                     rich::delete_block(e, a);
                 } else {
                     // The empty line goes, and the caret moves on below the block.
-                    rich::set_sel(e, ps - 1, ps);
+                    rich::set_sel(e, ps - 1, pe);
                     rich::replace_sel(e, "");
-                    let end = rows.last().map_or(0, |r| r.end) as i32 - 1;
+                    let end = rows.last().map_or(0, |r| r.end) as i32 - (pe - ps + 1);
                     rich::set_sel(e, end, end);
                 }
             });
@@ -446,10 +448,7 @@ mod tests {
         assert_eq!(plain(h), "Title/[/    a/        ^|]/end");
         assert!(block_tab(h, true));
         assert_eq!(plain(h), "Title/[/    a/    ^|]/end");
-        // An empty last line: Enter leaves the block.
-        let (a, _) = rich::sel(h);
-        rich::set_sel(h, a - 4, a);
-        rich::replace_sel(h, "");
+        // A last line with nothing but its indent: Enter leaves the block.
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h), "Title/[/    a|]/^end");
         // Backspace at the start of the block takes it apart.
@@ -464,5 +463,57 @@ mod tests {
         // Enter in an empty block takes it away.
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h).replace('^', ""), "Title/");
+    }
+
+    #[test]
+    fn quote_typed_after_a_quote() {
+        // "> " typed on the line after a quote, then on the line after text below it.
+        let h = editor("Title\rline one\r");
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        let t = rich::text(h);
+        rich::wrap(h, rich::para_start(&t, end), end, Block::Quote);
+        assert_eq!(plain(h), "Title/line one/[/^|]/");
+        rich::replace_sel(h, "q1");
+        // Enter twice leaves it.
+        assert_eq!(block_enter(h), None);
+        rich::replace_sel(h, "\r");
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/line one/[/q1|]/^");
+        rich::replace_sel(h, "after\r");
+        let (a, _) = rich::sel(h);
+        let t = rich::text(h);
+        rich::wrap(h, rich::para_start(&t, a), rich::para_end(&t, a), Block::Quote);
+        // Right after the line above: no empty paragraph between.
+        assert_eq!(plain(h), "Title/line one/[/q1|]/after/[/^|]/");
+    }
+
+    #[test]
+    fn undo_after_restyle_and_save() {
+        const EM_UNDO: u32 = 0x00C7;
+        let h = editor("Title\rbody");
+        rich::send(h, rich::EM_SETUNDOLIMIT, 110, 0);
+        rich::style_title(h);
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        let worker = editor("");
+        for k in 0..10 {
+            let end = rich::text(h).len() as i32;
+            rich::set_sel(h, end, end);
+            rich::replace_sel(h, &format!(" w{k}"));
+            // What the note does after a burst of typing, then when it saves.
+            rich::style_title(h);
+            rich::color_named_links(h);
+            rich::fix_caret_indent(h);
+            let rtf = rich::get_rtf(h);
+            rich::set_rtf(worker, &rtf);
+            let _ = rich::to_markdown(worker, false);
+        }
+        // Each Ctrl+Z takes back one edit, newest first, down to how it started.
+        for k in (0..10).rev() {
+            assert_eq!(rich::send(h, EM_UNDO, 0, 0), 1);
+            let words: String = (0..k).map(|j| format!(" w{j}")).collect();
+            assert_eq!(plain(h).replace('^', ""), format!("Title/body{words}"));
+        }
+        assert_eq!(rich::send(h, EM_UNDO, 0, 0), 0);
     }
 }

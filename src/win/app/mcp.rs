@@ -320,6 +320,10 @@ impl mcp::Notes for WinNotes {
             load(w, markdown);
         }
         let (text, rtf) = take(w);
+        // The user can take an assistant's change back with Ctrl+Z.
+        if rtf != n.rtf {
+            crate::win::ui::note::history::saved(id, &n.rtf);
+        }
         store_mut(|s| {
             if let Some(n) = s.note_mut(id) {
                 n.text = text;
