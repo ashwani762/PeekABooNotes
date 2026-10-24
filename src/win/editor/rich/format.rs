@@ -229,8 +229,10 @@ pub fn set_box_colors(h: HWND, ink: u32, done: u32, text: u32) {
 /// paper colour (`checks` draws the visible circle over it); completed items fade to the
 /// secondary colour and are struck through, starting at the text, not the gap.
 pub fn style_boxes(h: HWND) {
-    // Each box is formatted through the selection: hold the view still meanwhile.
-    still(h, || style_boxes_now(h));
+    // Each box is formatted through the selection: hold the view still meanwhile. The
+    // looks follow from the text, so they're no step for Ctrl+Z (which would otherwise
+    // first undo the formatting of a new item, selecting its box, before the item).
+    still(h, || unrecorded(h, || style_boxes_now(h)));
 }
 
 fn style_boxes_now(h: HWND) {

@@ -143,22 +143,24 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
     if kind.0 == AutoKind::List && rich::numbering(e) != 0 {
         return false;
     }
-    rich::set_sel(e, ps, a);
-    rich::replace_sel(e, "");
-    let pos = match kind {
-        (AutoKind::List, n) => {
-            rich::set_numbering(e, n);
-            ps
-        }
-        (AutoKind::Task, _) => {
-            if rich::numbering(e) != 0 {
-                rich::set_numbering(e, 0);
+    let pos = rich::still(e, || {
+        rich::set_sel(e, ps, a);
+        rich::replace_sel(e, "");
+        match kind {
+            (AutoKind::List, n) => {
+                rich::set_numbering(e, n);
+                ps
             }
-            rich::replace_sel(e, "\u{2610} ");
-            rich::style_boxes(e);
-            ps + 2
+            (AutoKind::Task, _) => {
+                if rich::numbering(e) != 0 {
+                    rich::set_numbering(e, 0);
+                }
+                rich::replace_sel(e, "\u{2610} ");
+                rich::style_boxes(e);
+                ps + 2
+            }
         }
-    };
+    });
     if let Some(st) = state(h) {
         st.auto = Some(Auto { kind: kind.0, typed: format!("{prefix} "), pos });
     }
@@ -314,13 +316,15 @@ pub(super) fn handle_enter(h: HWND, e: HWND) -> bool {
             rich::set_effect(e, CFM_STRIKEOUT, false);
             rich::replace_sel(e, "");
         } else {
-            rich::replace_sel(e, "\r");
-            rich::replace_sel(e, "\u{2610} ");
-            let (c, _) = rich::sel(e);
-            rich::set_sel(e, c - 2, c);
-            rich::set_effect(e, CFM_STRIKEOUT, false);
-            rich::set_sel(e, c, c);
-            rich::style_boxes(e);
+            rich::still(e, || {
+                rich::replace_sel(e, "\r");
+                rich::replace_sel(e, "\u{2610} ");
+                let (c, _) = rich::sel(e);
+                rich::set_sel(e, c - 2, c);
+                rich::set_effect(e, CFM_STRIKEOUT, false);
+                rich::set_sel(e, c, c);
+                rich::style_boxes(e);
+            });
         }
         mark_dirty(h);
         return true;
@@ -521,6 +525,26 @@ mod tests {
         assert!(try_auto_list(null_mut(), h));
         rich::replace_sel(h, "q");
         assert_eq!(rich::to_markdown(h, true), "# T\n- alpha\n  - bravo\n    > q");
+    }
+
+    /// Enter on a task, or "[] " typed: one Ctrl+Z takes the new item back, not first the
+    /// formatting of its box.
+    #[test]
+    fn one_undo_per_new_item() {
+        let h = editor("T\r\u{2610} task");
+        rich::style_boxes(h);
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        assert!(handle_enter(null_mut(), h));
+        assert_eq!(plain(h), "T/☐ task/☐ ^");
+        assert!(rich::undo_group(h));
+        assert_eq!(plain(h), "T/☐ task^");
+        rich::replace_sel(h, "\r[]");
+        assert!(try_auto_list(null_mut(), h));
+        assert_eq!(plain(h), "T/☐ task/☐ ^");
+        assert!(rich::undo_group(h));
+        assert_eq!(plain(h), "T/☐ task/[]^");
     }
 
     #[test]
