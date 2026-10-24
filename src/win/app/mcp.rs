@@ -19,7 +19,7 @@ use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, PIPE
 
 use super::*;
 use crate::common::mcp::{self, State, Status};
-use crate::common::store::{strip_marker, title_of};
+use crate::common::store::title_of;
 use crate::common::{attach, search};
 
 /// Sent to the main window: wParam points at the request line, lParam at the reply.
@@ -154,9 +154,9 @@ fn when(ts: i64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", t.year, t.month, t.day, t.hour, t.minute)
 }
 
-/// Everything after the title line, list markers aside (what search looks in).
+/// Everything after the title line as plain text (what search looks in).
 fn rest_of(text: &str) -> String {
-    text.lines().skip_while(|l| strip_marker(l).trim().is_empty()).skip(1).map(strip_marker).collect::<Vec<_>>().join("\n")
+    crate::common::store::search_rest(text)
 }
 
 fn summary(n: &crate::common::store::Note) -> Value {

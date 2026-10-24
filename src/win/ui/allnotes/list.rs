@@ -18,13 +18,6 @@ pub(super) fn set_mode(l: &mut Lib, mode: usize) {
     }
 }
 
-/// What a search looks through besides the title: everything after the title line, list
-/// markers aside.
-fn search_rest(text: &str) -> String {
-    let rest: Vec<&str> = text.lines().skip_while(|l| strip_marker(l).trim().is_empty()).skip(1).map(strip_marker).collect();
-    rest.join("\n")
-}
-
 pub(super) fn rebuild(l: &mut Lib) {
     let q = crate::common::search::Query::new(&l.query);
     let searching = !l.query.trim().is_empty();

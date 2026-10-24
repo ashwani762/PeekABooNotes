@@ -219,7 +219,7 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             } else {
                 edited
             };
-            (meta, r.body.lines().map(|l| l.trim().trim_start_matches(['○', '●', '•', ' '])).find(|l| !l.is_empty()))
+            (meta, r.body.lines().map(crate::common::store::summary_line).find(|l| !l.is_empty()))
         };
         let mw = c.line_ct(&meta, &f.row_time, tx, mb, right - tx, clip, fade(mc), DT_LEFT);
         if let Some(pv) = preview {

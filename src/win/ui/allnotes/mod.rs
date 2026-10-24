@@ -26,7 +26,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
-use crate::common::store::{body_of, strip_marker, title_of};
+use crate::common::store::{body_of, search_rest, title_of};
 use crate::win::theme::{self, motion};
 use crate::common::i18n::time::{edited_time, relative_time};
 use crate::win::util::{WM_MOUSELEAVE, cref, from_wide, key_down, mix, rect, wide, x_of, y_of};

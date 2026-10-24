@@ -323,14 +323,82 @@ const MARKERS: [&str; 6] = ["[ ] ", "[x] ", "- [ ] ", "- [x] ", "- ", "* "];
 /// what they need, and a note this long still opens at once and keeps up with typing.
 pub const MAX_NOTE_CHARS: usize = 100_000;
 
-/// Whether `s` starts the way a list item, checklist item or heading is written in
-/// Markdown, so that plain text starting so has to be written escaped ("\- not a list").
+/// Whether `s` starts the way a list item, checklist item, heading, quote or code fence is
+/// written in Markdown, so that plain text starting so has to be written escaped ("\- not
+/// a list").
 pub fn looks_like_marker(s: &str) -> bool {
     let hashes = s.chars().take_while(|&c| c == '#').count();
     let digits = s.chars().take_while(|c| c.is_ascii_digit()).count();
-    ["- ", "* ", "+ ", "• ", "[ ] ", "[x] ", "[X] "].iter().any(|m| s.starts_with(m))
+    ["- ", "* ", "+ ", "• ", "[ ] ", "[x] ", "[X] ", "> ", "```"].iter().any(|m| s.starts_with(m))
+        || s == ">"
         || ((1..=6).contains(&hashes) && s[hashes..].starts_with(' '))
         || (digits > 0 && s[digits..].starts_with(". "))
+}
+
+/// A code block's opening or closing line.
+pub fn is_fence(l: &str) -> bool {
+    l.trim() == "```"
+}
+
+/// The text of a quote's paragraph, when `l` is one ("> Ship it on Friday").
+pub fn quoted(l: &str) -> Option<&str> {
+    let t = l.trim_start();
+    t.strip_prefix("> ").or_else(|| (t.trim_end() == ">").then_some(""))
+}
+
+/// How a table column lines up, from the colons in its separator cell.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+/// The cells of a table row ("| Name | Qty |") as written (see `cell_text`); None when `l`
+/// isn't one. An escaped pipe ("\|") stays inside its cell.
+pub fn table_cells(l: &str) -> Option<Vec<&str>> {
+    let t = l.trim().strip_prefix('|')?;
+    let (mut cells, mut start, mut esc) = (Vec::new(), 0, false);
+    for (i, ch) in t.char_indices() {
+        if ch == '|' && !esc {
+            cells.push(&t[start..i]);
+            start = i + 1;
+        }
+        esc = ch == '\\' && !esc;
+    }
+    // The closing pipe is optional.
+    if !t[start..].trim().is_empty() {
+        cells.push(&t[start..]);
+    }
+    (!cells.is_empty()).then_some(cells)
+}
+
+/// The column alignments in a table's separator row ("| --- | :---: | ---: |"); None when
+/// `l` isn't one.
+pub fn table_align(l: &str) -> Option<Vec<Align>> {
+    table_cells(l)?
+        .iter()
+        .map(|c| {
+            let c = c.trim();
+            let dashes = c.trim_start_matches(':').trim_end_matches(':');
+            (!dashes.is_empty() && dashes.bytes().all(|b| b == b'-')).then_some(match (c.starts_with(':'), c.ends_with(':')) {
+                (true, true) => Align::Center,
+                (false, true) => Align::Right,
+                _ => Align::Left,
+            })
+        })
+        .collect()
+}
+
+/// A table cell as one line of text: its line breaks become spaces.
+pub fn cell_text(c: &str) -> String {
+    let t = c.replace("<br>", " ").replace("<br/>", " ").replace("<br />", " ").replace("\\|", "|");
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether `lines` begin with a table: a row, then a separator row.
+fn table_starts<'a>(mut lines: impl Iterator<Item = &'a str>) -> bool {
+    lines.next().and_then(table_cells).is_some() && lines.next().and_then(table_align).is_some()
 }
 
 /// Markdown for reading outside the app, so viewers show the note's lines as it has them:
@@ -338,20 +406,31 @@ pub fn looks_like_marker(s: &str) -> bool {
 /// than joining it into one paragraph, and a plain line right after a list gets a blank
 /// line before it, which would otherwise read as part of the last item. A plain text
 /// editor shows nothing extra.
+///
+/// Code blocks are left exactly as they are. Quote paragraphs break like plain lines, and
+/// a table gets a blank line on either side, without which the text next to it would read
+/// as more of the table (or, after a quote, as more of the quote).
 pub fn hard_breaks(md: &str) -> String {
     let lines: Vec<&str> = md.split('\n').collect();
+    let quote = |l: &str| quoted(l).is_some();
+    let row = |l: &str| table_cells(l).is_some();
     let item = |l: &str| {
         let t = l.trim_start();
-        looks_like_marker(t) && !t.starts_with('#')
+        looks_like_marker(t) && !t.starts_with('#') && !quote(t) && !t.starts_with("```")
     };
-    let plain = |l: &str| !l.trim().is_empty() && !item(l) && !l.trim_start().starts_with('#');
+    let plain = |l: &str| !l.trim().is_empty() && !item(l) && !quote(l) && !row(l) && !is_fence(l) && !l.trim_start().starts_with('#');
     let mut out = String::with_capacity(md.len() + lines.len() * 2);
+    let mut code = false;
     for (i, l) in lines.iter().enumerate() {
         out.push_str(l);
         let Some(&next) = lines.get(i + 1) else { break };
-        if plain(l) && plain(next) {
+        if is_fence(l) {
+            code = !code;
+        } else if code {
+            // Exactly as written.
+        } else if (plain(l) && plain(next)) || (quote(l) && quote(next)) {
             out.push_str("  ");
-        } else if item(l) && plain(next) {
+        } else if ((item(l) || quote(l) || row(l)) && plain(next)) || (plain(l) && table_starts(lines[i + 1..].iter().copied())) {
             out.push('\n');
         }
         out.push('\n');
@@ -364,10 +443,17 @@ pub fn unescaped(line: &str) -> Option<&str> {
     line.trim_start().strip_prefix('\\').filter(|r| looks_like_marker(r))
 }
 
-/// Strip a leading list marker ("- ", "1. ", "[ ] " ...) from a line.
+/// Strip a leading list marker ("- ", "1. ", "[ ] " ...) or quote mark ("> ") from a line.
+/// A code fence or a table's separator row has no text at all.
 pub fn strip_marker(line: &str) -> &str {
     if let Some(r) = unescaped(line) {
         return r;
+    }
+    if is_fence(line) || table_align(line).is_some() {
+        return "";
+    }
+    if let Some(q) = quoted(line) {
+        return strip_marker(q);
     }
     let l = line.trim_start();
     for m in MARKERS {
@@ -383,8 +469,45 @@ pub fn strip_marker(line: &str) -> &str {
     l
 }
 
+/// Where a note's title comes from: its text, the line its body starts at, and whether
+/// the body starts inside the code block the title was taken from. The title is the first
+/// line with text: in a code block, its first line; in a table, its first row with text,
+/// as its cells (the whole table stays in the body, so the preview still shows it).
+fn head(text: &str) -> (String, usize, bool) {
+    let mut lines = text.lines().enumerate().peekable();
+    while let Some((i, l)) = lines.next() {
+        if is_fence(l) {
+            for (k, c) in lines.by_ref() {
+                if is_fence(c) {
+                    break;
+                }
+                if !c.trim().is_empty() {
+                    return (c.trim().to_string(), k + 1, true);
+                }
+            }
+            continue;
+        }
+        if table_cells(l).is_some() && lines.peek().is_some_and(|(_, n)| table_align(n).is_some()) {
+            let mut row = Some(l);
+            while let Some(r) = row {
+                let cells: Vec<String> = table_cells(r).unwrap_or_default().into_iter().map(cell_text).filter(|c| !c.is_empty()).collect();
+                if table_align(r).is_none() && !cells.is_empty() {
+                    return (cells.join(" \u{b7} "), i, false);
+                }
+                row = lines.next_if(|(_, n)| table_cells(n).is_some()).map(|(_, n)| n);
+            }
+            continue;
+        }
+        let t = strip_marker(l).trim();
+        if !t.is_empty() {
+            return (t.to_string(), i + 1, false);
+        }
+    }
+    (String::new(), usize::MAX, false)
+}
+
 pub fn title_of(text: &str) -> String {
-    let line = text.lines().map(|l| strip_marker(l).trim()).find(|l| !l.is_empty()).unwrap_or("");
+    let (line, _, _) = head(text);
     if line.is_empty() {
         return crate::t!("note_untitled").into();
     }
@@ -401,31 +524,68 @@ const PREVIEW_LINES: usize = 20;
 const PREVIEW_LINE_CHARS: usize = 300;
 
 /// The start of everything after the title line, with markers turned into glyphs for
-/// previews. Nested items keep two leading spaces per level (see `ui::draw_body`).
+/// previews. Nested items keep two leading spaces per level (see `ui::draw_body`). Quotes,
+/// code blocks and tables stay as written, for `ui::draw_body` to lay out; a code block
+/// the title came from opens again where the body starts.
 pub fn body_of(text: &str) -> String {
-    let mut lines = text.lines().skip_while(|l| strip_marker(l).trim().is_empty());
-    lines.next();
-    preview(lines)
+    let (_, start, code) = head(text);
+    let rest = text.lines().skip(start);
+    if code { preview(std::iter::once("```").chain(rest)) } else { preview(rest) }
 }
 
-/// Like `body_of`, from paragraph `first` (0 is the title line) on: what a scrolled note
-/// shows, for the card flying to or from its window.
+/// Like `body_of`, from line `first` of `text` (0 is the title line) on: what a scrolled
+/// note shows, for the card flying to or from its window. A code block or table that
+/// `first` is partway into opens again (a table without its header row).
 pub fn body_from(text: &str, first: usize) -> String {
-    preview(text.lines().skip(first))
+    let (mut code, mut sep, mut prev) = (false, None, "");
+    for l in text.lines().take(first) {
+        if is_fence(l) {
+            code = !code;
+            sep = None;
+        } else if !code {
+            sep = match sep {
+                Some(s) if table_cells(l).is_some() => Some(s),
+                _ if table_cells(prev).is_some() && table_align(l).is_some() => Some(l),
+                _ => None,
+            };
+        }
+        prev = l;
+    }
+    let rest = text.lines().skip(first);
+    match sep {
+        _ if code => preview(std::iter::once("```").chain(rest)),
+        Some(s) if text.lines().nth(first).is_some_and(|l| table_cells(l).is_some()) => preview(std::iter::once(s).chain(rest)),
+        _ => preview(rest),
+    }
 }
 
 fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
     let mut out = String::new();
+    let mut code = false;
     for l in lines.take(PREVIEW_LINES) {
         let l: &str = match l.char_indices().nth(PREVIEW_LINE_CHARS) {
             Some((i, _)) => &l[..i],
             None => l,
         };
+        if is_fence(l) {
+            code = !code;
+            out.push_str("```\n");
+            continue;
+        }
+        // A code block's lines are its text exactly; quotes and tables are laid out from
+        // their syntax.
+        if code || quoted(l).is_some() || table_cells(l).is_some() {
+            out.push_str(l);
+            out.push('\n');
+            continue;
+        }
         let t = l.trim_start();
         let level = ((l.len() - t.len()) / 2).min(5);
         let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
         let pretty = if let Some(r) = unescaped(t) {
-            r.to_string()
+            // Text that only looks like a quote or a fence stays escaped, or the preview
+            // would draw it as one (`ui::draw_body` shows it unescaped).
+            if quoted(r).is_some() || r.starts_with("```") { t.to_string() } else { r.to_string() }
         } else if let Some(r) = t.strip_prefix("[ ] ") {
             format!("○  {r}")
         } else if let Some(r) = t.strip_prefix("[x] ") {
@@ -442,6 +602,42 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
         out.push('\n');
     }
     out.trim_end().to_string()
+}
+
+/// A line of a preview (from `body_of`) as text for a one-line summary: quote marks, code
+/// fences and table syntax aside, and list glyphs too.
+pub fn summary_line(l: &str) -> std::borrow::Cow<'_, str> {
+    let l = l.trim();
+    if is_fence(l) || table_align(l).is_some() {
+        return "".into();
+    }
+    if let Some(cells) = table_cells(l) {
+        return cells.into_iter().map(cell_text).filter(|c| !c.is_empty()).collect::<Vec<_>>().join(" \u{b7} ").into();
+    }
+    let l = unescaped(l).or(quoted(l)).unwrap_or(l);
+    l.trim().trim_start_matches(['○', '●', '•', ' ']).into()
+}
+
+/// What a search looks through besides the title: everything after the title line as
+/// plain text. List markers and quote marks go, and so do code fences and table syntax:
+/// a row is its cells, separated by spaces.
+pub fn search_rest(text: &str) -> String {
+    let (_, start, mut code) = head(text);
+    let mut out: Vec<std::borrow::Cow<str>> = Vec::new();
+    for l in text.lines().skip(start) {
+        if is_fence(l) {
+            code = !code;
+        } else if code {
+            out.push(l.into());
+        } else if table_align(l).is_some() {
+            // A table's separator row is only syntax.
+        } else if let Some(cells) = table_cells(l) {
+            out.push(cells.into_iter().map(cell_text).filter(|c| !c.is_empty()).collect::<Vec<_>>().join(" ").into());
+        } else {
+            out.push(strip_marker(l).into());
+        }
+    }
+    out.join("\n")
 }
 
 /// Item `n` of a numbered list at nesting `level`, styled like the editor: 1. a. i.
@@ -472,5 +668,68 @@ mod tests {
         let md = "# Standup\nYesterday: retries\nToday: search\n- one\n  - nested\n- two\nafter\n\n![a.jpg](attachments/a.jpg)\nAll good\n1. first\n2. second";
         let want = "# Standup\nYesterday: retries  \nToday: search\n- one\n  - nested\n- two\n\nafter\n\n![a.jpg](attachments/a.jpg)  \nAll good\n1. first\n2. second";
         assert_eq!(hard_breaks(md), want);
+    }
+
+    #[test]
+    fn breaks_around_blocks() {
+        let md = "Notes\n```\nlet a = 1;\nlet b = 2;\n```\n> one\n> two\nafter\n| A | B |\n| - | - |\n| 1 | 2 |\nend";
+        let want = "Notes\n```\nlet a = 1;\nlet b = 2;\n```\n> one  \n> two\n\nafter\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\nend";
+        assert_eq!(hard_breaks(md), want);
+    }
+
+    #[test]
+    fn titles_from_blocks() {
+        assert_eq!(title_of("```\n\n  fn main() {\n}\n```\nafter"), "fn main() {");
+        assert_eq!(title_of("> Ship it on Friday\n> Tell Sam"), "Ship it on Friday");
+        assert_eq!(title_of("| Name | Qty | Note |\n| --- | :---: | ---: |\n| Tea | 2 | green |"), "Name \u{b7} Qty \u{b7} Note");
+        assert_eq!(title_of("|  |  |\n| - | - |\n| Tea | 2<br>cups |"), "Tea \u{b7} 2 cups");
+        assert_eq!(title_of("```\n\n```\nReal title"), "Real title");
+        assert_eq!(title_of("| not | a table\nafter"), "| not | a table");
+        assert_eq!(title_of("\\> not a quote"), "> not a quote");
+    }
+
+    #[test]
+    fn bodies_keep_blocks() {
+        // A code block the title came from opens again; its lines stay as they are.
+        assert_eq!(body_of("```\nfn main() {\n  - x\n}\n```\n- after"), "```\n  - x\n}\n```\n•  after");
+        assert_eq!(body_of("> Ship it\n> Tell Sam\nDone"), "> Tell Sam\nDone");
+        // A table's title is its header; the preview still shows all of it.
+        let t = "| Name | Qty |\n| --- | ---: |\n| Tea | 2 |";
+        assert_eq!(body_of(t), t);
+        assert_eq!(body_of("Title\n```\n[ ] not a task\n```\n[ ] a task"), "```\n[ ] not a task\n```\n○  a task");
+        // Text that only looks like a quote or a fence stays escaped.
+        assert_eq!(body_of("Title\n\\> not a quote\n\\```"), "\\> not a quote\n\\```");
+    }
+
+    #[test]
+    fn scrolled_bodies_reopen_blocks() {
+        let code = "Title\n```\na\nb\n```\nafter";
+        assert_eq!(body_from(code, 3), "```\nb\n```\nafter");
+        assert_eq!(body_from(code, 5), "after");
+        let table = "Title\n| A | B |\n| - | -: |\n| 1 | 2 |\n| 3 | 4 |";
+        assert_eq!(body_from(table, 1), "| A | B |\n| - | -: |\n| 1 | 2 |\n| 3 | 4 |");
+        assert_eq!(body_from(table, 4), "| - | -: |\n| 3 | 4 |");
+    }
+
+    #[test]
+    fn markers_of_blocks() {
+        assert_eq!(strip_marker("> quoted"), "quoted");
+        assert_eq!(strip_marker("> - quoted item"), "quoted item");
+        assert_eq!(strip_marker(">"), "");
+        assert_eq!(strip_marker("```"), "");
+        assert_eq!(strip_marker("| --- | :---: | ---: |"), "");
+        assert_eq!(strip_marker("| a | b |"), "| a | b |");
+        assert_eq!(strip_marker("\\> literal"), "> literal");
+        assert_eq!(table_align("| --- | :---: | ---: |"), Some(vec![Align::Left, Align::Center, Align::Right]));
+        assert_eq!(table_align("| a | --- |"), None);
+        assert_eq!(table_cells("| a \\| b | c"), Some(vec![" a \\| b ", " c"]));
+        assert!(looks_like_marker("> a") && looks_like_marker("```js") && !looks_like_marker(">a"));
+    }
+
+    #[test]
+    fn searches_block_text() {
+        let text = "Title\n> quoted\n```\n- code\n```\n| A | B |\n| --- | --- |\n| x<br>y | \\| z |";
+        assert_eq!(search_rest(text), "quoted\n- code\nA B\nx y | z");
+        assert_eq!(search_rest("Plain\n- item\n1. one"), "item\none");
     }
 }

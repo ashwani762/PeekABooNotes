@@ -188,6 +188,30 @@ impl Font {
         Font { strike: true, ..self.clone() }
     }
 
+    /// The size the font was made at, in px.
+    pub fn size(&self) -> f32 {
+        match &self.fmt {
+            Some(f) => unsafe { f.GetFontSize() },
+            None => (self.ascent + self.descent) as f32 / 1.33,
+        }
+    }
+
+    /// The same face at another size and weight.
+    pub fn variant(&self, px: f32, weight: u32) -> Font {
+        let face = self.fmt.as_ref().and_then(|f| unsafe {
+            let mut name = vec![0u16; f.GetFontFamilyNameLength() as usize + 1];
+            f.GetFontFamilyName(&mut name).ok()?;
+            Some(String::from_utf16_lossy(&name[..name.len() - 1]))
+        });
+        Font::new_styled(px, weight, face.as_deref().unwrap_or(crate::win::theme::FACE_TEXT), false, self.underline, self.strike)
+    }
+
+    /// Whether `other` is this very font (not merely one alike).
+    pub fn same(&self, other: &Font) -> bool {
+        let raw = |f: &Font| f.fmt.as_ref().map(|f| windows::core::Interface::as_raw(f) as usize);
+        raw(self).is_some() && raw(self) == raw(other) && self.underline == other.underline && self.strike == other.strike
+    }
+
     /// Height of `s` word-wrapped to `w` px.
     pub fn wrapped_height(&self, s: &str, w: i32) -> i32 {
         if s.is_empty() {
@@ -245,6 +269,20 @@ impl Font {
         }
         format!("{head}\u{2026}{}", tail(lo))
     }
+}
+
+/// Whether a font family is installed: DirectWrite quietly stands another in for a
+/// missing one, so a fallback has to be chosen before.
+pub fn installed(face: &str) -> bool {
+    let name = crate::win::util::wide(face);
+    engine(|e| unsafe {
+        let mut fonts = None;
+        let (mut i, mut found) = (0u32, windows::core::BOOL(0));
+        e.dwf.GetSystemFontCollection(&mut fonts, false).is_ok()
+            && fonts.is_some_and(|f| f.FindFamilyName(PCWSTR(name.as_ptr()), &mut i, &mut found).is_ok())
+            && found.as_bool()
+    })
+    .unwrap_or(false)
 }
 
 /// One recorded text draw (see `Target::batch`).
