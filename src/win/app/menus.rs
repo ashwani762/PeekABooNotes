@@ -14,28 +14,31 @@ pub fn color_menu(id: u64) -> Vec<menu::Item> {
 /// Right-click in a note's text (editor `e`): the formatting row and the editing
 /// commands, each greyed out when it has nothing to act on.
 pub fn edit_menu(e: HWND) -> Vec<menu::Item> {
+    use crate::common::i18n::keys;
     use menu::{Item, Tool, ToolStyle, action};
     let (a, b) = rich::sel(e);
     let selected = a != b;
     let t = rich::text(e);
     let in_table = rich::block_at(e, &t, a).is_some_and(|(k, _)| k == rich::Block::Table);
+    // The shortcuts are the editor's own (see `key_cmd`).
+    let tool = |id, glyph, style, label, k: &[&str]| Tool { id, glyph, style, label, key: keys(k) };
     let mut v = vec![
         Item::Tools(vec![
-            Tool { id: NC_BOLD, glyph: "B", style: ToolStyle::Bold },
-            Tool { id: NC_ITALIC, glyph: "I", style: ToolStyle::Italic },
-            Tool { id: NC_UNDERLINE, glyph: "U", style: ToolStyle::Underline },
-            Tool { id: NC_STRIKE, glyph: "S", style: ToolStyle::Strike },
-            Tool { id: NC_BULLETS, glyph: "\u{2022}", style: ToolStyle::Plain },
-            Tool { id: NC_NUMBERS, glyph: "1.", style: ToolStyle::Plain },
-            Tool { id: NC_TASK, glyph: "\u{E930}", style: ToolStyle::Icon },
+            tool(NC_BOLD, "B", ToolStyle::Bold, t!("tip_bold"), &["ctrl", "B"]),
+            tool(NC_ITALIC, "I", ToolStyle::Italic, t!("tip_italic"), &["ctrl", "I"]),
+            tool(NC_UNDERLINE, "U", ToolStyle::Underline, t!("tip_underline"), &["ctrl", "U"]),
+            tool(NC_STRIKE, "S", ToolStyle::Strike, t!("tip_strike"), &["ctrl", "shift", "X"]),
+            tool(NC_BULLETS, "\u{2022}", ToolStyle::Plain, t!("tip_bullets"), &["ctrl", "shift", "8"]),
+            tool(NC_NUMBERS, "1.", ToolStyle::Plain, t!("tip_numbers"), &["ctrl", "shift", "7"]),
+            tool(NC_TASK, "\u{E930}", ToolStyle::Icon, t!("tip_checklist"), &["ctrl", "shift", "L"]),
         ]),
         Item::Tools(vec![
-            Tool { id: NC_ALIGN_LEFT, glyph: "\u{E8E4}", style: ToolStyle::Icon },
-            Tool { id: NC_ALIGN_CENTER, glyph: "\u{E8E3}", style: ToolStyle::Icon },
-            Tool { id: NC_ALIGN_RIGHT, glyph: "\u{E8E2}", style: ToolStyle::Icon },
-            Tool { id: NC_QUOTE, glyph: "\u{201C}", style: ToolStyle::Bold },
-            Tool { id: NC_CODE, glyph: "\u{E943}", style: ToolStyle::Icon },
-            Tool { id: NC_TABLE, glyph: "\u{E80A}", style: ToolStyle::Icon },
+            tool(NC_ALIGN_LEFT, "\u{E8E4}", ToolStyle::Icon, t!("tip_align_left"), &["ctrl", "L"]),
+            tool(NC_ALIGN_CENTER, "\u{E8E3}", ToolStyle::Icon, t!("tip_align_center"), &["ctrl", "E"]),
+            tool(NC_ALIGN_RIGHT, "\u{E8E2}", ToolStyle::Icon, t!("tip_align_right"), &["ctrl", "R"]),
+            tool(NC_QUOTE, "\u{201C}", ToolStyle::Bold, t!("tip_quote"), &["ctrl", "'"]),
+            tool(NC_CODE, "\u{E943}", ToolStyle::Icon, t!("tip_code"), &["ctrl", "shift", "M"]),
+            tool(NC_TABLE, "\u{E80A}", ToolStyle::Icon, t!("tip_table"), &["ctrl", "shift", "T"]),
         ]),
         Item::Separator,
         action(NC_CUT, t!("menu_cut"), &crate::common::i18n::keys(&["ctrl", "X"]), IC_CUT).enabled(selected),

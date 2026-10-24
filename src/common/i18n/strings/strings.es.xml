@@ -284,6 +284,23 @@
     <string name="color_sand">Arena</string>
     <string name="tip_more">Más</string>
     <string name="tip_close">Cerrar</string>
+    <string name="tip_bold">Negrita</string>
+    <string name="tip_italic">Cursiva</string>
+    <string name="tip_underline">Subrayado</string>
+    <string name="tip_strike">Tachado</string>
+    <string name="tip_bullets">Lista con viñetas</string>
+    <string name="tip_numbers">Lista numerada</string>
+    <string name="tip_checklist">Lista de tareas</string>
+    <string name="tip_align_left">Alinear a la izquierda</string>
+    <string name="tip_align_center">Centrar</string>
+    <string name="tip_align_right">Alinear a la derecha</string>
+    <string name="tip_quote">Cita</string>
+    <string name="tip_code">Bloque de código</string>
+    <string name="tip_table">Tabla</string>
+    <plurals name="tip_more_notes">
+        <item quantity="one">%d nota más</item>
+        <item quantity="other">%d notas más</item>
+    </plurals>
     <string name="settings_group_assistants">Asistentes de IA</string>
     <string name="settings_mcp">Permitir asistentes (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude y otras IA leen y escriben tus notas</string>

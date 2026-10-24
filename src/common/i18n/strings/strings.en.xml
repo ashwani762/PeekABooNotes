@@ -294,6 +294,23 @@
     <string name="color_sand">Sand</string>
     <string name="tip_more">More</string>
     <string name="tip_close">Close</string>
+    <string name="tip_bold">Bold</string>
+    <string name="tip_italic">Italic</string>
+    <string name="tip_underline">Underline</string>
+    <string name="tip_strike">Strikethrough</string>
+    <string name="tip_bullets">Bulleted List</string>
+    <string name="tip_numbers">Numbered List</string>
+    <string name="tip_checklist">Checklist</string>
+    <string name="tip_align_left">Align Left</string>
+    <string name="tip_align_center">Centre</string>
+    <string name="tip_align_right">Align Right</string>
+    <string name="tip_quote">Quote</string>
+    <string name="tip_code">Code Block</string>
+    <string name="tip_table">Table</string>
+    <plurals name="tip_more_notes">
+        <item quantity="one">%d More Note</item>
+        <item quantity="other">%d More Notes</item>
+    </plurals>
     <string name="settings_group_assistants">AI Assistants</string>
     <string name="settings_mcp">Allow assistants (MCP)</string>
     <string name="settings_mcp_sub">Lets ChatGPT, Claude and other AI apps read and write your notes</string>

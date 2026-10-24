@@ -270,6 +270,21 @@ pub(super) fn footer_drop(d: &Deck) -> f32 {
     bottoms.fold(0.0, f32::max)
 }
 
+/// The "+N" tile or the plus button as drawn now (window coordinates), for its tooltip.
+pub(super) fn footer_rect(d: &Deck, h: Hit) -> Option<RECT> {
+    let g = &d.geo;
+    let s = g.s;
+    let centre_near = (TAB_W / 2.0 + 2.0) * s;
+    let (cx, _) = span(g, g.ew, centre_near, centre_near);
+    let drop = footer_drop(d);
+    let (w, top, ht) = match h {
+        Hit::More if g.more > 0 => ((TAB_W - 10.0) * s, g.more_y() + drop, 26.0 * s),
+        Hit::Plus => (34.0 * s, g.plus_cy() + drop - 17.0 * s, 34.0 * s),
+        _ => return None,
+    };
+    Some(rect((cx - w / 2.0) as i32, top as i32, w as i32, ht as i32))
+}
+
 pub(super) fn preview_height(d: &Deck, i: usize) -> f32 {
     let s = d.geo.s;
     // Title band above the body, padding below it (as `draw_card` lays them out).

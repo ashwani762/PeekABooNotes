@@ -271,6 +271,22 @@
     <string name="color_sand">サンド</string>
     <string name="tip_more">その他</string>
     <string name="tip_close">閉じる</string>
+    <string name="tip_bold">太字</string>
+    <string name="tip_italic">斜体</string>
+    <string name="tip_underline">下線</string>
+    <string name="tip_strike">取り消し線</string>
+    <string name="tip_bullets">箇条書き</string>
+    <string name="tip_numbers">番号付きリスト</string>
+    <string name="tip_checklist">チェックリスト</string>
+    <string name="tip_align_left">左揃え</string>
+    <string name="tip_align_center">中央揃え</string>
+    <string name="tip_align_right">右揃え</string>
+    <string name="tip_quote">引用</string>
+    <string name="tip_code">コードブロック</string>
+    <string name="tip_table">表</string>
+    <plurals name="tip_more_notes">
+        <item quantity="other">他 %d 件のメモ</item>
+    </plurals>
     <string name="settings_group_assistants">AI アシスタント</string>
     <string name="settings_mcp">アシスタントを許可 (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT や Claude などの AI アプリがメモを読み書きできます</string>

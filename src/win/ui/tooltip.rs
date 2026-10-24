@@ -38,6 +38,8 @@ struct Tip {
     keys: String,
     /// Waiting out the delay.
     pending: bool,
+    /// Brought up by keyboard focus, not the pointer: it shows wherever the pointer is.
+    by_key: bool,
     /// Clicked: stay away until the pointer moves to another button.
     muted: bool,
     shown: bool,
@@ -87,6 +89,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 label: String::new(),
                 keys: String::new(),
                 pending: false,
+                by_key: false,
                 muted: false,
                 shown: false,
                 hidden_at: None,
@@ -107,6 +110,16 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
 /// The pointer rests on a button of `owner` at `anchor` (client coordinates).
 /// Call it on every move over the button; repeats are free.
 pub fn hover(owner: HWND, anchor: RECT, label: &str, keys: &str) {
+    rest(owner, anchor, label, keys, false);
+}
+
+/// Keyboard focus reached a button of `owner` at `anchor`: its tooltip comes up as for
+/// the pointer, after the same wait.
+pub fn focus(owner: HWND, anchor: RECT, label: &str, keys: &str) {
+    rest(owner, anchor, label, keys, true);
+}
+
+fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) {
     with(|t| {
         let same = t.owner == owner && t.label == label && t.keys == keys && (t.anchor.left, t.anchor.top) == (anchor.left, anchor.top);
         if same && (t.pending || t.shown || t.muted) {
@@ -116,6 +129,7 @@ pub fn hover(owner: HWND, anchor: RECT, label: &str, keys: &str) {
         t.anchor = anchor;
         t.label = label.to_string();
         t.keys = keys.to_string();
+        t.by_key = by_key;
         t.muted = false;
         let warm = t.shown || t.hidden_at.is_some_and(|h| h.elapsed().as_millis() < WARM_MS);
         if warm {
@@ -327,11 +341,11 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 with(|t| {
                     if t.pending {
                         t.pending = false;
-                        // Only while the pointer is still over the button.
+                        // Only while the pointer is still over the button (or it has focus).
                         let mut p = POINT { x: 0, y: 0 };
                         GetCursorPos(&mut p);
                         let mut q = p;
-                        if !t.owner.is_null() && ScreenToClient(t.owner, &mut q) != 0 && crate::win::util::pt_in(&t.anchor, q.x, q.y) {
+                        if !t.owner.is_null() && (t.by_key || (ScreenToClient(t.owner, &mut q) != 0 && crate::win::util::pt_in(&t.anchor, q.x, q.y))) {
                             show(t, false);
                         }
                     }

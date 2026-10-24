@@ -284,6 +284,23 @@
     <string name="color_sand">रेतीला</string>
     <string name="tip_more">और</string>
     <string name="tip_close">बंद करें</string>
+    <string name="tip_bold">बोल्ड</string>
+    <string name="tip_italic">इटैलिक</string>
+    <string name="tip_underline">रेखांकित</string>
+    <string name="tip_strike">काटी गई रेखा</string>
+    <string name="tip_bullets">बुलेट सूची</string>
+    <string name="tip_numbers">क्रमांकित सूची</string>
+    <string name="tip_checklist">चेकलिस्ट</string>
+    <string name="tip_align_left">बाएँ संरेखित करें</string>
+    <string name="tip_align_center">बीच में संरेखित करें</string>
+    <string name="tip_align_right">दाएँ संरेखित करें</string>
+    <string name="tip_quote">उद्धरण</string>
+    <string name="tip_code">कोड ब्लॉक</string>
+    <string name="tip_table">तालिका</string>
+    <plurals name="tip_more_notes">
+        <item quantity="one">%d और नोट</item>
+        <item quantity="other">%d और नोट्स</item>
+    </plurals>
     <string name="settings_group_assistants">AI सहायक</string>
     <string name="settings_mcp">सहायकों को अनुमति दें (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude और दूसरे AI ऐप आपके नोट्स पढ़ और लिख सकते हैं</string>

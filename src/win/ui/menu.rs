@@ -7,7 +7,8 @@
 //! styled to match). Opens with a 120 ms fade-and-settle from the pointer, highlights on
 //! hover instantly, confirms a choice with a quick blink and fades out.
 //! `show` runs a nested message loop, like `TrackPopupMenu`, and returns the command id
-//! (0 if dismissed). Keyboard: arrows, Enter, Esc, and first-letter jumps.
+//! (0 if dismissed). Keyboard: arrows (Up and Down between rows, Left and Right along
+//! the colour and tool rows), Enter or Space, Esc, and first-letter jumps.
 //!
 //! Dismissal fades too, and lets go of the mouse at once, so whatever is under the
 //! pointer responds while the menu is still disappearing. A caller can also pass a
@@ -50,6 +51,9 @@ pub struct Tool {
     pub id: u32,
     pub glyph: &'static str,
     pub style: ToolStyle,
+    /// The tooltip: what it does, and its shortcut ("" for none).
+    pub label: &'static str,
+    pub key: String,
 }
 
 pub enum Item {
@@ -117,6 +121,8 @@ struct Menu {
     has_icons: bool,
     /// Fading out after a dismissal; input is ignored and passes through.
     closing: bool,
+    /// Where the pointer last was (client coordinates).
+    pointer: (i32, i32),
 }
 
 /// Tells the menu whether the pointer, outside it, has moved somewhere it no longer belongs.
@@ -263,6 +269,7 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
             canvas: None,
             has_icons,
             closing: false,
+            pointer: (i32::MIN, i32::MIN),
         })
     });
     with(render);
@@ -412,21 +419,45 @@ fn choose(m: &mut Menu, t: Target) {
     }
 }
 
-/// Fade out without a choice. The mouse is released straight away and the window turns
-/// click-through, so the pointer is already back with whatever lies beneath.
-/// A swatch under the pointer says which colour it is.
-fn swatch_tip(m: &Menu, t: Target) {
+/// A swatch says which colour it is, a tool what it does and its shortcut: under the
+/// pointer, or (`by_key`) when the keyboard reaches it.
+fn tip(m: &Menu, t: Target, by_key: bool) {
     use crate::win::ui::tooltip;
-    let Target::Swatch(i, k) = t else {
-        tooltip::leave(m.hwnd);
-        return;
+    let s = m.s;
+    let row = |i: usize| layout_rows(m).get(i).copied();
+    let (r, label, key) = match (t, item_of(m, t)) {
+        (Target::Swatch(i, k), Some(Item::Swatches { .. })) => {
+            let Some((ry, rh)) = row(i) else { return };
+            let d = SW * s;
+            (rect(m.margin + swatch_x(m, k) as i32, m.margin + (ry + (rh - d) / 2.0) as i32, d as i32, d as i32), theme::color_name(theme::ORDER[k]), "")
+        }
+        (Target::Tool(i, k), Some(Item::Tools(tools))) if tools.get(k).is_some_and(|t| !t.label.is_empty()) => {
+            let Some((ry, rh)) = row(i) else { return };
+            let d = TOOL * s;
+            (rect(m.margin + tool_x(m, tools.len(), k) as i32, m.margin + (ry + (rh - d) / 2.0) as i32, d as i32, d as i32), tools[k].label, tools[k].key.as_str())
+        }
+        _ => {
+            tooltip::leave(m.hwnd);
+            return;
+        }
     };
-    let Some(&(ry, rh)) = layout_rows(m).get(i) else { return };
-    let d = SW * m.s;
-    let r = rect(m.margin + swatch_x(m, k) as i32, m.margin + (ry + (rh - d) / 2.0) as i32, d as i32, d as i32);
-    tooltip::hover(m.hwnd, r, theme::color_name(theme::ORDER[k]), "");
+    if by_key {
+        tooltip::focus(m.hwnd, r, label, key);
+    } else {
+        tooltip::hover(m.hwnd, r, label, key);
+    }
 }
 
+/// The item a target sits in.
+fn item_of(m: &Menu, t: Target) -> Option<&Item> {
+    match t {
+        Target::Row(i) | Target::Swatch(i, _) | Target::Tool(i, _) => m.items.get(i),
+        Target::None => None,
+    }
+}
+
+/// Fade out without a choice. The mouse is released straight away and the window turns
+/// click-through, so the pointer is already back with whatever lies beneath.
 fn dismiss(m: &mut Menu) {
     crate::win::ui::tooltip::mute();
     if m.result.is_some() || m.blink.is_some() || m.closing {
@@ -551,8 +582,92 @@ fn render(m: &mut Menu) {
     m.canvas = Some(c);
 }
 
-fn selectable(m: &Menu) -> Vec<usize> {
-    m.items.iter().enumerate().filter(|(_, it)| matches!(it, Item::Action { disabled: false, .. })).map(|(i, _)| i).collect()
+/// What the keys can reach in a row: nothing, the row itself, or this many targets along it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Reach {
+    Nothing,
+    Row,
+    Along(usize),
+}
+
+impl Reach {
+    fn of(it: &Item) -> Reach {
+        match it {
+            Item::Action { disabled: false, .. } => Reach::Row,
+            Item::Swatches { .. } => Reach::Along(theme::ORDER.len()),
+            Item::Tools(t) if !t.is_empty() => Reach::Along(t.len()),
+            _ => Reach::Nothing,
+        }
+    }
+
+    fn width(self) -> usize {
+        match self {
+            Reach::Nothing => 0,
+            Reach::Row => 1,
+            Reach::Along(n) => n,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Arrow {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// Where an arrow key takes the keyboard focus, as (row, column). Up and Down go to the
+/// next row with something to reach, wrapping round, and keep the column if that row has
+/// it (else start at its first). Left and Right go along a row, wrapping too. With no
+/// focus yet, Down starts at the top and Up at the bottom.
+fn next_focus(rows: &[Reach], at: Option<(usize, usize)>, key: Arrow) -> Option<(usize, usize)> {
+    let n = rows.len();
+    match key {
+        Arrow::Left | Arrow::Right => {
+            let (i, k) = at?;
+            let w = rows.get(i)?.width();
+            if w < 2 {
+                return at;
+            }
+            Some((i, if key == Arrow::Right { (k + 1) % w } else { (k + w - 1) % w }))
+        }
+        Arrow::Up | Arrow::Down => {
+            let down = key == Arrow::Down;
+            // From nowhere, step as if from just past the far end.
+            let from = at.map_or(if down { n.checked_sub(1)? } else { 0 }, |a| a.0);
+            (1..=n).map(|d| if down { (from + d) % n } else { (from + n - d) % n }).find(|&i| rows[i].width() > 0).map(|i| {
+                let k = at.map_or(0, |a| a.1);
+                (i, if k < rows[i].width() { k } else { 0 })
+            })
+        }
+    }
+}
+
+fn focus_of(t: Target) -> Option<(usize, usize)> {
+    match t {
+        Target::Row(i) => Some((i, 0)),
+        Target::Swatch(i, k) | Target::Tool(i, k) => Some((i, k)),
+        Target::None => None,
+    }
+}
+
+fn target_of(m: &Menu, (i, k): (usize, usize)) -> Target {
+    match m.items.get(i) {
+        Some(Item::Swatches { .. }) => Target::Swatch(i, k),
+        Some(Item::Tools(_)) => Target::Tool(i, k),
+        Some(_) => Target::Row(i),
+        None => Target::None,
+    }
+}
+
+/// The keyboard moved to `t`: highlight it as the pointer would, tooltip included.
+fn focus(m: &mut Menu, t: Target) {
+    if t != m.hot {
+        m.hot = t;
+        render(m);
+        tip(m, t, true);
+    }
 }
 
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -561,14 +676,17 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             WM_MOUSEMOVE => {
                 let (x, y) = (x_of(lp), y_of(lp));
                 let outside = with(|m| {
-                    if m.closing {
+                    // A move that isn't one (sent when a window appears under a still
+                    // pointer, such as a tooltip) mustn't take the keyboard's highlight.
+                    if m.closing || m.pointer == (x, y) {
                         return None;
                     }
+                    m.pointer = (x, y);
                     let t = target_at(m, x, y);
                     if t != m.hot && m.blink.is_none() {
                         m.hot = t;
                         render(m);
-                        swatch_tip(m, t);
+                        tip(m, t, false);
                     }
                     let inside = x >= m.margin && y >= m.margin && x < m.margin + m.w && y < m.margin + m.h;
                     (!inside && m.blink.is_none()).then_some(POINT { x: m.origin.0 + x, y: m.origin.1 + y })
@@ -611,38 +729,41 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             WM_KEYDOWN => {
                 let vk = wp as u16;
                 with(|m| {
-                    let rows = selectable(m);
-                    let cur = match m.hot {
-                        Target::Row(i) => rows.iter().position(|r| *r == i),
+                    if m.closing || m.blink.is_some() {
+                        return;
+                    }
+                    let arrow = match vk {
+                        VK_UP => Some(Arrow::Up),
+                        VK_DOWN => Some(Arrow::Down),
+                        VK_LEFT => Some(Arrow::Left),
+                        VK_RIGHT => Some(Arrow::Right),
                         _ => None,
                     };
+                    if let Some(a) = arrow {
+                        let rows: Vec<Reach> = m.items.iter().map(Reach::of).collect();
+                        if let Some(f) = next_focus(&rows, focus_of(m.hot), a) {
+                            let t = target_of(m, f);
+                            focus(m, t);
+                        }
+                        return;
+                    }
                     match vk {
                         VK_ESCAPE => dismiss(m),
-                        VK_DOWN | VK_UP if !rows.is_empty() => {
-                            let n = rows.len() as i32;
-                            let next = match cur {
-                                Some(c) => (c as i32 + if vk == VK_DOWN { 1 } else { -1 }).rem_euclid(n),
-                                None if vk == VK_DOWN => 0,
-                                None => n - 1,
-                            };
-                            m.hot = Target::Row(rows[next as usize]);
-                            render(m);
-                        }
                         VK_RETURN | VK_SPACE => {
+                            crate::win::ui::tooltip::mute();
                             let t = m.hot;
                             choose(m, t);
                         }
                         _ => {
-                            // First-letter jump.
+                            // First-letter jump, among the action rows.
                             let ch = (vk as u8 as char).to_ascii_lowercase();
                             if ch.is_ascii_alphanumeric() {
-                                let found = rows.iter().copied().find(|&i| match &m.items[i] {
-                                    Item::Action { label, .. } => label.to_lowercase().starts_with(ch),
+                                let found = m.items.iter().enumerate().find(|(_, it)| match it {
+                                    Item::Action { label, disabled: false, .. } => label.to_lowercase().starts_with(ch),
                                     _ => false,
                                 });
-                                if let Some(i) = found {
-                                    m.hot = Target::Row(i);
-                                    render(m);
+                                if let Some((i, _)) = found {
+                                    focus(m, Target::Row(i));
                                 }
                             }
                         }
@@ -669,5 +790,73 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             _ => {}
         }
         DefWindowProcW(h, msg, wp, lp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use Reach::{Along, Nothing, Row};
+
+    // The edit menu's shape: two tool rows, a separator, actions.
+    const EDIT: [Reach; 7] = [Along(7), Along(6), Nothing, Row, Row, Nothing, Row];
+
+    #[test]
+    fn up_and_down_reach_every_row() {
+        let rows = [Row, Nothing, Along(12), Nothing, Along(7), Row];
+        assert_eq!(next_focus(&rows, None, Arrow::Down), Some((0, 0)));
+        assert_eq!(next_focus(&rows, Some((0, 0)), Arrow::Down), Some((2, 0)));
+        assert_eq!(next_focus(&rows, Some((2, 0)), Arrow::Down), Some((4, 0)));
+        assert_eq!(next_focus(&rows, Some((4, 3)), Arrow::Down), Some((5, 0)));
+        assert_eq!(next_focus(&rows, Some((5, 0)), Arrow::Down), Some((0, 0)), "wraps to the top");
+        assert_eq!(next_focus(&rows, None, Arrow::Up), Some((5, 0)));
+        assert_eq!(next_focus(&rows, Some((0, 0)), Arrow::Up), Some((5, 0)), "wraps to the bottom");
+    }
+
+    #[test]
+    fn rows_keep_the_column_when_they_can() {
+        assert_eq!(next_focus(&EDIT, Some((0, 4)), Arrow::Down), Some((1, 4)));
+        assert_eq!(next_focus(&EDIT, Some((1, 4)), Arrow::Up), Some((0, 4)));
+        // The second row is one shorter: past its end, start at its first.
+        assert_eq!(next_focus(&EDIT, Some((0, 6)), Arrow::Down), Some((1, 0)));
+        // Into an action row and back out: the column starts over.
+        assert_eq!(next_focus(&EDIT, Some((1, 5)), Arrow::Down), Some((3, 0)));
+        assert_eq!(next_focus(&EDIT, Some((3, 0)), Arrow::Up), Some((1, 0)));
+    }
+
+    #[test]
+    fn left_and_right_go_along_a_row() {
+        assert_eq!(next_focus(&EDIT, Some((0, 0)), Arrow::Right), Some((0, 1)));
+        assert_eq!(next_focus(&EDIT, Some((0, 6)), Arrow::Right), Some((0, 0)), "wraps");
+        assert_eq!(next_focus(&EDIT, Some((1, 0)), Arrow::Left), Some((1, 5)), "wraps");
+        // Nothing to the side of an action row, or of no focus at all.
+        assert_eq!(next_focus(&EDIT, Some((3, 0)), Arrow::Right), Some((3, 0)));
+        assert_eq!(next_focus(&EDIT, None, Arrow::Left), None);
+    }
+
+    #[test]
+    fn disabled_rows_are_skipped() {
+        let items = [
+            action(1, "Cut", "", "").enabled(false),
+            action(2, "Copy", "", ""),
+            Item::Separator,
+            action(3, "Paste", "", "").enabled(false),
+            Item::Tools(Vec::new()),
+        ];
+        let rows: Vec<Reach> = items.iter().map(Reach::of).collect();
+        assert_eq!(rows, [Nothing, Row, Nothing, Nothing, Nothing]);
+        assert_eq!(next_focus(&rows, None, Arrow::Down), Some((1, 0)));
+        assert_eq!(next_focus(&rows, None, Arrow::Up), Some((1, 0)));
+        assert_eq!(next_focus(&rows, Some((1, 0)), Arrow::Down), Some((1, 0)), "the only one stays");
+        assert_eq!(next_focus(&[Nothing, Nothing], None, Arrow::Down), None);
+        assert_eq!(next_focus(&[], None, Arrow::Up), None);
+    }
+
+    #[test]
+    fn swatches_reach_every_colour() {
+        let rows = [Reach::of(&Item::Swatches { base: 0, current: None })];
+        assert_eq!(rows, [Along(theme::ORDER.len())]);
+        let last = theme::ORDER.len() - 1;
+        assert_eq!(next_focus(&rows, Some((0, 0)), Arrow::Left), Some((0, last)));
     }
 }

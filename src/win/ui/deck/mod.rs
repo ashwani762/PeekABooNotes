@@ -503,6 +503,25 @@ fn leave_menu(hwnd: HWND, id: u64, pt: POINT) -> bool {
     .unwrap_or(false)
 }
 
+/// The plus button and the "+N" tile say what they do; anything else lets the tooltip go.
+fn tip(d: &Deck, hit: Hit) {
+    use crate::common::i18n::keys;
+    use crate::win::ui::tooltip;
+    let (label, k) = match hit {
+        Hit::Plus => (t!("menu_new_note").to_string(), keys(&["ctrl", "alt", "N"])),
+        // It opens All Notes, so it shares that shortcut.
+        Hit::More => (tn!("tip_more_notes", d.geo.more), keys(&["ctrl", "alt", "A"])),
+        _ => {
+            tooltip::leave(d.hwnd);
+            return;
+        }
+    };
+    match footer_rect(d, hit) {
+        Some(r) => tooltip::hover(d.hwnd, r, &label, &k),
+        None => tooltip::leave(d.hwnd),
+    }
+}
+
 /// The context menu is gone. If it closed in place (a choice, Esc, a click elsewhere),
 /// tuck the card back and let the real pointer position decide: still over the deck,
 /// stay open; elsewhere, fold after the usual grace.
@@ -600,10 +619,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 }
                 anim::wake(Client::Deck);
             }
+            // On every move: the buttons slide as a pulled-out card tucks back.
+            tip(d, hit);
             Action::None
         }),
         WM_MOUSELEAVE => with(|d| {
             d.tracking = false;
+            crate::win::ui::tooltip::leave(hwnd);
             // The pointer "leaves" for our own context menu: hold still until it closes.
             if d.drag.is_none() && !d.menu {
                 d.hover = Hit::None;
@@ -616,6 +638,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             Action::None
         }),
         WM_LBUTTONDOWN => with(|d| {
+            crate::win::ui::tooltip::mute();
             unsafe { SetCapture(hwnd) };
             let hit = hit_test(d, x, y);
             d.pressed = hit;
@@ -678,6 +701,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_RBUTTONUP => with(|d| {
             // The menu takes the stage: tuck any pulled-out card away at once, but keep
             // the deck open and the clicked card lit, so it's clear what the menu acts on.
+            crate::win::ui::tooltip::mute();
             unsafe {
                 KillTimer(hwnd, T_PREVIEW);
                 KillTimer(hwnd, T_COLLAPSE);
