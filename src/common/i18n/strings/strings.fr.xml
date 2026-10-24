@@ -244,6 +244,11 @@
     <string name="shortcut_nest">Indenter ou désindenter un élément</string>
     <string name="shortcut_prev_next">Note précédente ou suivante</string>
     <string name="shortcut_next_color">Couleur suivante</string>
+    <string name="shortcut_align">Aligner à gauche, au centre ou à droite</string>
+    <string name="shortcut_quote">Citation</string>
+    <string name="shortcut_code">Bloc de code</string>
+    <string name="shortcut_table">Tableau</string>
+    <string name="shortcut_leave_text">Quitter le texte de la note</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Dossier des notes</string>

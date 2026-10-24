@@ -254,6 +254,11 @@
     <string name="shortcut_nest">Indent or outdent a list item</string>
     <string name="shortcut_prev_next">Previous or next note</string>
     <string name="shortcut_next_color">Next colour</string>
+    <string name="shortcut_align">Align left, centre or right</string>
+    <string name="shortcut_quote">Quote</string>
+    <string name="shortcut_code">Code block</string>
+    <string name="shortcut_table">Table</string>
+    <string name="shortcut_leave_text">Leave the note's text</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notes folder</string>

@@ -244,6 +244,11 @@
     <string name="shortcut_nest">सूची आइटम को अंदर या बाहर करें</string>
     <string name="shortcut_prev_next">पिछला या अगला नोट</string>
     <string name="shortcut_next_color">अगला रंग</string>
+    <string name="shortcut_align">बाएँ, बीच में या दाएँ संरेखित करें</string>
+    <string name="shortcut_quote">उद्धरण</string>
+    <string name="shortcut_code">कोड ब्लॉक</string>
+    <string name="shortcut_table">तालिका</string>
+    <string name="shortcut_leave_text">नोट के टेक्स्ट से बाहर जाएँ</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">नोट्स फ़ोल्डर</string>

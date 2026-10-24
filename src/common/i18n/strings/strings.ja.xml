@@ -233,6 +233,11 @@
     <string name="shortcut_nest">リスト項目の字下げ/戻す</string>
     <string name="shortcut_prev_next">前のメモ/次のメモ</string>
     <string name="shortcut_next_color">次の色</string>
+    <string name="shortcut_align">左揃え・中央揃え・右揃え</string>
+    <string name="shortcut_quote">引用</string>
+    <string name="shortcut_code">コードブロック</string>
+    <string name="shortcut_table">表</string>
+    <string name="shortcut_leave_text">メモの本文から移動</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">メモのフォルダ</string>

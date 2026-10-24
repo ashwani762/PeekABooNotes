@@ -244,6 +244,11 @@
     <string name="shortcut_nest">Listeneintrag ein- oder ausrücken</string>
     <string name="shortcut_prev_next">Vorherige oder nächste Notiz</string>
     <string name="shortcut_next_color">Nächste Farbe</string>
+    <string name="shortcut_align">Links, zentriert oder rechts ausrichten</string>
+    <string name="shortcut_quote">Zitat</string>
+    <string name="shortcut_code">Codeblock</string>
+    <string name="shortcut_table">Tabelle</string>
+    <string name="shortcut_leave_text">Notiztext verlassen</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notizordner</string>

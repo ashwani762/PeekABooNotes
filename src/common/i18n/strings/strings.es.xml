@@ -244,6 +244,11 @@
     <string name="shortcut_nest">Sangrar o quitar sangría</string>
     <string name="shortcut_prev_next">Nota anterior o siguiente</string>
     <string name="shortcut_next_color">Color siguiente</string>
+    <string name="shortcut_align">Alinear a la izquierda, al centro o a la derecha</string>
+    <string name="shortcut_quote">Cita</string>
+    <string name="shortcut_code">Bloque de código</string>
+    <string name="shortcut_table">Tabla</string>
+    <string name="shortcut_leave_text">Salir del texto de la nota</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Carpeta de notas</string>
