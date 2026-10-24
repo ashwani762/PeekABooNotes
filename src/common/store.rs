@@ -597,30 +597,35 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
             out.push('\n');
             continue;
         }
-        let t = l.trim_start();
-        let level = ((l.len() - t.len()) / 2).min(5);
-        let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
-        let pretty = if let Some(r) = unescaped(t) {
-            // Text that only looks like a quote or a fence stays escaped, or the preview
-            // would draw it as one (`ui::draw_body` shows it unescaped).
-            if quoted(r).is_some() || r.starts_with("```") { t.to_string() } else { r.to_string() }
-        } else if let Some(r) = t.strip_prefix("[ ] ") {
-            format!("○  {r}")
-        } else if let Some(r) = t.strip_prefix("[x] ") {
-            format!("●  {r}")
-        } else if let Some(r) = t.strip_prefix("- ") {
-            // The editor's bullet for the level: • ◦ ▪.
-            format!("{}  {r}", ['•', '◦', '▪'][level % 3])
-        } else if let Some(r) = t[digits..].strip_prefix(". ").filter(|_| digits > 0) {
-            format!("{}. {r}", list_number(t[..digits].parse().unwrap_or(1), level))
-        } else {
-            t.to_string()
-        };
-        out.push_str(&"  ".repeat(level));
-        out.push_str(&pretty);
+        out.push_str(&pretty_line(l));
         out.push('\n');
     }
     out.trim_end().to_string()
+}
+
+/// A body line as previews show it: list markers as the glyphs the editor draws (• ◦ ▪,
+/// ○ ●, 1. a. i.), nested two spaces a level.
+pub fn pretty_line(l: &str) -> String {
+    let t = l.trim_start();
+    let level = ((l.len() - t.len()) / 2).min(5);
+    let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
+    let pretty = if let Some(r) = unescaped(t) {
+        // Text that only looks like a quote or a fence stays escaped, or the preview
+        // would draw it as one (`ui::draw_body` shows it unescaped).
+        if quoted(r).is_some() || r.starts_with("```") { t.to_string() } else { r.to_string() }
+    } else if let Some(r) = t.strip_prefix("[ ] ") {
+        format!("○  {r}")
+    } else if let Some(r) = t.strip_prefix("[x] ") {
+        format!("●  {r}")
+    } else if let Some(r) = t.strip_prefix("- ") {
+        // The editor's bullet for the level: • ◦ ▪.
+        format!("{}  {r}", ['•', '◦', '▪'][level % 3])
+    } else if let Some(r) = t[digits..].strip_prefix(". ").filter(|_| digits > 0) {
+        format!("{}. {r}", list_number(t[..digits].parse().unwrap_or(1), level))
+    } else {
+        t.to_string()
+    };
+    format!("{}{pretty}", "  ".repeat(level))
 }
 
 /// A line of a preview (from `body_of`) as text for a one-line summary: quote marks, code

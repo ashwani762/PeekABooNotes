@@ -25,7 +25,10 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         {
             out.push_str(&block_md(h, &t, kind, &rows, inline));
             out.push('\n');
-            numbers = [0; MAX_LEVEL as usize + 1];
+            // A quote under a list item is part of it: the list's count goes on after it.
+            if kind != Block::Quote || quote_level(h, rows[0]) == 0 {
+                numbers = [0; MAX_LEVEL as usize + 1];
+            }
             start = rows.last().map_or(t.len(), |r| r.end);
             if start >= t.len() {
                 break;
@@ -33,78 +36,7 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
             continue;
         }
         let end = t[start..].iter().position(|&c| c == CR).map(|i| start + i).unwrap_or(t.len());
-        set_sel(h, start as i32, start as i32);
-        let mut pf = ParaFormat2::new();
-        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
-        let num = pf.numbering;
-        let task = start < end && is_task(t[start]);
-        let level = if task || num != 0 { level_of(pf.start_indent, list_base(task)) as usize } else { 0 };
-        let mut body_start = start;
-        let mut prefix = "  ".repeat(level);
-        match num {
-            n if is_bullet(n) => prefix.push_str("- "),
-            PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN => {
-                numbers[level] += 1;
-                for n in numbers.iter_mut().skip(level + 1) {
-                    *n = 0;
-                }
-                prefix.push_str(&format!("{}. ", numbers[level]));
-            }
-            _ => numbers = [0; MAX_LEVEL as usize + 1],
-        }
-        if task {
-            if prefix.is_empty() {
-                prefix.push_str("- ");
-            }
-            if prefix.trim().is_empty() {
-                prefix.push_str("- ");
-            }
-            prefix.push_str(if t[start] == CHECKED { "[x] " } else { "[ ] " });
-            body_start += 1;
-            if body_start < end && t[body_start] == b' ' as u16 {
-                body_start += 1;
-            }
-        }
-        // A centred or right-aligned line keeps its alignment on the way out.
-        let align = if inline && start > 0 && num == 0 && !task {
-            match pf.alignment {
-                PFA_CENTER => Some("center"),
-                PFA_RIGHT => Some("right"),
-                _ => None,
-            }
-        } else {
-            None
-        };
-        let line_start = out.len();
-        out.push_str(&prefix);
-        // Plain text that only looks like a list or heading ("- not a list", typed and
-        // reverted with Backspace) is escaped, so it comes back as text.
-        let title = inline && start == 0 && prefix.is_empty() && end > 0;
-        if prefix.is_empty() && !title && crate::common::store::looks_like_marker(&visible(&t, body_start, end)) {
-            out.push('\\');
-        }
-        if title {
-            out.push_str("# ");
-            out.push_str(&with_links(h, &t, 0, end));
-        } else if let Some(md) = inline.then(|| item_link(h, &t, body_start)).flatten().and_then(|l| attachment_md(&l.2)) {
-            out.push_str(&md);
-        } else if inline {
-            let body = inline_md(h, &t, body_start, end);
-            // A ticked item's strikethrough is how it looks, not part of its text (also
-            // inside other marks: **~~bread~~**).
-            let done = task && t[start] == CHECKED;
-            out.push_str(&if done { body.replace("~~", "") } else { body });
-        } else if let Some(md) = light_attachment(h, &t, body_start, end) {
-            out.push_str(&md);
-        } else {
-            out.push_str(&visible(&t, body_start, end));
-        }
-        if let Some(a) = align
-            && out.len() > line_start
-        {
-            out.insert_str(line_start, &format!("<p align=\"{a}\">"));
-            out.push_str("</p>");
-        }
+        out.push_str(&para_md(h, &t, start, end, inline, &mut numbers));
         out.push('\n');
         if end >= t.len() {
             break;
@@ -116,6 +48,80 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         out = out.replace("- [ ] ", "[ ] ").replace("- [x] ", "[x] ");
     }
     out.trim_end().to_string()
+}
+
+/// The paragraph `t[start..end]` as one line of Markdown (`inline`: with marks and links;
+/// otherwise only its list marker), counting numbered items in `numbers`.
+fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: &mut [usize; MAX_LEVEL as usize + 1]) -> String {
+    set_sel(h, start as i32, start as i32);
+    let mut pf = ParaFormat2::new();
+    send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+    let num = pf.numbering;
+    let task = start < end && is_task(t[start]);
+    let level = if task || num != 0 { level_of(pf.start_indent, list_base(task)) as usize } else { 0 };
+    let mut body_start = start;
+    let mut prefix = "  ".repeat(level);
+    match num {
+        n if is_bullet(n) => prefix.push_str("- "),
+        PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN => {
+            numbers[level] += 1;
+            for n in numbers.iter_mut().skip(level + 1) {
+                *n = 0;
+            }
+            prefix.push_str(&format!("{}. ", numbers[level]));
+        }
+        _ => *numbers = [0; MAX_LEVEL as usize + 1],
+    }
+    if task {
+        if prefix.is_empty() {
+            prefix.push_str("- ");
+        }
+        if prefix.trim().is_empty() {
+            prefix.push_str("- ");
+        }
+        prefix.push_str(if t[start] == CHECKED { "[x] " } else { "[ ] " });
+        body_start += 1;
+        if body_start < end && t[body_start] == b' ' as u16 {
+            body_start += 1;
+        }
+    }
+    // A centred or right-aligned line keeps its alignment on the way out.
+    let align = if inline && start > 0 && num == 0 && !task {
+        match pf.alignment {
+            PFA_CENTER => Some("center"),
+            PFA_RIGHT => Some("right"),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let mut out = prefix;
+    // Plain text that only looks like a list or heading ("- not a list", typed and
+    // reverted with Backspace) is escaped, so it comes back as text.
+    let title = inline && start == 0 && out.is_empty() && end > 0;
+    if out.is_empty() && !title && crate::common::store::looks_like_marker(&visible(t, body_start, end)) {
+        out.push('\\');
+    }
+    if title {
+        out.push_str("# ");
+        out.push_str(&with_links(h, t, 0, end));
+    } else if let Some(md) = inline.then(|| item_link(h, t, body_start)).flatten().and_then(|l| attachment_md(&l.2)) {
+        out.push_str(&md);
+    } else if inline {
+        let body = inline_md(h, t, body_start, end);
+        // A ticked item's strikethrough is how it looks, not part of its text (also
+        // inside other marks: **~~bread~~**).
+        let done = task && t[start] == CHECKED;
+        out.push_str(&if done { body.replace("~~", "") } else { body });
+    } else if let Some(md) = light_attachment(h, t, body_start, end) {
+        out.push_str(&md);
+    } else {
+        out.push_str(&visible(t, body_start, end));
+    }
+    match align {
+        Some(a) if !out.is_empty() => format!("<p align=\"{a}\">{out}</p>"),
+        _ => out,
+    }
 }
 
 /// The block starting at `cp` as the light text has it: (kind, how many lines, where it
@@ -145,7 +151,10 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
     match kind {
         Block::Quote => {
             let (a, b) = cells(t, rows[0]).first().copied().unwrap_or((rows[0].start, rows[0].start));
-            let lines: Vec<String> = paras(a, b).into_iter().map(|(x, y)| format!("> {}", text_of(x, y)).trim_end().to_string()).collect();
+            // Each paragraph as it would be outside (`> - item`), indented as the quote is.
+            let indent = "  ".repeat(quote_level(h, rows[0]));
+            let mut numbers = [0usize; MAX_LEVEL as usize + 1];
+            let lines: Vec<String> = paras(a, b).into_iter().map(|(x, y)| format!("{indent}> {}", para_md(h, t, x, y, inline, &mut numbers)).trim_end().to_string()).collect();
             out.push_str(&lines.join("\n"));
         }
         Block::Code => {
@@ -365,13 +374,7 @@ pub fn load_markdown(h: HWND, md: &str) {
 }
 
 fn load_markdown_now(h: HWND, md: &str) {
-    enum Kind {
-        Plain,
-        Bullet,
-        Number,
-        Task(bool),
-    }
-    let mut lines: Vec<(Kind, i32, String, Runs, Links, u16)> = Vec::new();
+    let mut lines: Vec<Line> = Vec::new();
     // Quotes, code and tables: an empty line holds each one's place until the text is in.
     let mut fills: Vec<(usize, Fill)> = Vec::new();
     let norm = md.replace("\r\n", "\n");
@@ -382,68 +385,23 @@ fn load_markdown_now(h: HWND, md: &str) {
         // Trailing spaces only ever mean a line break (`hard_breaks`), which a line is anyway.
         let raw = src[i].trim_end();
         i += 1;
-        let l = raw.trim_start();
-        if let Some((fill, used)) = block_from(l, &src[i..]) {
+        if let Some((fill, used)) = block_from(raw, &src[i..]) {
             // A blank line on either side of a block is Markdown's way to set it apart (a
             // table needs one), not an empty paragraph: blocks have their own space.
-            if lines.last().is_some_and(|(_, _, s, ..)| s.is_empty()) && fills.last().is_none_or(|(at, _)| *at != lines.len() - 1) {
+            if lines.last().is_some_and(|l| l.text.is_empty()) && fills.last().is_none_or(|(at, _)| *at != lines.len() - 1) {
                 lines.pop();
             }
             fills.push((lines.len(), fill));
-            lines.push((Kind::Plain, 0, String::new(), Vec::new(), Vec::new(), PFA_LEFT));
+            lines.push(Line::empty());
             i += used;
             if src.get(i).is_some_and(|n| n.trim().is_empty()) {
                 i += 1;
             }
             continue;
         }
-        // A centred or right-aligned line, as `to_markdown` writes one.
-        let (raw, align) = match aligned(l) {
-            Some((inner, a)) => (inner, a),
-            None => (raw, PFA_LEFT),
-        };
-        let l = raw.trim_start();
-        // Two spaces (or a tab) per nesting level, as `to_markdown` writes them.
-        let indent: usize = raw[..raw.len() - l.len()].chars().map(|c| if c == '\t' { 2 } else { 1 }).sum();
-        let hashes = l.chars().take_while(|&c| c == '#').count();
-        let (k, rest) = if let Some(r) = crate::common::store::unescaped(l) {
-            (Kind::Plain, r)
-        } else if let Some(r) = l.strip_prefix("- [ ] ").or(l.strip_prefix("[ ] ")) {
-            (Kind::Task(false), r)
-        } else if let Some(r) =
-            l.strip_prefix("- [x] ").or(l.strip_prefix("- [X] ")).or(l.strip_prefix("[x] ")).or(l.strip_prefix("[X] "))
-        {
-            (Kind::Task(true), r)
-        } else if let Some(r) = l[hashes..].strip_prefix(' ').filter(|_| (1..=6).contains(&hashes)) {
-            (Kind::Plain, r)
-        } else if let Some(r) = l.strip_prefix("- ").or(l.strip_prefix("* ")).or(l.strip_prefix("• ")) {
-            (Kind::Bullet, r)
-        } else {
-            let d = l.chars().take_while(|c| c.is_ascii_digit()).count();
-            match l[d..].strip_prefix(". ") {
-                Some(r) if d > 0 => (Kind::Number, r),
-                _ => (Kind::Plain, raw),
-            }
-        };
-        let (text, mut runs, mut links) = parse_inline(rest);
-        let mark = match k {
-            Kind::Task(true) => "\u{2611} ",
-            Kind::Task(false) => "\u{2610} ",
-            _ => "",
-        };
-        let shift = mark.encode_utf16().count() as i32;
-        for r in &mut runs {
-            r.0 += shift;
-            r.1 += shift;
-        }
-        for l in &mut links {
-            l.0 += shift;
-            l.1 += shift;
-        }
-        let level = if matches!(k, Kind::Plain) { 0 } else { (indent / 2).min(MAX_LEVEL as usize) as i32 };
-        lines.push((k, level, format!("{mark}{text}"), runs, links, align));
+        lines.push(parse_line(raw));
     }
-    let joined: Vec<&str> = lines.iter().map(|(_, _, s, _, _, _)| s.as_str()).collect();
+    let joined: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
     set_sel(h, 0, -1);
     insert_text(h, &joined.join("\r"));
     // Start clean: a reused control keeps the last document's list and character formats.
@@ -455,46 +413,13 @@ fn load_markdown_now(h: HWND, md: &str) {
     // Everything that inserts text (links' hidden instructions, blocks), by position.
     let mut later: Vec<(i32, Later)> = Vec::new();
     let mut fills = fills.into_iter().peekable();
-    for (n, (k, level, s, runs, line_links, align)) in lines.iter().enumerate() {
-        later.extend(line_links.iter().map(|(a, b, url)| (pos + a, Later::Link(pos + b, url.clone()))));
+    for (n, line) in lines.iter().enumerate() {
+        later.extend(line.links.iter().map(|(a, b, url)| (pos + a, Later::Link(pos + b, url.clone()))));
         if let Some((_, fill)) = fills.next_if(|(at, _)| *at == n) {
             later.push((pos, Later::Block(fill)));
         }
-        let len = s.encode_utf16().count() as i32;
-        set_sel(h, pos, pos);
-        match k {
-            Kind::Bullet => set_numbering(h, PFN_BULLET),
-            Kind::Number => set_numbering(h, PFN_ARABIC),
-            Kind::Task(true) => {
-                set_sel(h, pos + 1, pos + len);
-                set_effect(h, CFM_STRIKEOUT, true);
-            }
-            _ => {}
-        }
-        if *align != PFA_LEFT {
-            set_sel(h, pos, pos);
-            set_alignment(h, *align);
-        }
-        for _ in 0..*level {
-            set_sel(h, pos, pos);
-            nest(h, 1);
-        }
-        if matches!(k, Kind::Number) && *level == 0 {
-            // After a nested sublist RichEdit would restart the count: carry it on.
-            let before = siblings_before(h, &text(h), pos, 0);
-            if before > 0 {
-                set_sel(h, pos, pos);
-                let mut pf = ParaFormat2::new();
-                pf.mask = PFM_NUMBERINGSTART;
-                pf.numbering_start = 1 + before as u16;
-                send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
-            }
-        }
-        for &(a, b, effect) in runs {
-            set_sel(h, pos + a, pos + b);
-            set_effect(h, effect, true);
-        }
-        pos += len + 1;
+        format_line(h, pos, line);
+        pos += line.text.encode_utf16().count() as i32 + 1;
     }
     // Each adds text: from the end, so the rest stay put.
     later.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
@@ -509,12 +434,128 @@ fn load_markdown_now(h: HWND, md: &str) {
     set_sel(h, 0, 0);
 }
 
+/// What a Markdown line makes of its paragraph.
+enum Kind {
+    Plain,
+    Bullet,
+    Number,
+    Task(bool),
+}
+
+/// A paragraph read from a Markdown line: its kind and nesting level, its text (with a
+/// checklist item's box), marks, links and alignment.
+struct Line {
+    kind: Kind,
+    level: i32,
+    text: String,
+    runs: Runs,
+    links: Links,
+    align: u16,
+}
+
+impl Line {
+    fn empty() -> Line {
+        Line { kind: Kind::Plain, level: 0, text: String::new(), runs: Vec::new(), links: Vec::new(), align: PFA_LEFT }
+    }
+}
+
+/// One Markdown line, outside any block, as a paragraph.
+fn parse_line(raw: &str) -> Line {
+    let l = raw.trim_start();
+    // A centred or right-aligned line, as `to_markdown` writes one.
+    let (raw, align) = match aligned(l) {
+        Some((inner, a)) => (inner, a),
+        None => (raw, PFA_LEFT),
+    };
+    let l = raw.trim_start();
+    // Two spaces (or a tab) per nesting level, as `to_markdown` writes them.
+    let indent: usize = raw[..raw.len() - l.len()].chars().map(|c| if c == '\t' { 2 } else { 1 }).sum();
+    let hashes = l.chars().take_while(|&c| c == '#').count();
+    let (k, rest) = if let Some(r) = crate::common::store::unescaped(l) {
+        (Kind::Plain, r)
+    } else if let Some(r) = l.strip_prefix("- [ ] ").or(l.strip_prefix("[ ] ")) {
+        (Kind::Task(false), r)
+    } else if let Some(r) =
+        l.strip_prefix("- [x] ").or(l.strip_prefix("- [X] ")).or(l.strip_prefix("[x] ")).or(l.strip_prefix("[X] "))
+    {
+        (Kind::Task(true), r)
+    } else if let Some(r) = l[hashes..].strip_prefix(' ').filter(|_| (1..=6).contains(&hashes)) {
+        (Kind::Plain, r)
+    } else if let Some(r) = l.strip_prefix("- ").or(l.strip_prefix("* ")).or(l.strip_prefix("• ")) {
+        (Kind::Bullet, r)
+    } else {
+        let d = l.chars().take_while(|c| c.is_ascii_digit()).count();
+        match l[d..].strip_prefix(". ") {
+            Some(r) if d > 0 => (Kind::Number, r),
+            _ => (Kind::Plain, raw),
+        }
+    };
+    let (text, mut runs, mut links) = parse_inline(rest);
+    let mark = match k {
+        Kind::Task(true) => "\u{2611} ",
+        Kind::Task(false) => "\u{2610} ",
+        _ => "",
+    };
+    let shift = mark.encode_utf16().count() as i32;
+    for r in &mut runs {
+        r.0 += shift;
+        r.1 += shift;
+    }
+    for l in &mut links {
+        l.0 += shift;
+        l.1 += shift;
+    }
+    let level = if matches!(k, Kind::Plain) { 0 } else { (indent / 2).min(MAX_LEVEL as usize) as i32 };
+    Line { kind: k, level, text: format!("{mark}{text}"), runs, links, align }
+}
+
+/// Give the paragraph at `pos`, its text already in, the format `line` describes. Its
+/// links are the caller's to make: they insert text.
+fn format_line(h: HWND, pos: i32, line: &Line) {
+    let (k, level, align, runs) = (&line.kind, &line.level, &line.align, &line.runs);
+    let len = line.text.encode_utf16().count() as i32;
+    set_sel(h, pos, pos);
+    match k {
+        Kind::Bullet => set_numbering(h, PFN_BULLET),
+        Kind::Number => set_numbering(h, PFN_ARABIC),
+        Kind::Task(true) => {
+            set_sel(h, pos + 1, pos + len);
+            set_effect(h, CFM_STRIKEOUT, true);
+        }
+        _ => {}
+    }
+    if *align != PFA_LEFT {
+        set_sel(h, pos, pos);
+        set_alignment(h, *align);
+    }
+    for _ in 0..*level {
+        set_sel(h, pos, pos);
+        nest(h, 1);
+    }
+    if matches!(k, Kind::Number) {
+        // After a nested sublist RichEdit would restart the count: carry it on.
+        let before = siblings_before(h, &text(h), pos, *level);
+        if before > 0 {
+            set_sel(h, pos, pos);
+            let mut pf = ParaFormat2::new();
+            pf.mask = PFM_NUMBERINGSTART;
+            pf.numbering_start = 1 + before as u16;
+            send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+        }
+    }
+    for &(a, b, effect) in runs {
+        set_sel(h, pos + a, pos + b);
+        set_effect(h, effect, true);
+    }
+}
+
 /// A paragraph's text with its inline marks and links taken out: (text, runs, links).
 type Inline = (String, Runs, Links);
 
 /// A block's content, read from Markdown.
 enum Fill {
-    Quote(Vec<Inline>),
+    /// How far it's indented under a list item, and its paragraphs.
+    Quote(usize, Vec<Line>),
     Code(Vec<String>),
     /// Rows of cells (each cell's paragraphs), and each column's alignment.
     Table(Vec<Vec<Vec<Inline>>>, Vec<u16>),
@@ -570,28 +611,32 @@ fn aligned(l: &str) -> Option<(&str, u16)> {
 
 /// A block starting at line `l`, with the lines after it in `next`: what it holds, and
 /// how many of `next` it takes.
-fn block_from(l: &str, next: &[&str]) -> Option<(Fill, usize)> {
+fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
+    let l = raw.trim_start();
     // ``` code, to the closing fence (or the end).
     if l.starts_with("```") {
         let body: Vec<String> = next.iter().take_while(|n| !n.trim().starts_with("```")).map(|n| n.trim_end().to_string()).collect();
         let used = (body.len() + 1).min(next.len());
         return Some((Fill::Code(body), used));
     }
-    // > quote lines, together.
+    // > quote lines, together, each a paragraph of its own kind (`> - item`); indented
+    // two spaces a level, a quote under a list item.
     let quoted = |s: &str| {
-        let t = s.trim();
-        t.strip_prefix("> ").or(t.strip_prefix('>')).map(|r| r.to_string())
+        let t = s.trim_end();
+        let q = t.trim_start();
+        let lead = t.len() - q.len();
+        q.strip_prefix("> ").or(q.strip_prefix('>')).map(|r| (lead, r.to_string()))
     };
-    if let Some(first) = quoted(l) {
-        let mut paras = vec![parse_inline(&first)];
+    if let Some((lead, first)) = quoted(raw) {
+        let mut paras = vec![parse_line(&first)];
         for n in next {
             match quoted(n) {
-                Some(q) => paras.push(parse_inline(&q)),
+                Some((_, q)) => paras.push(parse_line(&q)),
                 None => break,
             }
         }
         let used = paras.len() - 1;
-        return Some((Fill::Quote(paras), used));
+        return Some((Fill::Quote(lead / 2, paras), used));
     }
     // | a | b | with a | --- | --- | line under it.
     if l.starts_with('|') {
@@ -659,7 +704,7 @@ fn separator(l: &str) -> Option<Vec<u16>> {
 /// Build `fill` in place of the empty paragraph at `at`.
 fn put_block(h: HWND, at: i32, fill: &Fill) {
     let (kind, rows, cols) = match fill {
-        Fill::Quote(_) => (Block::Quote, 1, 1),
+        Fill::Quote(..) => (Block::Quote, 1, 1),
         Fill::Code(_) => (Block::Code, 1, 1),
         Fill::Table(r, a) => (Block::Table, r.len().max(1), a.len().max(1)),
     };
@@ -670,11 +715,16 @@ fn put_block(h: HWND, at: i32, fill: &Fill) {
     insert_block_over(h, at, over, kind, rows, cols);
     let t = text(h);
     let Some((_, rs)) = block_at(h, &t, at) else { return };
+    if let Fill::Quote(level, _) = fill
+        && *level > 0
+    {
+        set_quote_level(h, rs[0], *level);
+    }
     let all: Vec<(usize, usize)> = rs.iter().flat_map(|r| cells(&t, *r)).collect();
     // From the last cell up, so the ones before stay put.
     for (n, &(a, _)) in all.iter().enumerate().rev() {
         match fill {
-            Fill::Quote(paras) => fill_cell(h, a as i32, paras, PFA_LEFT),
+            Fill::Quote(_, lines) => fill_quote(h, a as i32, lines),
             Fill::Code(lines) => {
                 set_sel(h, a as i32, a as i32);
                 insert_text(h, &lines.join("\r"));
@@ -688,6 +738,23 @@ fn put_block(h: HWND, at: i32, fill: &Fill) {
         }
     }
     style_blocks(h);
+}
+
+/// A quote's paragraphs into its (empty) cell at `at`: lists, checklists and all.
+fn fill_quote(h: HWND, at: i32, lines: &[Line]) {
+    let joined: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+    set_sel(h, at, at);
+    insert_text(h, &joined.join("\r"));
+    let mut pos = at;
+    let mut links = Vec::new();
+    for line in lines {
+        format_line(h, pos, line);
+        links.extend(line.links.iter().map(|(a, b, url)| (pos + a, pos + b, url.clone())));
+        pos += line.text.encode_utf16().count() as i32 + 1;
+    }
+    for (a, b, url) in links.iter().rev() {
+        set_link(h, *a, *b, url);
+    }
 }
 
 /// Paragraphs into the (empty) cell at `at`, with their marks and links.

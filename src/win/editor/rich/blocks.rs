@@ -240,13 +240,14 @@ fn fit_widths(old: &[i32], total: i32) -> Vec<i32> {
 }
 
 /// Give every block in `h` its look for the current colours and width: borders, shading,
-/// the code face, and cells that fill the text column. Cheap when nothing changed.
+/// the code face, and cells that fill the text column. Cheap when nothing changed, and
+/// never a step for Undo (a note made narrower would otherwise take Ctrl+Z first).
 pub fn style_blocks(h: HWND) {
     let t = text(h);
     if !t.contains(&ROW_START) {
         return;
     }
-    still(h, || style_blocks_now(h, &t));
+    still(h, || unrecorded(h, || style_blocks_now(h, &t)));
 }
 
 fn style_blocks_now(h: HWND, t: &[u16]) {
@@ -257,8 +258,9 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
     for (kind, rows) in blocks(h, t) {
         for (i, &row) in rows.iter().enumerate() {
             let Some((r, old)) = get(h, row) else { continue };
-            // The cells' padding reaches out past their edges: keep the right border in view.
-            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), total - 2 * r.margin);
+            // The cells' padding reaches out past their edges: keep the right border in view
+            // (and an indented quote's start further in).
+            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), (total - 2 * r.margin - r.indent).max(720));
             let cells: Vec<CellParms> = widths
                 .iter()
                 .map(|&w| match kind {
@@ -418,11 +420,13 @@ pub fn wrap(h: HWND, a: i32, b: i32, kind: Block) {
     let end = if t.get((src + len) as usize) == Some(&CR) { src + len + 1 } else { src + len };
     set_sel(h, src, end);
     replace_sel(h, "");
-    // A wrapped list item is just text in the block.
-    set_sel(h, cell, cell + len);
-    let mut pf = ParaFormat2::new();
-    pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET;
-    send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+    // In code a list item is just text; a quote keeps its lists and checklists.
+    if kind == Block::Code {
+        set_sel(h, cell, cell + len);
+        let mut pf = ParaFormat2::new();
+        pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET;
+        send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+    }
     style_blocks(h);
     // The line left below the block, when there's nothing on it, is plain text (it was a
     // list item when one was wrapped).
@@ -469,6 +473,21 @@ pub fn unwrap(h: HWND, cp: i32) -> Option<(i32, i32)> {
     let start = row.start as i32;
     set_sel(h, start, start);
     Some((start, start + len))
+}
+
+/// How far the quote `row` is indented under a list item, in levels (0: at the margin).
+pub fn quote_level(h: HWND, row: Row) -> usize {
+    get(h, row).map_or(0, |(r, _)| if r.indent <= 0 { 0 } else { 1 + ((r.indent - BULLET_TEXT) as f32 / LEVEL as f32).round().max(0.0) as usize })
+}
+
+/// Indent the quote `row` to `level`: level 1 lines its bar up under a list item's text,
+/// each level after that a nesting step further.
+pub fn set_quote_level(h: HWND, row: Row, level: usize) {
+    let Some((mut r, cells)) = get(h, row) else { return };
+    let level = level.min(MAX_LEVEL as usize);
+    r.indent = if level == 0 { 0 } else { BULLET_TEXT + (level as i32 - 1) * LEVEL };
+    set(h, row, &r, &cells);
+    style_blocks(h);
 }
 
 // ---------------------------------------------------------------- tables
@@ -729,5 +748,96 @@ mod tests {
         let h2 = editor();
         set_rtf(h2, &get_rtf(h));
         assert_eq!(to_markdown(h2, true), format!("# {md}"), "after storing:\n{}", get_rtf(h));
+    }
+
+    #[test]
+    fn quotes_hold_lists_and_sit_under_items() {
+        let h = editor();
+        let md = "T\n> quoted **bold**\n> - bullet\n>   - nested\n> - [ ] task\n> - [x] done\n> 1. one\n> 2. two\n> <p align=\"center\">centred</p>\nafter\n- item\n  > under the item\n  > second line\nend";
+        load_markdown(h, md);
+        assert_eq!(shape(h), vec![(Block::Quote, 1, 1), (Block::Quote, 1, 1)]);
+        let t = text(h);
+        let q = blocks(h, &t);
+        assert_eq!((quote_level(h, q[0].1[0]), quote_level(h, q[1].1[0])), (0, 1));
+        assert_eq!(to_markdown(h, true), format!("# {md}"));
+        // Stored and opened again: the same.
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        assert_eq!(to_markdown(h2, true), format!("# {md}"));
+        // The light text keeps the markers previews draw.
+        let light = to_markdown(h, false);
+        assert!(light.contains("> - bullet\n>   - nested\n> [ ] task\n> [x] done\n> 1. one"), "{light}");
+        assert!(light.contains("- item\n  > under the item"), "{light}");
+    }
+
+    #[test]
+    fn resizing_is_not_an_undo_step() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;
+        const EM_UNDO: u32 = 0x00C7;
+        let h = editor();
+        load_markdown(h, "T\n> quote\n| a | b |\n| --- | --- |\n| 1 | 2 |\nend");
+        send(h, EM_EMPTYUNDOBUFFER, 0, 0);
+        let end = text(h).len() as i32;
+        set_sel(h, end, end);
+        replace_sel(h, " typed");
+        // The note is made narrower: its blocks are refitted.
+        unsafe { MoveWindow(h, 0, 0, 250, 300, 0) };
+        style_blocks(h);
+        // Ctrl+Z takes back the typing, not the refit.
+        assert_eq!(send(h, EM_UNDO, 0, 0), 1);
+        assert!(!String::from_utf16_lossy(&text(h)).contains("typed"));
+    }
+
+    /// Notes written every way the editor can hold them: each must come back the same from
+    /// the editor, from the RTF a note is stored as, and from a file exported and imported.
+    #[test]
+    fn every_combination_round_trips() {
+        let cases = [
+            // Each block at the start (under the title), alone, and at the end.
+            "T\n> q",
+            "T\n```\ncode\n```",
+            "T\n| a | b |\n| --- | --- |\n| 1 | 2 |",
+            "T\nbefore\n> q",
+            // Every pair of blocks, back to back.
+            "T\n> q\n```\nc\n```",
+            "T\n```\nc\n```\n> q",
+            "T\n> q\n| a |\n| --- |\n| 1 |",
+            "T\n| a |\n| --- |\n| 1 |\n> q",
+            "T\n```\nc\n```\n| a |\n| --- |\n| 1 |",
+            "T\n| a |\n| --- |\n| 1 |\n```\nc\n```",
+            "T\n> one\ntext\n> two",
+            // Marks and links inside a quote and a table.
+            "T\n> **bold** _italic_ <u>under</u> ~~strike~~ and a [link](https://example.com)",
+            "T\n| **b** | _i_ | [l](https://example.com) |\n| --- | :---: | ---: |\n| <u>u</u> | ~~s~~ | x\\|y |",
+            "T\n| one<br>two | three |\n| --- | --- |\n| 1 | 2 |",
+            // Markdown's own characters are only text in code.
+            "T\n```\n- not a list\n> not a quote\n| not | a table |\n**not bold** _x_ [x](y)\n    indented\n```",
+            // Lists inside a quote, and quotes under list items.
+            "T\n> - a\n>   - b\n>     - c\n> 1. one\n> 2. two\n> - [ ] task\n> - [x] done",
+            "T\n- item\n  > under it\n- next\n  - nested\n    > under that",
+            "T\n1. first\n  > quoted\n2. second",
+            // Alignment, inside and outside blocks.
+            "T\n<p align=\"center\">c</p>\n<p align=\"right\">r</p>\n> <p align=\"center\">in a quote</p>",
+            // Lists and checklists around blocks.
+            "T\n- a\n- b\n> q\n- c\n- [ ] d",
+            // Text that only looks like syntax stays text.
+            "T\n\\> not a quote\n\\```",
+        ];
+        for md in cases {
+            let want = format!("# {md}");
+            let h = editor();
+            load_markdown(h, md);
+            assert_eq!(to_markdown(h, true), want, "editor: {md}");
+            let h2 = editor();
+            set_rtf(h2, &get_rtf(h));
+            assert_eq!(to_markdown(h2, true), want, "stored: {md}");
+            let exported = crate::common::store::hard_breaks(&to_markdown(h, true));
+            let h3 = editor();
+            load_markdown(h3, exported.strip_prefix("# ").unwrap());
+            assert_eq!(to_markdown(h3, true), want, "exported as:\n{exported}");
+            // Light text: titles and previews read it.
+            let light = to_markdown(h, false);
+            assert_eq!(crate::common::store::title_of(&light), "T", "title: {light}");
+        }
     }
 }

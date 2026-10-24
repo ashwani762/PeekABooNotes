@@ -249,13 +249,19 @@ fn block_at<'a>(lines: &'a [&'a str], i: usize) -> Option<(Block<'a>, usize)> {
 /// past the bottom (drawn down to there).
 fn quote(c: Option<&mut Canvas>, p: &Pass, lines: &[&str], y: i32) -> Option<i32> {
     let bar = (2.5 * p.s).max(2.0);
-    let tx = p.r.left + (bar + 12.0 * p.s).round() as i32;
+    // Indented two spaces a level, a quote sits under a list item: so does its bar.
+    let first = lines.first().copied().unwrap_or("");
+    let level = ((first.len() - first.trim_start().len()) / 2) as i32;
+    let left = p.r.left + level * (16.0 * p.s) as i32;
+    let tx = left + (bar + 12.0 * p.s).round() as i32;
     let w = (p.r.right - tx).max(1);
-    let paras: Vec<(&str, i32)> = lines
+    // Its lines can be list items and checklist items: shown with their marks.
+    let paras: Vec<(String, i32)> = lines
         .iter()
         .map(|l| {
-            let t = store::quoted(l).unwrap_or("");
-            (t, p.f.wrapped_height(t, w).max(p.line_h))
+            let t = store::pretty_line(store::quoted(l).unwrap_or(""));
+            let h = p.f.wrapped_height(&t, w).max(p.line_h);
+            (t, h)
         })
         .collect();
     let h: i32 = paras.iter().map(|q| q.1).sum();
@@ -265,7 +271,7 @@ fn quote(c: Option<&mut Canvas>, p: &Pass, lines: &[&str], y: i32) -> Option<i32
     let inset = 2.0 * p.s;
     let (b0, b1) = (y as f32 + inset, ((y + h) as f32 - inset).min(bottom as f32));
     if b1 > b0 {
-        c.rrect(p.r.left as f32, b0, bar, b1 - b0, bar / 2.0, p.text, 0.55 * p.alpha);
+        c.rrect(left as f32, b0, bar, b1 - b0, bar / 2.0, p.text, 0.55 * p.alpha);
     }
     let mut ty = y;
     for (t, th) in paras {
@@ -274,10 +280,10 @@ fn quote(c: Option<&mut Canvas>, p: &Pass, lines: &[&str], y: i32) -> Option<i32
             return None;
         }
         if th > room {
-            c.text_above(t, p.f, rect(tx, ty, w, room), bottom, p.text, p.alpha, DT_LEFT | DT_WORDBREAK);
+            c.text_above(&t, p.f, rect(tx, ty, w, room), bottom, p.text, p.alpha, DT_LEFT | DT_WORDBREAK);
             return None;
         }
-        c.text(t, p.f, rect(tx, ty, w, th), p.text, p.alpha, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+        c.text(&t, p.f, rect(tx, ty, w, th), p.text, p.alpha, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
         ty += th;
     }
     Some(h)

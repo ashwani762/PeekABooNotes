@@ -125,6 +125,14 @@ pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> usize 
     let mut p = ps;
     while p > 0 {
         p = para_start(t, p - 1);
+        // A quote under an item belongs to it: the count goes on past it.
+        if t.get(p as usize) == Some(&ROW_END)
+            && let Some((Block::Quote, rows)) = block_at(h, t, p)
+            && quote_level(h, rows[0]) > 0
+        {
+            p = rows[0].start as i32;
+            continue;
+        }
         set_sel(h, p, p);
         let mut pf = ParaFormat2::new();
         send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);

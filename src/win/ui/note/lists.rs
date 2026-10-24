@@ -233,8 +233,9 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
 }
 
 /// Tab in a quote or code block: code indents by four spaces (Shift+Tab takes up to four
-/// back); a quote ignores it (RichEdit would give it a second row). False elsewhere: in a
-/// table Tab moves between cells.
+/// back); a quote steps in under a list item (Shift+Tab back out), unless the caret is on
+/// a list item inside it, which nests as anywhere. False when it's not ours: in a table
+/// Tab moves between cells.
 pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
     let (a, b) = rich::sel(e);
     let t = rich::text(e);
@@ -253,7 +254,17 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
             }
             true
         }
-        Some((rich::Block::Quote, ..)) => true,
+        Some((rich::Block::Quote, rows, ..)) => {
+            if rich::list_level(e).is_some() {
+                return false;
+            }
+            let level = rich::quote_level(e, rows[0]);
+            let next = if shift { level.saturating_sub(1) } else { level + 1 };
+            if next != level {
+                rich::still(e, || rich::set_quote_level(e, rows[0], next));
+            }
+            true
+        }
         _ => false,
     }
 }

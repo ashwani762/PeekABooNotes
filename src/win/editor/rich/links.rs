@@ -118,6 +118,21 @@ pub fn undo_group(h: HWND) -> bool {
     true
 }
 
+/// Run `f`, which only changes how things look (no text moves), outside the undo history:
+/// Ctrl+Z steps over it to the last thing the user did.
+pub fn unrecorded<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
+    let d = doc(h);
+    if let Some(d) = &d {
+        let _ = unsafe { d.Undo(tomSuspend.0) };
+    }
+    let r = f();
+    if let Some(d) = &d {
+        let _ = unsafe { d.Undo(tomResume.0) };
+    }
+    r
+}
+
 /// The font size (points) of the character at `cp`, without touching the selection.
 pub fn size_at(h: HWND, cp: i32) -> Option<f32> {
     range(h, cp, cp + 1).and_then(|r| unsafe { r.GetFont().ok()?.GetSize().ok() })
