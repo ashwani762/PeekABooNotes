@@ -217,7 +217,7 @@ pub fn fix_caret_indent(h: HWND) {
     let base = list_base(true);
     if pf.numbering == 0 && pf.offset == mark_w() && pf.start_indent >= base && (pf.start_indent - base) % LEVEL == 0 {
         pf = ParaFormat2::new();
-        pf.mask = PFM_STARTINDENT | PFM_OFFSET;
+        pf.mask = PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING;
         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     }
 }

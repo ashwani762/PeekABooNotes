@@ -45,9 +45,23 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
     }
     // Inline mode is for export: plain `-` lists in the light mode are what we store.
     if !inline {
-        out = out.replace("- [ ] ", "[ ] ").replace("- [x] ", "[x] ");
+        out = out.lines().map(light_task).collect::<Vec<_>>().join("\n");
     }
     out.trim_end().to_string()
+}
+
+/// A task line without the `- `, past any indent and quote marks.
+fn light_task(l: &str) -> String {
+    let i = l.find(|c: char| c != ' ' && c != '>').unwrap_or(l.len());
+    let (lead, rest) = l.split_at(i);
+    for (from, to) in [("- [ ]", "[ ]"), ("- [x]", "[x]")] {
+        if let Some(r) = rest.strip_prefix(from)
+            && (r.is_empty() || r.starts_with(' '))
+        {
+            return format!("{lead}{to}{r}");
+        }
+    }
+    l.to_string()
 }
 
 /// The paragraph `t[start..end]` as one line of Markdown (`inline`: with marks and links;
@@ -459,6 +473,12 @@ impl Line {
     }
 }
 
+/// The text after a task marker (`- [ ] `, `[x] `), or "" for an item with none.
+fn task_rest(l: &str, done: bool) -> Option<&str> {
+    let marks: &[&str] = if done { &["- [x]", "- [X]", "[x]", "[X]"] } else { &["- [ ]", "[ ]"] };
+    marks.iter().find_map(|m| l.strip_prefix(m).and_then(|r| r.strip_prefix(' ').or(r.is_empty().then_some(""))))
+}
+
 /// One Markdown line, outside any block, as a paragraph.
 fn parse_line(raw: &str) -> Line {
     let l = raw.trim_start();
@@ -473,11 +493,9 @@ fn parse_line(raw: &str) -> Line {
     let hashes = l.chars().take_while(|&c| c == '#').count();
     let (k, rest) = if let Some(r) = crate::common::store::unescaped(l) {
         (Kind::Plain, r)
-    } else if let Some(r) = l.strip_prefix("- [ ] ").or(l.strip_prefix("[ ] ")) {
+    } else if let Some(r) = task_rest(l, false) {
         (Kind::Task(false), r)
-    } else if let Some(r) =
-        l.strip_prefix("- [x] ").or(l.strip_prefix("- [X] ")).or(l.strip_prefix("[x] ")).or(l.strip_prefix("[X] "))
-    {
+    } else if let Some(r) = task_rest(l, true) {
         (Kind::Task(true), r)
     } else if let Some(r) = l[hashes..].strip_prefix(' ').filter(|_| (1..=6).contains(&hashes)) {
         (Kind::Plain, r)
@@ -624,7 +642,17 @@ fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
     let quoted = |s: &str| {
         let t = s.trim_end();
         let q = t.trim_start();
-        let lead = t.len() - q.len();
+        let mut lead = t.len() - q.len();
+        // `- > text`, a quote as a list item: under the item before it.
+        let d = q.chars().take_while(char::is_ascii_digit).count();
+        let item = q.strip_prefix("- ").or(q.strip_prefix("* ")).or((d > 0).then(|| q[d..].strip_prefix(". ")).flatten());
+        let q = match item {
+            Some(r) if r.starts_with('>') => {
+                lead += 2;
+                r
+            }
+            _ => q,
+        };
         q.strip_prefix("> ").or(q.strip_prefix('>')).map(|r| (lead, r.to_string()))
     };
     if let Some((lead, first)) = quoted(raw) {

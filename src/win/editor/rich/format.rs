@@ -6,6 +6,22 @@
 use super::*;
 
 /// Apply face, size and text colour to everything (and to newly typed text).
+/// Every paragraph's reading rhythm: line spacing in 1/20ths of a line (1.2 lines), and
+/// the space after it in twips.
+pub(super) const LINE_MULT: i32 = 24;
+pub(super) const PARA_AFTER: i32 = 50;
+
+/// Give the paragraphs from `a` to `b` (-1: the end) the rhythm.
+pub(super) fn base_spacing(h: HWND, a: i32, b: i32) {
+    set_sel(h, a, b);
+    let mut pf = ParaFormat2::new();
+    pf.mask = PFM_LINESPACING | PFM_SPACEAFTER;
+    pf.line_spacing_rule = 5; // multiple of single, in 1/20ths
+    pf.line_spacing = LINE_MULT;
+    pf.space_after = PARA_AFTER;
+    send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+}
+
 pub fn apply_base_format(h: HWND, text_rgb: u32, bg_rgb: u32) {
     bulk(h, || base_format_now(h, text_rgb, bg_rgb));
 }
@@ -27,13 +43,7 @@ fn base_format_now(h: HWND, text_rgb: u32, bg_rgb: u32) {
     // Comfortable reading rhythm for every paragraph, without moving the caret.
     let (a, b) = sel(h);
     send(h, EM_HIDESELECTION, 1, 0);
-    set_sel(h, 0, -1);
-    let mut pf = ParaFormat2::new();
-    pf.mask = PFM_LINESPACING | PFM_SPACEAFTER;
-    pf.line_spacing_rule = 5; // multiple of single, in 1/20ths
-    pf.line_spacing = 24;
-    pf.space_after = 50;
-    send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+    base_spacing(h, 0, -1);
     normalize_lists(h);
     fit_pictures(h);
     // The body font just went over everything, file chips' paperclips included.
@@ -49,6 +59,8 @@ thread_local! {
     static TYPE: std::cell::Cell<(u8, u8)> = const { std::cell::Cell::new((0, 1)) };
     /// Width of a checklist marker (box glyph + space) in twips, for the current type.
     static MARK_W: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+    /// A body line's height in twips, for a DPI: (dpi, twips).
+    static LINE_H: std::cell::Cell<Option<(i32, i32)>> = const { std::cell::Cell::new(None) };
 }
 
 /// Choose the notes' typeface (0 system, 1 serif, 2 mono, 3 handwriting) and size
@@ -56,6 +68,7 @@ thread_local! {
 pub fn set_typography(font: u8, size: u8) {
     TYPE.with(|t| t.set((font.min(3), size.min(2))));
     MARK_W.with(|m| m.set(None));
+    LINE_H.with(|m| m.set(None));
 }
 
 /// Body size in twips.
@@ -113,6 +126,37 @@ pub(super) fn mark_w() -> i32 {
     let w = (glyph + space) * 15; // px at 96 dpi -> twips
     MARK_W.with(|m| m.set(Some(w)));
     w
+}
+
+/// A body line in twips at `dpi`: the GDI height RichEdit lays lines out with, times
+/// the reading rhythm `apply_base_format` gives every paragraph.
+pub(super) fn body_line_h(dpi: i32) -> i32 {
+    use windows_sys::Win32::Graphics::Gdi::{CreateFontIndirectW, DeleteObject, GetDC, GetTextMetricsW, LOGFONTW, ReleaseDC, SelectObject, TEXTMETRICW};
+    if let Some((d, h)) = LINE_H.with(|m| m.get())
+        && d == dpi
+    {
+        return h;
+    }
+    let h = unsafe {
+        let dc = GetDC(std::ptr::null_mut());
+        let mut lf: LOGFONTW = std::mem::zeroed();
+        lf.lfHeight = -(body_size() * dpi / 1440);
+        lf.lfWeight = 400;
+        lf.lfCharSet = 1; // DEFAULT_CHARSET
+        for (i, c) in body_face().encode_utf16().take(31).enumerate() {
+            lf.lfFaceName[i] = c;
+        }
+        let font = CreateFontIndirectW(&lf);
+        let old = SelectObject(dc, font);
+        let mut tm: TEXTMETRICW = std::mem::zeroed();
+        GetTextMetricsW(dc, &mut tm);
+        SelectObject(dc, old);
+        DeleteObject(font);
+        ReleaseDC(std::ptr::null_mut(), dc);
+        (tm.tmHeight + tm.tmExternalLeading) * 1440 / dpi * LINE_MULT / 20
+    };
+    LINE_H.with(|m| m.set(Some((dpi, h))));
+    h
 }
 
 pub(super) fn set_face(cf: &mut CharFormat2, face: &str) {
@@ -206,9 +250,14 @@ fn style_boxes_now(h: HWND) {
     // A hanging indent puts the text in the same column as bullets and numbers (and
     // wrapped lines under it), leaving room on the left for the circle.
     let mut indent = ParaFormat2::new();
-    indent.mask = PFM_STARTINDENT | PFM_OFFSET;
+    indent.mask = PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING;
     indent.offset = mark_w();
     indent.start_indent = (LIST_TEXT - indent.offset).max(0);
+    // A body line tall: an item that is only its box would be sized from the small glyph
+    // (a trailing space, or a quote's end mark, doesn't count), and its circle is
+    // body-sized.
+    indent.line_spacing_rule = 3;
+    indent.line_spacing = body_line_h(unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) } as i32);
     set_face(&mut boxf, "Segoe UI Symbol");
     for (i, &c) in t.iter().enumerate() {
         if !is_task(c) || (i > 0 && t[i - 1] != CR) {

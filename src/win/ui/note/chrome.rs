@@ -14,10 +14,7 @@ pub(super) fn buttons(cw: i32, s: f32) -> [(Btn, RECT); 6] {
     let top = (header_h(s) - bh) / 2;
     let right = cw - (6.0 * s) as i32;
     let at = |i: i32| rect(right - bw * (i + 1), top, bw, bh);
-    // What to do with the note sits apart from the window's own controls.
-    let gap = (8.0 * s) as i32;
-    let apart = |i: i32| rect(right - bw * (i + 1) - gap, top, bw, bh);
-    [(Btn::Close, at(0)), (Btn::More, at(1)), (Btn::Color, at(2)), (Btn::Pin, at(3)), (Btn::Delete, apart(4)), (Btn::Done, apart(5))]
+    [(Btn::Close, at(0)), (Btn::More, at(1)), (Btn::Color, at(2)), (Btn::Pin, at(3)), (Btn::Delete, at(4)), (Btn::Done, at(5))]
 }
 
 /// Show (or move along) the tooltip for header button `b`; `Btn::None` lets it go.

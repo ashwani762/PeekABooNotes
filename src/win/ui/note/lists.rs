@@ -114,11 +114,22 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
     }
     let prefix = String::from_utf16_lossy(&t[ps as usize..a as usize]);
     if prefix == ">" && ps > 0 && rich::cell_at(e, &t, a).is_none() {
+        // On a list item the quote takes the item's place, under the item above it, as
+        // deep as the item was.
+        let item = rich::list_level(e);
         rich::still(e, || {
             rich::set_sel(e, ps, a);
             rich::replace_sel(e, "");
+            if item.is_some() {
+                rich::set_numbering(e, 0);
+            }
             let t = rich::text(e);
             rich::wrap(e, ps, rich::para_end(&t, ps), rich::Block::Quote);
+            if let Some(level) = item
+                && let Some((_, rows)) = rich::block_at(e, &rich::text(e), ps)
+            {
+                rich::set_quote_level(e, rows[0], level as usize + 1);
+            }
         });
         mark_dirty(h);
         return true;
@@ -497,6 +508,19 @@ mod tests {
         rich::wrap(h, rich::para_start(&t, a), rich::para_end(&t, a), Block::Quote);
         // Right after the line above: no empty paragraph between.
         assert_eq!(plain(h), "Title/line one/[/q1|]/after/[/^|]/");
+    }
+
+    #[test]
+    fn quote_typed_on_a_nested_item() {
+        // "> " on a new item under "bravo": a quote under bravo, not a bullet in a quote.
+        let h = editor("");
+        rich::load_markdown(h, "T\n- alpha\n  - bravo\n  - x");
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end - 1, end);
+        rich::replace_sel(h, ">");
+        assert!(try_auto_list(null_mut(), h));
+        rich::replace_sel(h, "q");
+        assert_eq!(rich::to_markdown(h, true), "# T\n- alpha\n  - bravo\n    > q");
     }
 
     #[test]

@@ -33,7 +33,7 @@ fn crc32(data: &[u8]) -> u32 {
 /// MS-DOS time and date (two-second steps): local wall-clock time, as zip tools show it.
 fn dos_time(t: &LocalTime) -> (u16, u16) {
     let year = t.year.clamp(1980, 2107) as u32;
-    ((t.hour << 11 | t.minute << 5 | t.second / 2) as u16, ((year - 1980) << 9 | t.month << 5 | t.day) as u16)
+    ((t.hour << 11 | t.minute << 5 | (t.second / 2)) as u16, ((year - 1980) << 9 | t.month << 5 | t.day) as u16)
 }
 
 /// A file's modified time, local.

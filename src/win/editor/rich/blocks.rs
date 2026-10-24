@@ -247,7 +247,12 @@ pub fn style_blocks(h: HWND) {
     if !t.contains(&ROW_START) {
         return;
     }
+    // Nor a change to the note: RichEdit reports refitting a table as one, which would
+    // have every note with a table saved (and "edited") whenever it opened or was resized.
+    let mask = send(h, EM_GETEVENTMASK, 0, 0);
+    send(h, EM_SETEVENTMASK, 0, 0);
     still(h, || unrecorded(h, || style_blocks_now(h, &t)));
+    send(h, EM_SETEVENTMASK, 0, mask);
 }
 
 fn style_blocks_now(h: HWND, t: &[u16]) {
@@ -364,7 +369,7 @@ fn skeleton(kind: Block, rows: usize, cols: usize, total: i32) -> String {
         out.push_str(&def);
         out.push(' ');
         for _ in 0..cols {
-            out.push_str("\\pard\\intbl\\cell ");
+            out.push_str(&format!("\\pard\\intbl\\sl{}\\slmult1\\sa{}\\cell ", LINE_MULT * 12, PARA_AFTER));
         }
         out.push_str("\\row ");
     }
@@ -424,7 +429,7 @@ pub fn wrap(h: HWND, a: i32, b: i32, kind: Block) {
     if kind == Block::Code {
         set_sel(h, cell, cell + len);
         let mut pf = ParaFormat2::new();
-        pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET;
+        pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING;
         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     }
     style_blocks(h);
@@ -509,6 +514,9 @@ pub fn insert_row(h: HWND, cp: i32, below: bool) {
     rp.cells = cells.len() as u8;
     set_sel(h, at, at);
     send(h, EM_INSERTTABLE, &rp as *const _ as usize, cells.as_ptr() as isize);
+    if let Some(r) = self::rows(&text(h)).into_iter().find(|r| r.start == at as usize) {
+        base_spacing(h, r.start as i32, r.end as i32);
+    }
     style_blocks(h);
     set_sel(h, at + 2, at + 2);
 }
@@ -768,6 +776,64 @@ mod tests {
         let light = to_markdown(h, false);
         assert!(light.contains("> - bullet\n>   - nested\n> [ ] task\n> [x] done\n> 1. one"), "{light}");
         assert!(light.contains("- item\n  > under the item"), "{light}");
+    }
+
+    /// Checklist lines are as tall as prose, in a quote too, even when an item is empty:
+    /// its circle is body-sized and would otherwise hang below a shorter line (and a
+    /// quote's bar). In every typeface and size.
+    #[test]
+    fn task_lines_are_body_lines() {
+        for (font, size) in (0..4).flat_map(|f| (0..3).map(move |s| (f, s))) {
+            set_typography(font, size);
+            let h = editor();
+            apply_base_format(h, 0x1D1D1F, 0xFFFFFF);
+            load_markdown(h, "T\none\ntwo\n- [ ] x\n- [ ] y\n> qone\n> qtwo\n> - [ ] alpha\n> - [ ] beta\nend");
+            style_boxes(h);
+            let y = |h: HWND, w: &str| {
+                let t = text(h);
+                let w: Vec<u16> = w.encode_utf16().collect();
+                let i = t.windows(w.len()).position(|v| v == &w[..]).unwrap();
+                pos_from_char(h, i as i32).y
+            };
+            let pitch = y(h, "two") - y(h, "one");
+            let at = format!("font {font} size {size}");
+            assert_eq!(y(h, "x") - y(h, "two"), pitch, "{at}: prose to task");
+            assert_eq!(y(h, "y") - y(h, "x"), pitch, "{at}: task to task");
+            assert_eq!(y(h, "qtwo") - y(h, "qone"), pitch, "{at}: quoted prose");
+            assert_eq!(y(h, "alpha") - y(h, "qtwo"), pitch, "{at}: quoted prose to task");
+            assert_eq!(y(h, "beta") - y(h, "alpha"), pitch, "{at}: quoted task to task");
+            let end = y(h, "end");
+            for w in ["y", "beta"] {
+                let t = text(h);
+                let w: Vec<u16> = w.encode_utf16().collect();
+                let i = t.windows(w.len()).position(|v| v == &w[..]).unwrap() as i32;
+                set_sel(h, i, i + w.len() as i32);
+                replace_sel(h, "");
+                style_boxes(h);
+            }
+            assert_eq!(y(h, "end"), end, "{at}: empty items");
+            // After the RTF a note is stored as, the same.
+            let h2 = editor();
+            set_rtf(h2, &get_rtf(h));
+            apply_base_format(h2, 0x1D1D1F, 0xFFFFFF);
+            assert_eq!(y(h2, "end"), end, "{at}: stored");
+        }
+        set_typography(0, 1);
+    }
+
+    /// An empty item is still a task, and `- > text` (a quote as a list item, as other
+    /// editors write one) goes under the item before it.
+    #[test]
+    fn empty_tasks_and_item_quotes() {
+        let h = editor();
+        load_markdown(h, "T\n- [ ]\n> - [ ]\n- a\n  - > under a's item");
+        let lines = |md: String| md.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+        assert_eq!(lines(to_markdown(h, true)), "# T\n- [ ]\n> - [ ]\n- a\n    > under a's item");
+        assert_eq!(lines(to_markdown(h, false)), "T\n[ ]\n> [ ]\n- a\n    > under a's item");
+        // The light form imports as the same note.
+        let h2 = editor();
+        load_markdown(h2, &to_markdown(h, false));
+        assert_eq!(lines(to_markdown(h2, true)), lines(to_markdown(h, true)));
     }
 
     #[test]
