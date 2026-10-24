@@ -185,6 +185,11 @@ pub fn set_box_colors(h: HWND, ink: u32, done: u32, text: u32) {
 /// paper colour (`checks` draws the visible circle over it); completed items fade to the
 /// secondary colour and are struck through, starting at the text, not the gap.
 pub fn style_boxes(h: HWND) {
+    // Each box is formatted through the selection: hold the view still meanwhile.
+    still(h, || style_boxes_now(h));
+}
+
+fn style_boxes_now(h: HWND) {
     let t = text(h);
     if !t.iter().any(|&c| is_task(c)) {
         return;
@@ -244,5 +249,4 @@ pub fn style_boxes(h: HWND) {
         }
     }
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);
-}
+    send(h, EM_HIDESELECTION, 0, 0);}

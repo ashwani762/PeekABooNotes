@@ -61,6 +61,30 @@ pub fn bulk<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// Run `f`, which moves the selection about to format text, with the view held still:
+/// nothing is drawn until it's done, and the scroll position is put back, so the note
+/// doesn't jump or flash. Unlike `bulk`, it stays undoable.
+pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    if BULK.with(|b| b.get()) > 0 {
+        return f();
+    }
+    let d = doc(h);
+    let y = scroll_y(h);
+    if let Some(d) = &d {
+        unsafe {
+            let _ = d.Freeze();
+        }
+    }
+    let r = f();
+    set_scroll_y(h, y);
+    if let Some(d) = &d {
+        unsafe {
+            let _ = d.Unfreeze();
+        }
+    }
+    r
+}
+
 /// The font size (points) of the character at `cp`, without touching the selection.
 pub fn size_at(h: HWND, cp: i32) -> Option<f32> {
     range(h, cp, cp + 1).and_then(|r| unsafe { r.GetFont().ok()?.GetSize().ok() })

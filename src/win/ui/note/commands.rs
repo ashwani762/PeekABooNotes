@@ -20,7 +20,7 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
         NC_STRIKE => fmt(&|| rich::toggle_effect(e, CFM_STRIKEOUT)),
         NC_BULLETS => fmt(&|| rich::toggle_numbering(e, PFN_BULLET)),
         NC_NUMBERS => fmt(&|| rich::toggle_numbering(e, PFN_ARABIC)),
-        NC_TASK => fmt(&|| toggle_task_lines(e)),
+        NC_TASK => fmt(&|| rich::still(e, || toggle_task_lines(e))),
         NC_TOGGLE_CHECK => fmt(&|| toggle_check_at_caret(e)),
         NC_CUT => fmt(&|| {
             rich::send(e, WM_CUT, 0, 0);
