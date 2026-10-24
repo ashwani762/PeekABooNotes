@@ -388,8 +388,12 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
         // Static preview while the inline editor is being made.
         c.line_ct(&r.title, &f.card_title, x0, (card.y + 52.0 * s) as i32, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
         let br = rect(x0, (card.y + 72.0 * s) as i32, x1 - x0, (rule_y - 44.0 * s - card.y - 72.0 * s).max(0.0) as i32);
-        let (body, k) = if r.body.is_empty() { (t!("card_no_text"), 0.55) } else { (r.body.as_str(), 0.92) };
-        c.text_ct(body, &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, k), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
+        if r.body.is_empty() {
+            c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
+        } else {
+            // As the deck draws it: lists, checklists, quotes, code and tables, not their markup.
+            crate::win::ui::draw_body(c, &r.body, &f.card_body, br, r.color, dark, a, s);
+        }
     }
     // Footer: when it was edited, then a hairline and the colour swatches.
     let meta = t!("card_meta", edited_time(r.updated), crate::common::i18n::time::day(r.created));
