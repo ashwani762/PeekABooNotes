@@ -921,7 +921,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             WM_NCRBUTTONUP if wp as u32 == HTCAPTION => {
                 if let Some(id) = id_of(h) {
-                    let cmd = app::popup(app::note_menu(id, false), x_of(lp), y_of(lp), h);
+                    let cmd = app::popup(app::note_menu(id, true), x_of(lp), y_of(lp), h);
                     if cmd != 0 {
                         PostMessageW(h, WM_NOTE_CMD, cmd as usize, 0);
                     }

@@ -29,6 +29,10 @@ struct Toast {
     /// Seconds of countdown left.
     left: f32,
     rise: Spring,
+    /// The Undo button lights up while the pointer is on the toast (all of it undoes).
+    hot: Spring,
+    /// Mouse button held down on the toast: the button sinks a little.
+    pressed: bool,
     alive: bool,
     canvas: Option<Canvas>,
     s: f32,
@@ -69,6 +73,8 @@ pub fn show(count: usize, archived: bool) {
                 archived,
                 left: SECONDS,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
+                hot: Spring::unit(0.0, (1.0, 0.12)),
+                pressed: false,
                 alive: true,
                 canvas: None,
                 s,
@@ -110,7 +116,11 @@ pub fn frame(dt: f32) -> bool {
         let mut slot = cell.borrow_mut();
         let Some(t) = slot.as_mut() else { return false };
         let moving = t.rise.step(dt);
-        if t.alive && !hovered(t.hwnd) {
+        let over = hovered(t.hwnd);
+        t.pressed &= over;
+        t.hot.to(if over && t.alive { 1.0 } else { 0.0 });
+        t.hot.step(dt);
+        if t.alive && !over {
             t.left -= dt;
         }
         if t.alive && t.left <= 0.0 {
@@ -170,7 +180,10 @@ fn render(t: &mut Toast) {
     c.text(&msg, &t.body, rect(tx, y as i32, (w as f32 * 0.6) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     let (bw, bh) = (76.0 * s, 32.0 * s);
     let button = Shape::new(x + w as f32 - bw - 10.0 * s, y + (h as f32 - bh) / 2.0, bw, bh, bh / 2.0);
-    c.shape(&button, 0xFFFFFF, 0.14 * a, 1.0, 0.0);
+    // Brighter under the pointer; pressed, it sinks a little and brightens a touch more.
+    let fill = if t.pressed { button.inset(1.5 * s) } else { button };
+    let lit = 0.12 * clamp01(t.hot.value) + if t.pressed { 0.08 } else { 0.0 };
+    c.shape(&fill, 0xFFFFFF, (0.14 + lit) * a, 1.0, 0.0);
     let br = rect(button.x as i32, button.y as i32, bw as i32, bh as i32);
     c.text(t!("toast_undo"), &t.bold, br, theme::COLORS[0].accent, a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     c.flush();
@@ -188,7 +201,22 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     unsafe {
         match msg {
             WM_MOUSEACTIVATE => return MA_NOACTIVATE as LRESULT,
+            // Shown on the press, done on the release.
+            WM_LBUTTONDOWN => {
+                TOAST.with(|t| {
+                    if let Some(t) = t.borrow_mut().as_mut() {
+                        t.pressed = true;
+                    }
+                });
+                anim::wake(Client::Toast);
+                return 0;
+            }
             WM_LBUTTONUP => {
+                TOAST.with(|t| {
+                    if let Some(t) = t.borrow_mut().as_mut() {
+                        t.pressed = false;
+                    }
+                });
                 app::undo_delete();
                 return 0;
             }

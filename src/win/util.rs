@@ -36,6 +36,14 @@ pub fn set_clipboard_text(text: &str) -> bool {
     }
 }
 
+/// Whether a note's Paste has something to take: text, or files copied in Explorer.
+pub fn clipboard_can_paste() -> bool {
+    use windows_sys::Win32::System::DataExchange::IsClipboardFormatAvailable;
+    const CF_UNICODETEXT: u32 = 13;
+    const CF_HDROP: u32 = 15;
+    unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 || IsClipboardFormatAvailable(CF_HDROP) != 0 }
+}
+
 /// The clipboard's text, if it holds any.
 pub fn clipboard_text() -> Option<String> {
     use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};

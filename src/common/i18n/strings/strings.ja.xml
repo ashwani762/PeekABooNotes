@@ -84,6 +84,12 @@
     <string name="search_placeholder">検索</string>
     <string name="empty_search_title">「%1$s」に一致するメモはありません</string>
     <string name="empty_search_body">つづりを確認するか、別の言葉で検索してください。</string>
+    <plurals name="empty_search_in_archive">
+        <item quantity="other">アーカイブの %d 件を表示</item>
+    </plurals>
+    <plurals name="empty_search_in_notes">
+        <item quantity="other">メモの %d 件を表示</item>
+    </plurals>
     <string name="empty_archive_title">アーカイブは空です</string>
     <string name="empty_archive_body">アーカイブしたメモはデッキから外れますが、ここで検索できます。</string>
     <string name="empty_notes_title">メモはまだありません</string>

@@ -57,20 +57,31 @@ pub enum Item {
     Swatches { base: u32, current: Option<u8> },
     /// A row of compact icon buttons (text formatting).
     Tools(Vec<Tool>),
-    Action { id: u32, label: String, key: String, icon: &'static str, checked: bool, danger: bool },
+    /// A `disabled` row is greyed out: no highlight, and neither the mouse nor the keys pick it.
+    Action { id: u32, label: String, key: String, icon: &'static str, checked: bool, danger: bool, disabled: bool },
     Separator,
 }
 
+impl Item {
+    /// The same row, greyed out unless `on`.
+    pub fn enabled(mut self, on: bool) -> Item {
+        if let Item::Action { disabled, .. } = &mut self {
+            *disabled = !on;
+        }
+        self
+    }
+}
+
 pub fn action(id: u32, label: &str, key: &str, icon: &'static str) -> Item {
-    Item::Action { id, label: label.into(), key: key.into(), icon, checked: false, danger: false }
+    Item::Action { id, label: label.into(), key: key.into(), icon, checked: false, danger: false, disabled: false }
 }
 
 pub fn check(id: u32, label: &str, key: &str, checked: bool) -> Item {
-    Item::Action { id, label: label.into(), key: key.into(), icon: "", checked, danger: false }
+    Item::Action { id, label: label.into(), key: key.into(), icon: "", checked, danger: false, disabled: false }
 }
 
 pub fn danger(id: u32, label: &str, key: &str, icon: &'static str) -> Item {
-    Item::Action { id, label: label.into(), key: key.into(), icon, checked: false, danger: true }
+    Item::Action { id, label: label.into(), key: key.into(), icon, checked: false, danger: true, disabled: false }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -351,7 +362,8 @@ fn target_at(m: &Menu, x: i32, y: i32) -> Target {
             continue;
         }
         return match &m.items[i] {
-            Item::Action { .. } => Target::Row(i),
+            Item::Action { disabled: false, .. } => Target::Row(i),
+            Item::Action { .. } => Target::None,
             Item::Swatches { .. } => (0..theme::ORDER.len())
                 .find(|&k| {
                     let x0 = swatch_x(m, k) - 3.0 * s;
@@ -461,7 +473,7 @@ fn render(m: &mut Menu) {
             Item::Separator => {
                 c.rrect(ox + 12.0 * s, y + rh / 2.0, m.w as f32 - 24.0 * s, 1.0, 0.0, edge, if dark { 0.12 } else { 0.10 });
             }
-            Item::Action { label, key, icon, checked, danger, .. } => {
+            Item::Action { label, key, icon, checked, danger, disabled, .. } => {
                 let hot = m.hot == Target::Row(i) || m.blink.is_some_and(|(_, _, t)| t == Target::Row(i));
                 let lit = hot && blink_on;
                 // Destructive rows stay red all the way: red label and icon, red highlight.
@@ -471,8 +483,9 @@ fn render(m: &mut Menu) {
                     let hl = Shape::new(ox + PAD * s, y, m.w as f32 - 2.0 * PAD * s, rh, 6.0 * s);
                     c.shape(&hl, hl_rgb, 1.0, 1.0, 0.0);
                 }
-                let ink = if lit { 0xFFFFFF } else if *danger { red } else { text };
-                let ink2 = if lit { mix(hl_rgb, 0xFFFFFF, 0.8) } else if *danger { red } else { sub };
+                let off = mix(sub, surface, 0.45);
+                let ink = if lit { 0xFFFFFF } else if *disabled { off } else if *danger { red } else { text };
+                let ink2 = if lit { mix(hl_rgb, 0xFFFFFF, 0.8) } else if *disabled { off } else if *danger { red } else { sub };
                 let mid = (y + rh / 2.0) as i32;
                 if *checked {
                     c.text_ct("\u{E73E}", &m.fonts.icon, rect((ox + 12.0 * s) as i32, y as i32, (20.0 * s) as i32, rh as i32), None, ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -539,7 +552,7 @@ fn render(m: &mut Menu) {
 }
 
 fn selectable(m: &Menu) -> Vec<usize> {
-    m.items.iter().enumerate().filter(|(_, it)| matches!(it, Item::Action { .. })).map(|(i, _)| i).collect()
+    m.items.iter().enumerate().filter(|(_, it)| matches!(it, Item::Action { disabled: false, .. })).map(|(i, _)| i).collect()
 }
 
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {

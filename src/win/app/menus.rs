@@ -11,13 +11,14 @@ pub fn color_menu(id: u64) -> Vec<menu::Item> {
     vec![menu::Item::Swatches { base: NC_COLOR0, current: color }]
 }
 
-/// Context menu for a note. In the editor it leads with a formatting toolbar row.
-pub fn note_menu(id: u64, with_edit: bool) -> Vec<menu::Item> {
-    use menu::{Item, Tool, ToolStyle, action, danger};
-    let (archived, pinned, color, off_deck) = store(|s| s.note(id).map(|n| (n.archived, n.pinned, n.color, n.off_deck))).unwrap_or_default();
-    let mut v = Vec::new();
-    if with_edit {
-        v.push(Item::Tools(vec![
+/// Right-click in a note's text (editor `e`): the formatting row and the editing
+/// commands, each greyed out when it has nothing to act on.
+pub fn edit_menu(e: HWND) -> Vec<menu::Item> {
+    use menu::{Item, Tool, ToolStyle, action};
+    let (a, b) = rich::sel(e);
+    let selected = a != b;
+    vec![
+        Item::Tools(vec![
             Tool { id: NC_BOLD, glyph: "B", style: ToolStyle::Bold },
             Tool { id: NC_ITALIC, glyph: "I", style: ToolStyle::Italic },
             Tool { id: NC_UNDERLINE, glyph: "U", style: ToolStyle::Underline },
@@ -25,26 +26,37 @@ pub fn note_menu(id: u64, with_edit: bool) -> Vec<menu::Item> {
             Tool { id: NC_BULLETS, glyph: "\u{2022}", style: ToolStyle::Plain },
             Tool { id: NC_NUMBERS, glyph: "1.", style: ToolStyle::Plain },
             Tool { id: NC_TASK, glyph: "\u{E930}", style: ToolStyle::Icon },
-        ]));
-        v.push(Item::Separator);
-        v.push(action(NC_CUT, t!("menu_cut"), &crate::common::i18n::keys(&["ctrl", "X"]), IC_CUT));
-        v.push(action(NC_COPY, t!("menu_copy"), &crate::common::i18n::keys(&["ctrl", "C"]), IC_COPY));
-        v.push(action(NC_PASTE, t!("menu_paste"), &crate::common::i18n::keys(&["ctrl", "V"]), IC_PASTE));
-        v.push(action(NC_SELECT_ALL, t!("menu_select_all"), &crate::common::i18n::keys(&["ctrl", "A"]), IC_SELECT));
-        v.push(action(NC_LINK, t!("menu_link"), &crate::common::i18n::keys(&["ctrl", "K"]), IC_LINK));
-    } else {
+        ]),
+        Item::Separator,
+        action(NC_CUT, t!("menu_cut"), &crate::common::i18n::keys(&["ctrl", "X"]), IC_CUT).enabled(selected),
+        action(NC_COPY, t!("menu_copy"), &crate::common::i18n::keys(&["ctrl", "C"]), IC_COPY).enabled(selected),
+        action(NC_PASTE, t!("menu_paste"), &crate::common::i18n::keys(&["ctrl", "V"]), IC_PASTE).enabled(crate::win::util::clipboard_can_paste()),
+        action(NC_SELECT_ALL, t!("menu_select_all"), &crate::common::i18n::keys(&["ctrl", "A"]), IC_SELECT),
+        Item::Separator,
+        action(NC_LINK, t!("menu_link"), &crate::common::i18n::keys(&["ctrl", "K"]), IC_LINK),
+    ]
+}
+
+/// A note's own menu: its colour, place and fate. From the note window itself (`in_note`:
+/// its More button or a right-click on its header) it ends with moving between notes;
+/// elsewhere (the deck, All Notes) it starts with Open.
+pub fn note_menu(id: u64, in_note: bool) -> Vec<menu::Item> {
+    use menu::{Item, action, danger};
+    let (archived, pinned, color, off_deck) = store(|s| s.note(id).map(|n| (n.archived, n.pinned, n.color, n.off_deck))).unwrap_or_default();
+    let mut v = Vec::new();
+    if !in_note {
         v.push(action(NC_OPEN, t!("menu_open"), "", IC_OPEN));
+        v.push(Item::Separator);
     }
-    v.push(Item::Separator);
     v.push(Item::Swatches { base: NC_COLOR0, current: Some(color) });
     v.push(Item::Separator);
-    v.push(Item::Action { id: NC_PIN, label: t!("menu_keep_on_top").into(), key: crate::common::i18n::keys(&["ctrl", "shift", "P"]), icon: IC_PIN, checked: pinned, danger: false });
+    v.push(Item::Action { id: NC_PIN, label: t!("menu_keep_on_top").into(), key: crate::common::i18n::keys(&["ctrl", "shift", "P"]), icon: IC_PIN, checked: pinned, danger: false, disabled: false });
     if !archived {
         v.push(menu::check(NC_DECK, t!("menu_show_in_deck"), "", !off_deck));
     }
     v.push(action(NC_ARCHIVE, if archived { t!("menu_restore") } else { t!("menu_archive") }, &if archived { String::new() } else { crate::common::i18n::keys(&["ctrl", "shift", "A"]) }, IC_ARCHIVE));
     v.push(danger(NC_DELETE, t!("menu_delete"), &crate::common::i18n::keys(&["ctrl", "shift", "del"]), IC_DELETE));
-    if with_edit {
+    if in_note {
         v.push(Item::Separator);
         v.push(action(NC_PREV, t!("menu_previous_note"), &crate::common::i18n::keys(&["ctrl", "["]), IC_BACK));
         v.push(action(NC_NEXT, t!("menu_next_note"), &crate::common::i18n::keys(&["ctrl", "]"]), IC_FORWARD));

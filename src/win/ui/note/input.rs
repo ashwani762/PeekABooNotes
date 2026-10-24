@@ -68,6 +68,24 @@ fn link_tip(e: HWND, x: i32, y: i32) {
     tooltip::hover(e, anchor, &shown, "");
 }
 
+/// The text menu (formatting and editing) at screen point `p`, or under the caret when
+/// `p` is (-1, -1), as the keyboard asks for it.
+fn text_menu(h: HWND, e: HWND, mut p: POINT) {
+    if id_of(h).is_none() {
+        return;
+    }
+    if p.x == -1 && p.y == -1 {
+        let (a, _) = rich::sel(e);
+        p = rich::pos_from_char(e, a);
+        unsafe { ClientToScreen(e, &mut p) };
+        p.y += 20;
+    }
+    let cmd = app::popup(app::edit_menu(e), p.x, p.y, h);
+    if cmd != 0 {
+        unsafe { PostMessageW(h, WM_NOTE_CMD, cmd as usize, 0) };
+    }
+}
+
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
     let h = parent as HWND;
     match msg {
@@ -82,6 +100,12 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             let (ctrl, shift, alt) = (key_down(VK_CONTROL), key_down(VK_SHIFT), key_down(VK_MENU));
             let Some(st) = state(h) else { return unsafe { DefSubclassProc(e, msg, wp, lp) } };
             st.swallow = false;
+            // The keyboard's Menu key, or Shift+F10: the text menu at the caret.
+            if vk == VK_APPS || (shift && !ctrl && vk == VK_F10) {
+                st.swallow = true;
+                text_menu(h, e, POINT { x: -1, y: -1 });
+                return 0;
+            }
             if !matches!(vk, VK_BACK | VK_SHIFT | VK_CONTROL | VK_MENU) {
                 st.auto = None;
             }
@@ -187,19 +211,26 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     return 0;
                 }
         }
+        // RichEdit hands right-clicks to its OLE callback (see `attach`) rather than send
+        // WM_CONTEXTMENU, so the text menu opens from here. A right-click outside the
+        // selection moves the caret there first; inside it, the selection stays to act on.
+        WM_RBUTTONDOWN => {
+            let cp = rich::char_from_pos(e, x_of(lp), y_of(lp));
+            let (a, b) = rich::sel(e);
+            if a == b || cp < a.min(b) || cp > a.max(b) {
+                rich::set_sel(e, cp, cp);
+            }
+            unsafe { SetFocus(e) };
+            return 0;
+        }
+        WM_RBUTTONUP => {
+            let mut p = POINT { x: x_of(lp), y: y_of(lp) };
+            unsafe { ClientToScreen(e, &mut p) };
+            text_menu(h, e, p);
+            return 0;
+        }
         WM_CONTEXTMENU => {
-            let Some(id) = id_of(h) else { return 0 };
-            let (mut x, mut y) = (x_of(lp), y_of(lp));
-            if x == -1 && y == -1 {
-                let (a, _) = rich::sel(e);
-                let mut p = rich::pos_from_char(e, a);
-                unsafe { ClientToScreen(e, &mut p) };
-                (x, y) = (p.x, p.y + 20);
-            }
-            let cmd = app::popup(app::note_menu(id, true), x, y, h);
-            if cmd != 0 {
-                unsafe { PostMessageW(h, WM_NOTE_CMD, cmd as usize, 0) };
-            }
+            text_menu(h, e, POINT { x: x_of(lp), y: y_of(lp) });
             return 0;
         }
         WM_MOUSEMOVE if PRESS.with(|p| p.borrow().is_some()) => {
@@ -255,6 +286,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         }
         WM_NCDESTROY => unsafe {
             crate::win::editor::checks::forget(e);
+            crate::win::editor::fade::forget(e);
             RemoveWindowSubclass(e, Some(edit_proc), 1);
         },
         _ => {}
@@ -286,6 +318,9 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     if drew {
         crate::win::editor::checks::paint(e);
         crate::win::editor::emoji::paint(e);
+        if let Some((paper, s)) = crate::win::editor::checks::paper(e) {
+            crate::win::editor::fade::paint(e, paper, s);
+        }
         super::scrollbar::sync(h);
     }
     r

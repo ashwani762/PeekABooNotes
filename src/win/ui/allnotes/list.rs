@@ -18,6 +18,13 @@ pub(super) fn set_mode(l: &mut Lib, mode: usize) {
     }
 }
 
+/// What a search looks through besides the title: everything after the title line, list
+/// markers aside.
+fn search_rest(text: &str) -> String {
+    let rest: Vec<&str> = text.lines().skip_while(|l| strip_marker(l).trim().is_empty()).skip(1).map(strip_marker).collect();
+    rest.join("\n")
+}
+
 pub(super) fn rebuild(l: &mut Lib) {
     let q = crate::common::search::Query::new(&l.query);
     let searching = !l.query.trim().is_empty();
@@ -33,10 +40,7 @@ pub(super) fn rebuild(l: &mut Lib) {
             .filter_map(|n| {
                 let title = title_of(&n.text);
                 let m = if searching {
-                    // Everything after the title line, list markers aside.
-                    let rest: Vec<&str> = n.text.lines().skip_while(|l| strip_marker(l).trim().is_empty()).skip(1).map(strip_marker).collect();
-                    let rest = rest.join("
-");
+                    let rest = search_rest(&n.text);
                     let m = q.score(&title, &rest)?;
                     let snippet = m.body_at.map(|at| crate::common::search::snippet(&rest, at, 80));
                     let marks = snippet.as_deref().map(|s| q.marks(s)).unwrap_or_default();
@@ -75,6 +79,12 @@ pub(super) fn rebuild(l: &mut Lib) {
     } else {
         rows.sort_by_key(|r| std::cmp::Reverse(r.updated));
     }
+    // Nothing here? Count the matches in the other list, to offer them.
+    l.elsewhere = if searching && rows.is_empty() && mode != 2 {
+        app::store(|s| s.d.notes.iter().filter(|n| n.archived == (mode == 0) && q.score(&title_of(&n.text), &search_rest(&n.text)).is_some()).count())
+    } else {
+        0
+    };
     // When the selected note goes (archived, deleted), select its neighbour, not the top.
     let was = primary_index(l);
     l.rows = rows;

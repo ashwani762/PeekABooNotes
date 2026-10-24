@@ -98,6 +98,14 @@
     <string name="search_placeholder">Search</string>
     <string name="empty_search_title">No results for “%1$s”</string>
     <string name="empty_search_body">Check the spelling or try a different word.</string>
+    <plurals name="empty_search_in_archive">
+        <item quantity="one">Show 1 match in the Archive</item>
+        <item quantity="other">Show %d matches in the Archive</item>
+    </plurals>
+    <plurals name="empty_search_in_notes">
+        <item quantity="one">Show 1 match in Notes</item>
+        <item quantity="other">Show %d matches in Notes</item>
+    </plurals>
     <string name="empty_archive_title">Nothing archived</string>
     <string name="empty_archive_body">Archived notes leave the deck but stay searchable here.</string>
     <string name="empty_notes_title">No notes yet</string>

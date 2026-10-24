@@ -238,7 +238,8 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
             let mut sh = button_shape(w, label, &r);
             let k = if pressed(0) { 2.4 } else if hovered(0) { 1.6 } else { 1.0 };
             // After an import / export the button briefly answers with a tick (or a
-            // cross) and a count, growing or shrinking to fit, then turns back.
+            // cross) and a count, then turns back. It grows when the answer needs the
+            // room, but never shrinks: a button that jumps narrower looks like a glitch.
             let result = match &w.result {
                 Some((rk, ok, text)) if row.key == Some(*rk) && w.result_a.value > 0.001 => Some((*ok, text.as_str(), clamp01(w.result_a.value))),
                 _ => None,
@@ -246,7 +247,7 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
             let glyph_w = 16.0 * s;
             if let Some((_, text, t)) = result {
                 let want = f.button.measure(text).0 as f32 + glyph_w + 30.0 * s;
-                let grow = (want - sh.w) * t;
+                let grow = (want - sh.w).max(0.0) * t;
                 sh.x -= grow;
                 sh.w += grow;
             }

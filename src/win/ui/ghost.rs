@@ -184,7 +184,9 @@ fn render(g: &mut Ghost) {
     // Content sits where the note window draws it; the growing card reveals it.
     let content = match g.kind {
         Kind::Open => alpha * clamp01((p - 0.25) / 0.6),
-        _ => alpha * (1.0 - clamp01(p / 0.6)),
+        // Archived or deleted, the note fades as one, words and all: never an empty card.
+        Kind::Dissolve => alpha,
+        Kind::Close => alpha * (1.0 - clamp01(p / 0.6)),
     };
     if let Some(img) = g.image.as_ref() {
         // Anchored at the card's top-left, as the window lays itself out.

@@ -88,6 +88,14 @@
     <string name="search_placeholder">Buscar</string>
     <string name="empty_search_title">Sin resultados para «%1$s»</string>
     <string name="empty_search_body">Revisa la ortografía o prueba otra palabra.</string>
+    <plurals name="empty_search_in_archive">
+        <item quantity="one">Ver 1 resultado en Archivo</item>
+        <item quantity="other">Ver %d resultados en Archivo</item>
+    </plurals>
+    <plurals name="empty_search_in_notes">
+        <item quantity="one">Ver 1 resultado en Notas</item>
+        <item quantity="other">Ver %d resultados en Notas</item>
+    </plurals>
     <string name="empty_archive_title">Nada archivado</string>
     <string name="empty_archive_body">Las notas archivadas salen del mazo pero siguen apareciendo en las búsquedas.</string>
     <string name="empty_notes_title">Aún no hay notas</string>

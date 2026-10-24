@@ -77,6 +77,8 @@ enum Hit {
     Settings,
     Search,
     Segment(usize),
+    /// A search found nothing here, but the link under it shows the matches elsewhere.
+    Elsewhere,
     Row(usize),
     Archive,
     Delete,
@@ -227,6 +229,9 @@ struct Lib {
     rows: Vec<Row>,
     mode: usize,
     query: String,
+    /// Searching found nothing in this list, but this many in the other one (Notes or the
+    /// Archive): the empty list offers to show them.
+    elsewhere: usize,
     sel: Vec<u64>, // the last entry is the primary selection
     anchor: Option<u64>,
     focus_search: bool,
@@ -657,6 +662,7 @@ fn on_create(hwnd: HWND) {
         rows: Vec::new(),
         mode,
         query: String::new(),
+        elsewhere: 0,
         sel: Vec::new(),
         anchor: None,
         focus_search: false,
@@ -990,6 +996,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         }
                         Hit::Segment(i) => {
                             set_mode(l, i); // responds on press
+                            Action::None
+                        }
+                        Hit::Elsewhere => {
+                            set_mode(l, if l.mode == 1 { 0 } else { 1 });
                             Action::None
                         }
                         Hit::Row(i) => {

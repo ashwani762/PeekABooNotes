@@ -112,6 +112,18 @@ pub(super) fn swatch_rects(lay: &Layout, s: f32) -> Vec<RECT> {
     (0..theme::ORDER.len()).map(|i| rect((lay.card.x + 28.0 * s + i as f32 * (d + gap)) as i32, y as i32, d as i32, d as i32)).collect()
 }
 
+/// The link under an empty search to the matches in the other list, and where it sits.
+pub(super) fn elsewhere_link(l: &Lib, lay: &Layout) -> Option<(String, RECT)> {
+    if l.elsewhere == 0 || !l.rows.is_empty() {
+        return None;
+    }
+    let s = l.s;
+    let text = if l.mode == 1 { tn!("empty_search_in_notes", l.elsewhere) } else { tn!("empty_search_in_archive", l.elsewhere) };
+    let w = (l.fonts.count.measure(&text).0 + (24.0 * s) as i32).min((lay.list_w - 32.0 * s) as i32);
+    let top = ((LIST_TOP + 64.0 + 12.0) * s).round() as i32;
+    Some((text, rect((lay.list_w / 2.0) as i32 - w / 2, top, w, (28.0 * s) as i32)))
+}
+
 pub(super) fn hit_test(l: &Lib, x: i32, y: i32) -> Hit {
     let lay = layout(l);
     let s = l.s;
@@ -134,6 +146,11 @@ pub(super) fn hit_test(l: &Lib, x: i32, y: i32) -> Hit {
     if inside(&lay.seg) {
         let i = ((fx - lay.seg.x) / (lay.seg.w / 3.0)).floor().clamp(0.0, 2.0) as usize;
         return Hit::Segment(i);
+    }
+    if let Some((_, r)) = elsewhere_link(l, &lay)
+        && pt(&r)
+    {
+        return Hit::Elsewhere;
     }
     if fx < lay.list_w && fy >= lay.list_top {
         // Rows are uniform: compute the index directly (fast with thousands of notes).

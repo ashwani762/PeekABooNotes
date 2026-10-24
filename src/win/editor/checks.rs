@@ -40,6 +40,11 @@ pub fn set_style(e: HWND, ink: u32, bg: u32, s: f32) {
     STYLES.with(|m| m.borrow_mut().insert(e as isize, Style { ink, bg, s }));
 }
 
+/// Editor `e`'s paper colour and scale, as set by `set_style`.
+pub fn paper(e: HWND) -> Option<(u32, f32)> {
+    STYLES.with(|m| m.borrow().get(&(e as isize)).map(|st| (st.bg, st.s)))
+}
+
 pub fn forget(e: HWND) {
     STYLES.with(|m| m.borrow_mut().remove(&(e as isize)));
     ANIMS.with(|a| a.borrow_mut().retain(|k, _| k.0 != e as isize));

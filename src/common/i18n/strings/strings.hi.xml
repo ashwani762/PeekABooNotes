@@ -88,6 +88,14 @@
     <string name="search_placeholder">खोजें</string>
     <string name="empty_search_title">“%1$s” के लिए कोई नतीजा नहीं</string>
     <string name="empty_search_body">वर्तनी जाँचें या कोई दूसरा शब्द आज़माएँ।</string>
+    <plurals name="empty_search_in_archive">
+        <item quantity="one">संग्रह में 1 परिणाम दिखाएँ</item>
+        <item quantity="other">संग्रह में %d परिणाम दिखाएँ</item>
+    </plurals>
+    <plurals name="empty_search_in_notes">
+        <item quantity="one">नोट्स में 1 परिणाम दिखाएँ</item>
+        <item quantity="other">नोट्स में %d परिणाम दिखाएँ</item>
+    </plurals>
     <string name="empty_archive_title">संग्रह खाली है</string>
     <string name="empty_archive_body">संग्रहित नोट्स डेक से हट जाते हैं, पर यहाँ खोजे जा सकते हैं।</string>
     <string name="empty_notes_title">अभी कोई नोट नहीं</string>

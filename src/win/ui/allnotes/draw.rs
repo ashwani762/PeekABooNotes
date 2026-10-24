@@ -115,8 +115,18 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         };
         let y = px(LIST_TOP + 64.0);
         c.line_ct(&headline, &f.empty, px(16.0), y, (lay.list_w - 32.0 * s) as i32, None, mix(p.list, p.text, la), DT_CENTER);
-        let sr = rect(px(32.0), y + px(10.0), (lay.list_w - 64.0 * s) as i32, px(40.0));
-        c.text_ct(&sub, &f.count, sr, None, mix(p.list, p.sub, la), DT_CENTER | DT_WORDBREAK);
+        if let Some((link, r)) = elsewhere_link(l, lay) {
+            // The matches are in the other list: a link straight to them.
+            if l.hover == Hit::Elsewhere {
+                let a = p.hover.1 * if l.pressed == Hit::Elsewhere { 2.4 } else { 1.6 };
+                let sh = Shape::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32, 8.0 * s);
+                c.shape(&sh, p.hover.0, a * la, 1.0, 0.0);
+            }
+            c.text_ct(&link, &f.count, r, None, mix(p.list, p.focus, la), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        } else {
+            let sr = rect(px(32.0), y + px(10.0), (lay.list_w - 64.0 * s) as i32, px(40.0));
+            c.text_ct(&sub, &f.count, sr, None, mix(p.list, p.sub, la), DT_CENTER | DT_WORDBREAK);
+        }
     }
     let row_x = 10.0 * s;
     let row_w = lay.list_w - 20.0 * s;

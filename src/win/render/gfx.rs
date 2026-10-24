@@ -586,6 +586,12 @@ impl Canvas {
     }
 
     /// Copy to a DC (normal, non-layered windows).
+    /// Take the canvas's size of pixels from `hdc` at (`x`, `y`), opaque.
+    pub fn grab(&mut self, hdc: HDC, x: i32, y: i32) {
+        unsafe { BitBlt(self.img.dc, 0, 0, self.w, self.h, hdc, x, y, SRCCOPY) };
+        self.make_opaque_rect(RECT { left: 0, top: 0, right: self.w, bottom: self.h });
+    }
+
     pub fn blit(&self, hdc: HDC, x: i32, y: i32) {
         unsafe {
             GdiFlush();
