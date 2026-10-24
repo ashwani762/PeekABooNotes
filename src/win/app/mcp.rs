@@ -190,59 +190,6 @@ fn run_hidden(args: &[&str]) -> bool {
     std::process::Command::new("cmd").arg("/c").args(args).creation_flags(CREATE_NO_WINDOW).output().is_ok_and(|o| o.status.success())
 }
 
-#[cfg(test)]
-mod connect_tests {
-    use super::*;
-
-    fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("peekaboo-connect-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn json_settings_keep_their_other_entries() {
-        let dir = scratch("json");
-        let p = dir.join("claude_desktop_config.json");
-        // No file yet: made.
-        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "a.exe" })), Connect::Done);
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
-        assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "a.exe");
-        // Other servers and settings stay; ours is replaced; a backup is kept.
-        std::fs::write(&p, r#"{ "theme": "dark", "mcpServers": { "other": { "command": "o" }, "peekaboo-notes": { "command": "old" } } }"#).unwrap();
-        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "new.exe" })), Connect::Done);
-        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
-        assert_eq!(v["theme"], "dark");
-        assert_eq!(v["mcpServers"]["other"]["command"], "o");
-        assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "new.exe");
-        assert!(std::fs::read_to_string(dir.join("claude_desktop_config.json.bak")).unwrap().contains("old"));
-        // A file that isn't JSON is left alone.
-        std::fs::write(&p, "not json").unwrap();
-        assert_eq!(put_json(&p, "mcpServers", json!({})), Connect::Failed);
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), "not json");
-        // No folder: the app isn't installed.
-        assert_eq!(put_json(&dir.join("nowhere").join("x.json"), "mcpServers", json!({})), Connect::Missing);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn toml_table_is_added_or_replaced() {
-        let dir = scratch("toml");
-        let p = dir.join("config.toml");
-        let table = "[mcp_servers.peekaboo-notes]\ncommand = 'new.exe'";
-        assert_eq!(put_toml(&p, table), Connect::Done);
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("{table}\n"));
-        std::fs::write(&p, "model = \"x\"\n[mcp_servers.peekaboo-notes]\ncommand = 'old'\n\n[mcp_servers.other]\ncommand = 'o'\n").unwrap();
-        assert_eq!(put_toml(&p, table), Connect::Done);
-        let s = std::fs::read_to_string(&p).unwrap();
-        assert!(s.starts_with("model = \"x\"\n"), "{s}");
-        assert!(s.contains("command = 'new.exe'") && !s.contains("'old'"), "{s}");
-        assert!(s.contains("[mcp_servers.other]\ncommand = 'o'"), "{s}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
 fn serve(main: isize) {
     let name = wide(&pipe_name());
     loop {
@@ -519,5 +466,58 @@ impl mcp::Notes for WinNotes {
         }
         log::info("mcp: changed a note's state");
         Ok(store(|s| s.note(id).map(summary)).unwrap_or(Value::Null))
+    }
+}
+
+#[cfg(test)]
+mod connect_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("peekaboo-connect-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn json_settings_keep_their_other_entries() {
+        let dir = scratch("json");
+        let p = dir.join("claude_desktop_config.json");
+        // No file yet: made.
+        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "a.exe" })), Connect::Done);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "a.exe");
+        // Other servers and settings stay; ours is replaced; a backup is kept.
+        std::fs::write(&p, r#"{ "theme": "dark", "mcpServers": { "other": { "command": "o" }, "peekaboo-notes": { "command": "old" } } }"#).unwrap();
+        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "new.exe" })), Connect::Done);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v["theme"], "dark");
+        assert_eq!(v["mcpServers"]["other"]["command"], "o");
+        assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "new.exe");
+        assert!(std::fs::read_to_string(dir.join("claude_desktop_config.json.bak")).unwrap().contains("old"));
+        // A file that isn't JSON is left alone.
+        std::fs::write(&p, "not json").unwrap();
+        assert_eq!(put_json(&p, "mcpServers", json!({})), Connect::Failed);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "not json");
+        // No folder: the app isn't installed.
+        assert_eq!(put_json(&dir.join("nowhere").join("x.json"), "mcpServers", json!({})), Connect::Missing);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn toml_table_is_added_or_replaced() {
+        let dir = scratch("toml");
+        let p = dir.join("config.toml");
+        let table = "[mcp_servers.peekaboo-notes]\ncommand = 'new.exe'";
+        assert_eq!(put_toml(&p, table), Connect::Done);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("{table}\n"));
+        std::fs::write(&p, "model = \"x\"\n[mcp_servers.peekaboo-notes]\ncommand = 'old'\n\n[mcp_servers.other]\ncommand = 'o'\n").unwrap();
+        assert_eq!(put_toml(&p, table), Connect::Done);
+        let s = std::fs::read_to_string(&p).unwrap();
+        assert!(s.starts_with("model = \"x\"\n"), "{s}");
+        assert!(s.contains("command = 'new.exe'") && !s.contains("'old'"), "{s}");
+        assert!(s.contains("[mcp_servers.other]\ncommand = 'o'"), "{s}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
