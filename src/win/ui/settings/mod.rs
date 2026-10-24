@@ -362,13 +362,18 @@ fn choose_language() {
 /// dialog shows nothing.
 fn show_result(hwnd: HWND, k: Key, outcome: app::Outcome, plural: &str) {
     let Some(r) = outcome else { return };
-    RESULT_WAITS.with(|r| r.set(false));
     let text = match r {
         Ok(n) => crate::common::i18n::plural(plural, n as i64, &[&n]),
         Err(()) => t!("result_failed").to_string(),
     };
+    show_text(hwnd, k, r.is_ok(), text);
+}
+
+/// Answer in row `k`'s button for a moment: a tick (or a cross) and `text`.
+fn show_text(hwnd: HWND, k: Key, ok: bool, text: String) {
+    RESULT_WAITS.with(|r| r.set(false));
     with(|w| {
-        w.result = Some((k, r.is_ok(), text));
+        w.result = Some((k, ok, text));
         w.result_a.to(1.0);
     });
     anim::wake(Client::Settings);
@@ -424,8 +429,15 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
             }
             let choice = app::popup(items, p.x, p.y, hwnd);
             if choice > 0 {
-                let copied = crate::win::util::set_clipboard_text(&app::mcp_setup_for(choice as usize - 1));
-                show_result(hwnd, k, Some(if copied { Ok(1) } else { Err(()) }), "result_copied");
+                let i = choice as usize - 1;
+                let name = app::MCP_CLIENTS[i];
+                let (ok, text) = match app::mcp_connect(i) {
+                    app::McpConnect::Done => (true, t!("result_connected", name)),
+                    app::McpConnect::Copied => (true, crate::common::i18n::plural("result_copied", 1, &[&1])),
+                    app::McpConnect::Missing => (true, t!("result_not_installed").to_string()),
+                    app::McpConnect::Failed => (false, t!("result_failed").to_string()),
+                };
+                show_text(hwnd, k, ok, text);
             }
         }
     }

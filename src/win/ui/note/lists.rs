@@ -17,16 +17,20 @@ pub(super) fn toggle_check(e: HWND, cp: i32) {
         return;
     }
     let checked = c == rich::CHECKED;
-    let (a, b) = rich::sel(e);
-    let end = rich::para_end(&t, cp);
-    rich::set_sel(e, cp, cp + 1);
-    rich::replace_sel(e, if checked { "\u{2610}" } else { "\u{2611}" });
-    rich::set_sel(e, cp + 1, end);
-    rich::set_effect(e, CFM_STRIKEOUT, !checked);
-    // A caret before the box would draw inside the circle: keep it after it.
-    let (a, b) = if a == b && a == cp { (cp + 1, cp + 1) } else { (a, b) };
-    rich::set_sel(e, a, b);
-    rich::style_boxes(e); // completed items turn secondary; reopened ones regain full ink
+    // Held still: putting the caret back would otherwise scroll to it, away from the box
+    // that was just ticked.
+    rich::still(e, || {
+        let (a, b) = rich::sel(e);
+        let end = rich::para_end(&t, cp);
+        rich::set_sel(e, cp, cp + 1);
+        rich::replace_sel(e, if checked { "\u{2610}" } else { "\u{2611}" });
+        rich::set_sel(e, cp + 1, end);
+        rich::set_effect(e, CFM_STRIKEOUT, !checked);
+        // A caret before the box would draw inside the circle: keep it after it.
+        let (a, b) = if a == b && a == cp { (cp + 1, cp + 1) } else { (a, b) };
+        rich::set_sel(e, a, b);
+        rich::style_boxes(e); // completed items turn secondary; reopened ones regain full ink
+    });
     crate::win::editor::checks::animate(e, cp, !checked);
     LAST_TOGGLE.with(|l| l.set(Some((e as isize, cp, rich::text(e).len()))));
 }
@@ -545,6 +549,25 @@ mod tests {
         assert_eq!(plain(h), "T/☐ task/☐ ^");
         assert!(rich::undo_group(h));
         assert_eq!(plain(h), "T/☐ task/[]^");
+    }
+
+    /// Ticking a box up the note while the caret is far below keeps the view where it is.
+    #[test]
+    fn ticking_keeps_the_view() {
+        let mut body = String::from("Title\r\u{2610} up here\r");
+        for i in 0..80 {
+            body.push_str(&format!("line {i}\r"));
+        }
+        let h = editor(&body);
+        rich::style_boxes(h);
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        rich::set_scroll_y(h, 0);
+        assert_eq!(rich::scroll_y(h), 0);
+        let cp = rich::text(h).iter().position(|&c| c == rich::BOX).unwrap() as i32;
+        toggle_check(h, cp);
+        assert_eq!(rich::scroll_y(h), 0, "the view jumped to the caret");
+        assert_eq!(rich::sel(h), (end, end), "the caret stays where it was");
     }
 
     #[test]

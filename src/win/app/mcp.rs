@@ -62,15 +62,19 @@ pub fn bridge_path() -> std::path::PathBuf {
     crate::win::util::exe_path().with_file_name("peekaboo-mcp.exe")
 }
 
+/// The command an assistant runs for the bridge. From the Store/MSIX package it is a
+/// command on PATH (an execution alias); its real folder changes with every update.
+fn bridge_command() -> String {
+    if packaged() { "peekaboo-mcp.exe".to_string() } else { bridge_path().to_string_lossy().into_owned() }
+}
+
 /// Assistant apps that run local MCP servers, as the Settings menu lists them.
 pub const CLIENTS: [&str; 9] = ["ChatGPT (desktop app)", "Claude Desktop", "Claude Code", "Gemini CLI", "Codex", "Cursor", "VS Code", "Windsurf", "LM Studio"];
 
 /// What to paste for assistant app `i` of `CLIENTS`: a command to run, or a piece of its
 /// MCP settings file.
 pub fn setup_for(i: usize) -> String {
-    // From the Store/MSIX package the bridge is a command on PATH (an execution alias);
-    // its real folder changes with every update.
-    let exe = if packaged() { "peekaboo-mcp.exe".to_string() } else { bridge_path().to_string_lossy().into_owned() };
+    let exe = bridge_command();
     // The usual "mcpServers" JSON (Claude Desktop, Gemini CLI, Cursor, Windsurf, LM Studio).
     let servers = || serde_json::to_string_pretty(&json!({ "mcpServers": { "peekaboo-notes": { "command": exe } } })).unwrap_or_default();
     match CLIENTS.get(i).copied().unwrap_or("") {
@@ -81,6 +85,161 @@ pub fn setup_for(i: usize) -> String {
         "Codex" => format!("[mcp_servers.peekaboo-notes]\ncommand = '{exe}'"),
         "VS Code" => serde_json::to_string_pretty(&json!({ "servers": { "peekaboo-notes": { "type": "stdio", "command": exe } } })).unwrap_or_default(),
         _ => servers(),
+    }
+}
+
+/// What `connect` did for an assistant app.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Connect {
+    /// Its settings name the bridge now; it has to be restarted to see it.
+    Done,
+    /// It takes the setup in a form of its own: the setup is on the clipboard.
+    Copied,
+    /// It isn't installed here (its settings folder is missing): the setup is on the
+    /// clipboard.
+    Missing,
+    /// Its settings couldn't be read or written: the setup is on the clipboard.
+    Failed,
+}
+
+/// Set assistant app `i` of `CLIENTS` up to run the bridge, in its own MCP settings
+/// (a backup of the file is kept beside it); the app then has to be restarted. Where
+/// that can't be done, the setup goes on the clipboard, as `setup_for` gives it.
+pub fn connect(i: usize) -> Connect {
+    let exe = bridge_command();
+    let home = |rel: &str| std::env::var_os("USERPROFILE").map(|h| std::path::PathBuf::from(h).join(rel));
+    let roaming = |rel: &str| std::env::var_os("APPDATA").map(|h| std::path::PathBuf::from(h).join(rel));
+    let server = json!({ "command": exe });
+    let outcome = match CLIENTS.get(i).copied().unwrap_or("") {
+        "Claude Desktop" => roaming(r"Claude\claude_desktop_config.json").map(|p| put_json(&p, "mcpServers", server)),
+        // Its own command keeps its settings file in step with a running Claude Code.
+        "Claude Code" => Some(if run_hidden(&["claude", "mcp", "add", "-s", "user", "peekaboo-notes", "--", &exe]) { Connect::Done } else { Connect::Missing }),
+        "Gemini CLI" => home(r".gemini\settings.json").map(|p| put_json(&p, "mcpServers", server)),
+        "Codex" => home(r".codex\config.toml").map(|p| put_toml(&p, &setup_for(i))),
+        "Cursor" => home(r".cursor\mcp.json").map(|p| put_json(&p, "mcpServers", server)),
+        "VS Code" => roaming(r"Code\User\mcp.json").map(|p| put_json(&p, "servers", json!({ "type": "stdio", "command": exe }))),
+        "Windsurf" => home(r".codeium\windsurf\mcp_config.json").map(|p| put_json(&p, "mcpServers", server)),
+        "LM Studio" => home(r".lmstudio\mcp.json").map(|p| put_json(&p, "mcpServers", server)),
+        _ => None,
+    };
+    let outcome = outcome.unwrap_or(Connect::Copied);
+    if outcome != Connect::Done {
+        crate::win::util::set_clipboard_text(&setup_for(i));
+    }
+    outcome
+}
+
+/// Put `entry` as "peekaboo-notes" in the `section` object of the JSON file at `path`,
+/// keeping everything else in it. Missing when its folder (the app) isn't there.
+fn put_json(path: &std::path::Path, section: &str, entry: Value) -> Connect {
+    let Some(dir) = path.parent() else { return Connect::Failed };
+    if !dir.is_dir() {
+        return Connect::Missing;
+    }
+    let mut root = match std::fs::read_to_string(path) {
+        Ok(s) if !s.trim().is_empty() => match serde_json::from_str::<Value>(&s) {
+            Ok(v) => v,
+            Err(_) => return Connect::Failed,
+        },
+        _ => json!({}),
+    };
+    let Some(obj) = root.as_object_mut() else { return Connect::Failed };
+    let s = obj.entry(section).or_insert_with(|| json!({}));
+    let Some(s) = s.as_object_mut() else { return Connect::Failed };
+    s.insert("peekaboo-notes".to_string(), entry);
+    write_back(path, &serde_json::to_string_pretty(&root).unwrap_or_default())
+}
+
+/// Put the TOML `table` (its header line first) in the file at `path`, in place of the
+/// same table if it's there, keeping everything else.
+fn put_toml(path: &std::path::Path, table: &str) -> Connect {
+    let Some(dir) = path.parent() else { return Connect::Failed };
+    if !dir.is_dir() {
+        return Connect::Missing;
+    }
+    let head = table.lines().next().unwrap_or_default();
+    let cur = std::fs::read_to_string(path).unwrap_or_default();
+    let next = match cur.find(head) {
+        Some(i) => {
+            let after = i + head.len();
+            let end = cur[after..].find("\n[").map_or(cur.len(), |j| after + j + 1);
+            format!("{}{table}\n{}", &cur[..i], &cur[end..])
+        }
+        None => format!("{cur}{}{table}\n", if cur.is_empty() || cur.ends_with('\n') { "" } else { "\n" }),
+    };
+    write_back(path, &next)
+}
+
+/// Write `text` to `path`, keeping what was there as `<name>.bak`.
+fn write_back(path: &std::path::Path, text: &str) -> Connect {
+    if path.is_file() {
+        let mut bak = path.as_os_str().to_owned();
+        bak.push(".bak");
+        let _ = std::fs::copy(path, bak);
+    }
+    match std::fs::write(path, text) {
+        Ok(()) => Connect::Done,
+        Err(_) => Connect::Failed,
+    }
+}
+
+/// Run a command line without a console window; true when it succeeded.
+fn run_hidden(args: &[&str]) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("cmd").arg("/c").args(args).creation_flags(CREATE_NO_WINDOW).output().is_ok_and(|o| o.status.success())
+}
+
+#[cfg(test)]
+mod connect_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("peekaboo-connect-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn json_settings_keep_their_other_entries() {
+        let dir = scratch("json");
+        let p = dir.join("claude_desktop_config.json");
+        // No file yet: made.
+        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "a.exe" })), Connect::Done);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "a.exe");
+        // Other servers and settings stay; ours is replaced; a backup is kept.
+        std::fs::write(&p, r#"{ "theme": "dark", "mcpServers": { "other": { "command": "o" }, "peekaboo-notes": { "command": "old" } } }"#).unwrap();
+        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "new.exe" })), Connect::Done);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v["theme"], "dark");
+        assert_eq!(v["mcpServers"]["other"]["command"], "o");
+        assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "new.exe");
+        assert!(std::fs::read_to_string(dir.join("claude_desktop_config.json.bak")).unwrap().contains("old"));
+        // A file that isn't JSON is left alone.
+        std::fs::write(&p, "not json").unwrap();
+        assert_eq!(put_json(&p, "mcpServers", json!({})), Connect::Failed);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "not json");
+        // No folder: the app isn't installed.
+        assert_eq!(put_json(&dir.join("nowhere").join("x.json"), "mcpServers", json!({})), Connect::Missing);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn toml_table_is_added_or_replaced() {
+        let dir = scratch("toml");
+        let p = dir.join("config.toml");
+        let table = "[mcp_servers.peekaboo-notes]\ncommand = 'new.exe'";
+        assert_eq!(put_toml(&p, table), Connect::Done);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), format!("{table}\n"));
+        std::fs::write(&p, "model = \"x\"\n[mcp_servers.peekaboo-notes]\ncommand = 'old'\n\n[mcp_servers.other]\ncommand = 'o'\n").unwrap();
+        assert_eq!(put_toml(&p, table), Connect::Done);
+        let s = std::fs::read_to_string(&p).unwrap();
+        assert!(s.starts_with("model = \"x\"\n"), "{s}");
+        assert!(s.contains("command = 'new.exe'") && !s.contains("'old'"), "{s}");
+        assert!(s.contains("[mcp_servers.other]\ncommand = 'o'"), "{s}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

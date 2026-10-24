@@ -86,17 +86,17 @@ A round trip keeps nesting, emphasis, links, attachments and ticked items intact
 
 ## AI assistants (MCP)
 
-Off until **Settings > Data > Allow assistants (MCP)**. **Copy Setup** puts the right snippet on the clipboard:
+Off until **Settings > Data > Allow assistants (MCP)**. **Connect** writes the bridge into the chosen app's own MCP settings (keeping a `.bak` of the file beside it), and the app has to be restarted. Where the app isn't installed (its settings folder is missing), or takes the setup in a form of its own, the snippet goes on the clipboard instead:
 
 | App | Where it goes |
 |---|---|
-| ChatGPT (desktop app) | Add an MCP server of type STDIO, with the copied command |
-| Claude Desktop | `claude_desktop_config.json` (the copied `mcpServers` block) |
-| Claude Code | Run the copied `claude mcp add ...` command |
-| Gemini CLI | `~/.gemini/settings.json` |
-| Codex | `~/.codex/config.toml` (the copied `[mcp_servers...]` table) |
-| Cursor, Windsurf, LM Studio | Their `mcp.json` (the copied `mcpServers` block) |
-| VS Code (Copilot) | `.vscode/mcp.json` (the copied `servers` block) |
+| ChatGPT (desktop app) | Copied: add an MCP server of type STDIO, with the command |
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` (`mcpServers`) |
+| Claude Code | Runs `claude mcp add -s user peekaboo-notes -- ...`; copied if `claude` isn't on PATH |
+| Gemini CLI | `~/.gemini/settings.json` (`mcpServers`) |
+| Codex | `~/.codex/config.toml` (the `[mcp_servers.peekaboo-notes]` table) |
+| Cursor, Windsurf, LM Studio | `~/.cursor/mcp.json`, `~/.codeium/windsurf/mcp_config.json`, `~/.lmstudio/mcp.json` (`mcpServers`) |
+| VS Code (Copilot) | `%APPDATA%\Code\User\mcp.json` (`servers`) |
 
 Any other app that runs local MCP servers works the same way: its command is `peekaboo-mcp.exe` from the app's folder (from the MSIX, just `peekaboo-mcp.exe`). ChatGPT on the web only reaches servers on the internet, so it can't use this one.
 

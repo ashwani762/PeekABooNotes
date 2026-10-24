@@ -310,8 +310,10 @@
     <string name="settings_mcp">Assistenten erlauben (MCP)</string>
     <string name="settings_mcp_sub">KI-Apps wie ChatGPT und Claude lesen und schreiben Notizen</string>
     <string name="settings_mcp_setup">Assistenten verbinden</string>
-    <string name="settings_mcp_setup_sub">App wählen und ihre Einrichtung kopieren</string>
-    <string name="button_copy_setup">Einrichtung kopieren</string>
+    <string name="settings_mcp_setup_sub">App wählen, der Rest wird eingerichtet</string>
+    <string name="button_connect">Verbinden</string>
+    <string name="result_connected">%1$s neu starten</string>
+    <string name="result_not_installed">Nicht installiert, Einrichtung kopiert</string>
     <string name="settings_mcp_footer">Assistenten können Notizen archivieren, aber nie löschen.</string>
     <plurals name="result_copied">
         <item quantity="one">Kopiert</item>

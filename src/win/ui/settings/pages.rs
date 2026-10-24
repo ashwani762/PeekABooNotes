@@ -126,7 +126,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                     header: Some(t!("settings_group_assistants")),
                     rows: vec![
                         row_sub(Key::Mcp, t!("settings_mcp"), t!("settings_mcp_sub"), Ctl::Toggle),
-                        row_sub(Key::McpSetup, t!("settings_mcp_setup"), t!("settings_mcp_setup_sub"), Ctl::Button(t!("button_copy_setup"))),
+                        row_sub(Key::McpSetup, t!("settings_mcp_setup"), t!("settings_mcp_setup_sub"), Ctl::Button(t!("button_connect"))),
                     ],
                     footer: Some(t!("settings_mcp_footer").into()),
                 },

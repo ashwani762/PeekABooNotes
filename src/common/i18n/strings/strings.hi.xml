@@ -310,8 +310,10 @@
     <string name="settings_mcp">सहायकों को अनुमति दें (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude और दूसरे AI ऐप आपके नोट्स पढ़ और लिख सकते हैं</string>
     <string name="settings_mcp_setup">सहायक जोड़ें</string>
-    <string name="settings_mcp_setup_sub">अपना ऐप चुनें और उसका सेटअप कॉपी करें</string>
-    <string name="button_copy_setup">सेटअप कॉपी करें</string>
+    <string name="settings_mcp_setup_sub">अपना ऐप चुनें, सेटअप अपने आप हो जाएगा</string>
+    <string name="button_connect">कनेक्ट करें</string>
+    <string name="result_connected">%1$s फिर से शुरू करें</string>
+    <string name="result_not_installed">इंस्टॉल नहीं है, सेटअप कॉपी किया</string>
     <string name="settings_mcp_footer">सहायक नोट्स को संग्रह में रख सकते हैं, पर कभी हटा नहीं सकते।</string>
     <plurals name="result_copied">
         <item quantity="one">कॉपी हो गया</item>

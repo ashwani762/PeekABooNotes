@@ -57,12 +57,12 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
 
 ## Works with your AI assistant
 
-Turn it on in Settings and **ChatGPT, Claude, Gemini, Copilot, Cursor** and other assistants can find, read and write your notes, through the open [Model Context Protocol](https://modelcontextprotocol.io). Pick your app, press **Copy Setup**, paste. Assistants can create, edit and archive notes, but never delete them. It's off until you say so, and works only on this computer.
+Turn it on in Settings and **ChatGPT, Claude, Gemini, Copilot, Cursor** and other assistants can find, read and write your notes, through the open [Model Context Protocol](https://modelcontextprotocol.io). Pick your app, press **Connect**, restart the app. Assistants can create, edit and archive notes, but never delete them. It's off until you say so, and works only on this computer.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/assistants-dark.png">
-    <img src="docs/screenshots/assistants-light.png" alt="Settings, AI Assistants: the switch to allow assistants is on, and Copy Setup lists ChatGPT, Claude Desktop, Claude Code, Gemini CLI, Codex, Cursor, VS Code, Windsurf and LM Studio." width="60%">
+    <img src="docs/screenshots/assistants-light.png" alt="Settings, AI Assistants: the switch to allow assistants is on, and Connect lists ChatGPT, Claude Desktop, Claude Code, Gemini CLI, Codex, Cursor, VS Code, Windsurf and LM Studio." width="60%">
   </picture>
 </p>
 

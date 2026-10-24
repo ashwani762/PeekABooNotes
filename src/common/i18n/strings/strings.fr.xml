@@ -310,8 +310,10 @@
     <string name="settings_mcp">Autoriser les assistants (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT, Claude et d\'autres IA lisent et écrivent vos notes</string>
     <string name="settings_mcp_setup">Connecter un assistant</string>
-    <string name="settings_mcp_setup_sub">Choisissez votre app pour copier sa configuration</string>
-    <string name="button_copy_setup">Copier la configuration</string>
+    <string name="settings_mcp_setup_sub">Choisissez votre app, elle sera configurée</string>
+    <string name="button_connect">Connecter</string>
+    <string name="result_connected">Redémarrez %1$s</string>
+    <string name="result_not_installed">Non installée, configuration copiée</string>
     <string name="settings_mcp_footer">Les assistants peuvent archiver des notes, jamais les supprimer.</string>
     <plurals name="result_copied">
         <item quantity="one">Copié</item>

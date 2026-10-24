@@ -296,8 +296,10 @@
     <string name="settings_mcp">アシスタントを許可 (MCP)</string>
     <string name="settings_mcp_sub">ChatGPT や Claude などの AI アプリがメモを読み書きできます</string>
     <string name="settings_mcp_setup">アシスタントを接続</string>
-    <string name="settings_mcp_setup_sub">アプリを選んで構成をコピー</string>
-    <string name="button_copy_setup">構成をコピー</string>
+    <string name="settings_mcp_setup_sub">アプリを選ぶだけで設定されます</string>
+    <string name="button_connect">接続</string>
+    <string name="result_connected">%1$s を再起動</string>
+    <string name="result_not_installed">未インストール、設定をコピー</string>
     <string name="settings_mcp_footer">アシスタントはメモをアーカイブできますが、削除はできません。</string>
     <plurals name="result_copied">
         <item quantity="other">コピーしました</item>

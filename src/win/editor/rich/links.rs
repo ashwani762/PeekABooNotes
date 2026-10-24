@@ -85,6 +85,9 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
             let _ = d.Unfreeze();
         }
     }
+    // A caret put back far from the change scrolls into view as the display thaws, past
+    // the scroll position set while it was frozen: set it again.
+    set_scroll_y(h, y);
     let after = text(h);
     if after != before {
         LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after, caret)));
