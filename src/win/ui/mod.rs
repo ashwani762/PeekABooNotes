@@ -352,6 +352,9 @@ fn table(c: Option<&mut Canvas>, p: &Pass, header: Option<&str>, align: &[Align]
     (h <= bottom - y).then_some(h)
 }
 
+/// A recently shown picture: (name, most width, most height), and the picture.
+type Thumb = ((String, i32, i32), Option<Rc<Image>>);
+
 /// Pictures in previews: at most as wide as the text, and this tall (DIPs).
 const PICTURE_H: f32 = 120.0;
 
@@ -418,8 +421,7 @@ thread_local! {
     /// alive, so no other font can come to look like it (`Font::same`).
     static VARIANTS: RefCell<Vec<(Font, Variant, Font)>> = const { RefCell::new(Vec::new()) };
     static MONO: Cell<Option<&'static str>> = const { Cell::new(None) };
-    /// Recently shown pictures, by (name, most width, most height).
-    static THUMBS: RefCell<Vec<((String, i32, i32), Option<Rc<Image>>)>> = const { RefCell::new(Vec::new()) };
+    static THUMBS: RefCell<Vec<Thumb>> = const { RefCell::new(Vec::new()) };
 }
 
 fn block_font(f: &Font, v: Variant) -> Font {
