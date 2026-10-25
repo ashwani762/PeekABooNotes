@@ -115,6 +115,22 @@ pub fn local_file(link: &str, base: &Path) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// Which files a link may bring in: those under one of `roots`, and none under one of
+/// `except` (the notes' own folder holds notes.json). Both sides fully resolved first, so
+/// `..`, links and network paths can't reach outside.
+pub struct Allowed {
+    pub roots: Vec<PathBuf>,
+    pub except: Vec<PathBuf>,
+}
+
+impl Allowed {
+    pub fn admits(&self, file: &Path) -> bool {
+        let Ok(f) = std::fs::canonicalize(file) else { return false };
+        let under = |dir: &PathBuf| std::fs::canonicalize(dir).is_ok_and(|d| f.starts_with(d));
+        self.roots.iter().any(under) && !self.except.iter().any(under)
+    }
+}
+
 /// "file:///C:/Users/me/Documents/PeekABoo%20Notes/attachments/plan.pdf".
 #[cfg(test)]
 fn file_url(path: &Path) -> String {
@@ -143,6 +159,25 @@ mod tests {
         assert_eq!(name_of("attachment:..%2Fsecret"), None);
         assert_eq!(name_of("attachment:a%5Cb"), None);
         assert_eq!(name_of("https://x.org"), None);
+    }
+
+    #[test]
+    fn only_allowed_folders_are_admitted() {
+        let dir = std::env::temp_dir().join(format!("peekaboo-allowed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["ok", "ok/notes", "ok/notes/attachments", "secret"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        for f in ["ok/a.png", "ok/notes/notes.json", "ok/notes/attachments/b.png", "secret/key.txt"] {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        let allowed = Allowed { roots: vec![dir.join("ok"), dir.join("ok/notes/attachments")], except: vec![dir.join("ok/notes")] };
+        assert!(allowed.admits(&dir.join("ok/a.png")));
+        assert!(!allowed.admits(&dir.join("secret/key.txt")), "outside every root");
+        assert!(!allowed.admits(&dir.join("ok/../secret/key.txt")), "not by going up");
+        assert!(!allowed.admits(&dir.join("ok/notes/notes.json")), "not the notes themselves");
+        assert!(!allowed.admits(&dir.join("ok/missing.png")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

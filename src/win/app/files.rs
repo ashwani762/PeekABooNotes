@@ -197,7 +197,10 @@ pub fn import(owner: HWND) -> Outcome {
         }
         rich::load_markdown(w, text);
         // Links to files beside it (an export's attachments) come in as attachments.
-        crate::win::ui::note::adopt_files(w, f.parent().unwrap_or(std::path::Path::new(".")));
+        // Only files beside the imported one (an export's attachments folder): a Markdown
+        // file from elsewhere can't pull in whatever it names.
+        let folder = f.parent().unwrap_or(std::path::Path::new("."));
+        crate::win::ui::note::adopt_files(w, folder, &crate::common::attach::Allowed { roots: vec![folder.to_path_buf()], except: Vec::new() });
         let rtf = rich::get_rtf(w);
         let plain = rich::to_markdown(w, false);
         store_mut(|s| s.create(&plain, &rtf));

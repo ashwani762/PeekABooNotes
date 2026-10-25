@@ -460,7 +460,7 @@ impl Drop for Scratch {
 /// Markdown into editor `e`, with files it links on this computer copied in.
 fn load(e: HWND, md: &str) {
     rich::load_markdown(e, md);
-    note::adopt_files(e, &crate::common::util::data_dir());
+    note::adopt_files(e, &crate::common::util::data_dir(), &note::assistant_folders());
 }
 
 /// (text, rtf) for a note from editor `e`'s content.

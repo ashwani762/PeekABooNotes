@@ -24,7 +24,7 @@ use crate::win::theme;
 use crate::win::util::{WM_MOUSELEAVE, key_down, mix, now, rect, wide, x_of, y_of};
 
 mod attach;
-pub use attach::{adopt_files, thumbnail};
+pub use attach::{adopt_files, assistant_folders, thumbnail};
 mod chrome;
 mod commands;
 pub mod versions;

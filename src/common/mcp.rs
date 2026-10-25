@@ -111,7 +111,7 @@ const TOOLS: &str = r#"[
  {
   "name": "create_note",
   "title": "Create a note",
-  "description": "Creates a note from Markdown. The first line is its title. Supported: **bold**, _italic_, ~~strike~~, <u>underline</u>, - bullets, 1. numbers, - [ ] / - [x] checklist items, > quotes (lists inside them as > - item; indented two spaces under a list item), ``` code blocks ```, | tables | with a | --- | row (:---: centres a column), <p align=\"center\">centred</p> or align=\"right\" lines, [links](https://...), and files on this computer as ![name](C:/path/picture.png) or [name](C:/path/file.pdf), which are copied in as attachments. Other headings come in as plain text.",
+  "description": "Creates a note from Markdown. The first line is its title. Supported: **bold**, _italic_, ~~strike~~, <u>underline</u>, - bullets, 1. numbers, - [ ] / - [x] checklist items, > quotes (lists inside them as > - item; indented two spaces under a list item), ``` code blocks ```, | tables | with a | --- | row (:---: centres a column), <p align=\"center\">centred</p> or align=\"right\" lines, [links](https://...), and files from the user's Pictures, Documents, Downloads, Desktop, Videos, Music or the temp folder as ![name](C:/path/picture.png) or [name](C:/path/file.pdf), which are copied in as attachments (links to files elsewhere stay links). Other headings come in as plain text.",
   "inputSchema": {
    "type": "object",
    "properties": {

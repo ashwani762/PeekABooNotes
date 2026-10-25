@@ -304,14 +304,14 @@ pub(super) fn flush_pending(h: HWND) {
 }
 
 /// Links in editor `e` (just loaded from Markdown in folder `base`) that point at local
-/// files: the files are copied in as attachments. A link alone on its line becomes the
-/// attachment itself (a picture shows); one inside a sentence keeps its words and points
-/// at the copy.
-pub fn adopt_files(e: HWND, base: &Path) {
+/// files `allowed` admits: the files are copied in as attachments (links to others stay
+/// as they are). A link alone on its line becomes the attachment itself (a picture
+/// shows); one inside a sentence keeps its words and points at the copy.
+pub fn adopt_files(e: HWND, base: &Path, allowed: &attach::Allowed) {
     let t = rich::text(e);
     // From the end, so what's changed never moves what's still to do.
     for (at, name_at, link) in rich::instructions(&t, 0, t.len()).into_iter().rev() {
-        let Some(file) = attach::local_file(&link, base) else { continue };
+        let Some(file) = attach::local_file(&link, base).filter(|f| allowed.admits(f)) else { continue };
         let Ok(name) = attach::copy_in(&file) else { continue };
         let t = rich::text(e);
         let Some((a, b, _)) = rich::link_at(e, name_at as i32) else { continue };
@@ -328,6 +328,28 @@ pub fn adopt_files(e: HWND, base: &Path) {
             rich::set_link(e, a, a + shown, &attach::url(&name));
         }
     }
+}
+
+/// The folders an assistant's links may bring files in from: the user's own (pictures,
+/// documents, downloads and the like) and the temp folder, where assistants make
+/// charts; never the notes' folder itself, other than its attachments.
+pub fn assistant_folders() -> attach::Allowed {
+    use windows_sys::Win32::UI::Shell::{FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures, FOLDERID_Videos, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    let mut roots = Vec::new();
+    for id in [&FOLDERID_Pictures, &FOLDERID_Documents, &FOLDERID_Downloads, &FOLDERID_Desktop, &FOLDERID_Videos, &FOLDERID_Music] {
+        let mut p: windows_sys::core::PWSTR = std::ptr::null_mut();
+        unsafe {
+            if SHGetKnownFolderPath(id, KF_FLAG_DEFAULT as _, std::ptr::null_mut(), &mut p) == 0 && !p.is_null() {
+                let n = (0..).take_while(|&i| *p.add(i) != 0).count();
+                roots.push(PathBuf::from(String::from_utf16_lossy(std::slice::from_raw_parts(p, n))));
+            }
+            windows_sys::Win32::System::Com::CoTaskMemFree(p as _);
+        }
+    }
+    roots.push(std::env::temp_dir());
+    let data = crate::common::util::data_dir();
+    roots.push(data.join(attach::EXPORT_DIR));
+    attach::Allowed { roots, except: vec![data] }
 }
 
 /// One of this note's attachments was dragged to another place in it: move it there,
