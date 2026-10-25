@@ -5,6 +5,26 @@
 
 use super::*;
 
+/// Which display the deck is on: only worth asking with more than one, or while the
+/// one chosen isn't connected, which then says why the deck is on the main display.
+/// The displays are the list kept between display changes, not looked for again on
+/// every rebuild.
+fn display_row() -> Option<Row> {
+    if display_away() {
+        return Some(row_sub(Key::DeckDisplay, t!("settings_deck_display"), t!("settings_deck_display_away"), Ctl::Choice));
+    }
+    (crate::win::ui::displays::list().len() > 1).then(|| row(Key::DeckDisplay, t!("settings_deck_display"), Ctl::Choice))
+}
+
+/// The Deck page's rows, with the deck's display after the screen edge when it's asked.
+fn with_display_row(mut rows: Vec<Row>) -> Vec<Row> {
+    if let Some(r) = display_row() {
+        let at = rows.iter().position(|r| r.key == Some(Key::Edge)).map_or(rows.len(), |i| i + 1);
+        rows.insert(at, r);
+    }
+    rows
+}
+
 pub(super) fn page(i: usize) -> Vec<Group> {
     match i {
         0 => vec![
@@ -43,12 +63,12 @@ pub(super) fn page(i: usize) -> Vec<Group> {
         2 => vec![
             Group {
                 header: None,
-                rows: vec![
+                rows: with_display_row(vec![
                     row_sub(Key::ShowDeck, t!("settings_show_deck"), t!("settings_show_deck_sub"), Ctl::Toggle),
                     row(Key::Edge, t!("settings_screen_edge"), Ctl::Seg(vec![t!("edge_left"), t!("edge_right")])),
                     row_sub(Key::Cards, t!("settings_cards"), t!("settings_cards_sub"), Ctl::Seg(vec!["5", "8", "12"])),
                     row_sub(Key::NewAt, t!("settings_new_notes"), t!("settings_new_notes_sub"), Ctl::Seg(vec![t!("new_notes_top"), t!("new_notes_bottom")])),
-                ],
+                ]),
                 footer: None,
             },
             Group {

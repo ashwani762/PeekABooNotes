@@ -206,6 +206,12 @@
     <string name="settings_screen_edge">画面の端</string>
     <string name="edge_left">左</string>
     <string name="edge_right">右</string>
+    <string name="settings_deck_display">デッキを表示する画面</string>
+    <string name="settings_deck_display_away">再接続されるまで、デッキはメイン ディスプレイに表示されます</string>
+    <string name="display_main">メイン ディスプレイ</string>
+    <string name="display_builtin">内蔵ディスプレイ</string>
+    <string name="display_numbered">ディスプレイ %d</string>
+    <string name="display_not_connected">%s (未接続)</string>
     <string name="settings_cards">デッキのカード数</string>
     <string name="settings_cards_sub">画面に収まる分を表示し、残りは「すべてのメモ」から開けます</string>
     <string name="settings_new_notes">新規メモの位置</string>

@@ -84,6 +84,14 @@ pub struct Settings {
     pub deck_hidden: bool,
     #[serde(default)]
     pub over_fullscreen: bool,
+    /// The display the deck is on: its monitor's device path, which stays the same when
+    /// Windows renumbers its displays; empty is the main display.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub deck_display: String,
+    /// That display's name when it was chosen, to say which one is missing while it's
+    /// not connected.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub deck_display_name: String,
     /// Vertical centre of the deck as a fraction of the work area height.
     #[serde(default = "default_pos")]
     pub deck_pos: f32,
@@ -150,6 +158,8 @@ impl Default for Settings {
             edge_left: false,
             deck_hidden: false,
             over_fullscreen: false,
+            deck_display: String::new(),
+            deck_display_name: String::new(),
             deck_pos: default_pos(),
             theme: 0,
             reduce_motion: false,
@@ -828,6 +838,22 @@ mod tests {
         // And so after the next load.
         let d: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert!(d.stale_light_text().is_empty());
+    }
+
+    #[test]
+    fn deck_display_defaults_to_the_main_one() {
+        // Settings saved before the deck could go on another display.
+        let d: Data = serde_json::from_str(r#"{"settings":{"edge_left":true,"deck_pos":0.3,"language":"de"}}"#).unwrap();
+        assert!(d.settings.edge_left && d.settings.language == "de");
+        assert!(d.settings.deck_display.is_empty() && d.settings.deck_display_name.is_empty());
+        // Left out while it's the main display, so such files stay as they were.
+        assert!(!serde_json::to_string(&d).unwrap().contains("deck_display"));
+        let mut d = d;
+        d.settings.deck_display = r"\\?\DISPLAY#DEL40F4#5&1&UID4352#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}".into();
+        d.settings.deck_display_name = "DELL U2720Q".into();
+        let back: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert_eq!(back.settings.deck_display, d.settings.deck_display);
+        assert_eq!(back.settings.deck_display_name, "DELL U2720Q");
     }
 
 

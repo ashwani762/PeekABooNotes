@@ -323,9 +323,14 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
         WM_SETTINGCHANGE => {
             apply_motion();
             apply_theme();
+            // The work area may have changed (the taskbar moved or hides itself).
+            crate::win::ui::displays::forget();
             deck::refresh();
         }
-        WM_DISPLAYCHANGE => deck::refresh(),
+        WM_DISPLAYCHANGE => {
+            crate::win::ui::displays::forget();
+            deck::refresh();
+        }
         WM_TIMER if wp == T_TRIM => {
             unsafe { KillTimer(h, T_TRIM) };
             trim_memory();
