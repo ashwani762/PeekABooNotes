@@ -255,9 +255,10 @@ fn call(notes: &mut dyn Notes, name: &str, args: &Value) -> Result<Value, String
     match name {
         "list_notes" => {
             let status = match args.get("status").and_then(Value::as_str).unwrap_or("active") {
+                "active" => Status::Active,
                 "archived" => Status::Archived,
                 "all" => Status::All,
-                _ => Status::Active,
+                other => return Err(format!("No status \"{other}\": use \"active\", \"archived\" or \"all\".")),
             };
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 500) as usize;
             let query = args.get("query").and_then(Value::as_str).filter(|q| !q.trim().is_empty());
@@ -294,6 +295,11 @@ fn error(id: &Value, code: i64, message: &str) -> String {
 }
 
 /// Answer one JSON-RPC message. None for notifications, which get no answer.
+/// The answer to a request line too long to take.
+pub fn request_too_long() -> String {
+    error(&Value::Null, -32600, "The request is too long.")
+}
+
 pub fn handle(line: &str, notes: &mut dyn Notes) -> Option<String> {
     // Some clients (a PowerShell pipe, for one) start the first line with a byte order mark.
     let line = line.trim_start_matches('\u{FEFF}');
@@ -301,6 +307,11 @@ pub fn handle(line: &str, notes: &mut dyn Notes) -> Option<String> {
         Ok(v) => v,
         Err(_) => return Some(error(&Value::Null, -32700, "Not JSON.")),
     };
+    // Batches (an array of requests) aren't taken: say so rather than leave the client
+    // waiting for an answer.
+    if !msg.is_object() {
+        return Some(error(&Value::Null, -32600, "Send one request per line, as a JSON object."));
+    }
     let id = msg.get("id").cloned()?; // no id: a notification
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
@@ -343,6 +354,33 @@ pub fn handle(line: &str, notes: &mut dyn Notes) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn batches_and_unknown_statuses_get_errors() {
+        struct None_;
+        impl Notes for None_ {
+            fn list(&mut self, _: Option<&str>, _: Status, _: usize) -> Value {
+                json!([])
+            }
+            fn read(&mut self, _: u64) -> Result<Value, String> {
+                Err("no".into())
+            }
+            fn create(&mut self, _: &str, _: Option<u8>, _: bool) -> Result<Value, String> {
+                Err("no".into())
+            }
+            fn write(&mut self, _: u64, _: &str, _: bool) -> Result<Value, String> {
+                Err("no".into())
+            }
+            fn set_state(&mut self, _: u64, _: State) -> Result<Value, String> {
+                Err("no".into())
+            }
+        }
+        let batch = handle(r#"[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]"#, &mut None_).unwrap();
+        assert!(batch.contains("-32600"), "{batch}");
+        let bad = handle(r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_notes","arguments":{"status":"bogus"}}}"#, &mut None_).unwrap();
+        assert!(bad.contains("No status") && bad.contains("\"isError\":true"), "{bad}");
+    }
+
     use super::*;
 
     #[derive(Default)]

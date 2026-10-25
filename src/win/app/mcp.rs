@@ -3,27 +3,47 @@
 
 //! MCP for assistants, on Windows: a named pipe the `peekaboo-mcp` program connects to,
 //! and the note work behind `common::mcp`'s tools. Each client gets a thread that reads
-//! its lines; every request is carried out on the UI thread (through `SendMessage`), so
-//! an assistant's edits behave like the user's: open notes update, the deck and All Notes
-//! refresh, nothing races the store.
+//! its lines; every request is carried out on the UI thread (queued, then a message to
+//! the main window), so an assistant's edits behave like the user's: open notes update,
+//! the deck and All Notes refresh, nothing races the store.
 
+use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::os::windows::io::FromRawHandle;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::windows::io::{AsRawHandle, FromRawHandle};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use serde_json::{Value, json};
-use windows_sys::Win32::Foundation::{ERROR_PIPE_CONNECTED, GetLastError, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree};
+use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+use windows_sys::Win32::Security::{GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser};
 use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
-use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT};
+use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT};
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::*;
 use crate::common::mcp::{self, State, Status};
 use crate::common::store::title_of;
 use crate::common::{attach, search};
 
-/// Sent to the main window: wParam points at the request line, lParam at the reply.
+/// Posted to the main window when a request is queued. It carries nothing: the work is
+/// in `QUEUE`, so a message from anywhere else at most finds the queue empty.
 pub const WM_MCP: u32 = WM_APP + 77;
+
+/// A request line, and where its reply goes.
+type Job = (String, mpsc::Sender<String>);
+static QUEUE: Mutex<VecDeque<Job>> = Mutex::new(VecDeque::new());
+
+/// Connected assistants' pipe handles, so turning assistants off can let them go at
+/// once. A client takes its own out (under the lock) before its handle closes.
+static CLIENTS_OPEN: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+
+/// The longest request line taken: a note's 100,000 characters with room to spare. A
+/// longer one is answered with an error, never held in memory whole.
+const MAX_LINE: usize = 4 << 20;
 
 /// The pipe's name: one per Windows user. (`peekaboo-mcp` builds the same name.)
 fn pipe_name() -> String {
@@ -45,15 +65,28 @@ pub fn init(main: HWND) {
 pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::SeqCst);
     if on {
-        if !LISTENING.swap(true, Ordering::SeqCst) {
-            let main = MAIN.load(Ordering::SeqCst);
-            let _ = std::thread::Builder::new().name("mcp".into()).spawn(move || serve(main));
-            log::info("mcp: on");
+        listen();
+        log::info("mcp: on");
+    } else {
+        if LISTENING.load(Ordering::SeqCst) {
+            // The server waits for a connection: make one, so it sees it's off and stops.
+            let _ = std::fs::OpenOptions::new().read(true).write(true).open(pipe_name());
         }
-    } else if LISTENING.load(Ordering::SeqCst) {
-        // The server waits for a connection: make one, so it sees it's off and stops.
-        let _ = std::fs::OpenOptions::new().read(true).write(true).open(pipe_name());
+        // And the assistants connected now are let go.
+        for &h in CLIENTS_OPEN.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            unsafe { DisconnectNamedPipe(h as HANDLE) };
+        }
         log::info("mcp: off");
+    }
+}
+
+/// Start the server, unless one is running.
+fn listen() {
+    if !LISTENING.swap(true, Ordering::SeqCst) {
+        let main = MAIN.load(Ordering::SeqCst);
+        if std::thread::Builder::new().name("mcp".into()).spawn(move || serve(main)).is_err() {
+            LISTENING.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -201,8 +234,20 @@ fn saved_or_err() -> Result<(), String> {
 }
 
 fn serve(main: isize) {
+    serve_while_on(main);
+    LISTENING.store(false, Ordering::SeqCst);
+    // Turned off and straight back on while this was on its way out: carry on.
+    if ENABLED.load(Ordering::SeqCst) {
+        listen();
+    }
+}
+
+fn serve_while_on(main: isize) {
     let name = wide(&pipe_name());
+    let sd = OwnerOnly::new();
+    let mut failures = 0;
     loop {
+        let sa = SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.as_ref().map_or(std::ptr::null_mut(), |d| d.0), bInheritHandle: 0 };
         let h = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
@@ -212,17 +257,24 @@ fn serve(main: isize) {
                 64 * 1024,
                 64 * 1024,
                 0,
-                std::ptr::null(),
+                if sd.is_some() { &sa } else { std::ptr::null() },
             )
         };
         if h == INVALID_HANDLE_VALUE {
+            // Taken for a moment (another program holding the name, a handle shortage):
+            // try again for a while rather than leave assistants off for the session.
+            failures += 1;
             log::warn(&format!("mcp: couldn't open the pipe ({})", unsafe { GetLastError() }));
-            return;
+            if failures > 10 || !ENABLED.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(failures));
+            continue;
         }
+        failures = 0;
         let ok = unsafe { ConnectNamedPipe(h, std::ptr::null_mut()) } != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         let file = unsafe { File::from_raw_handle(h as _) };
         if !ENABLED.load(Ordering::SeqCst) {
-            LISTENING.store(false, Ordering::SeqCst);
             return;
         }
         if ok {
@@ -231,34 +283,120 @@ fn serve(main: isize) {
     }
 }
 
+/// A security descriptor that lets only the user running the app open the pipe (by
+/// default anyone on the computer could read it).
+struct OwnerOnly(PSECURITY_DESCRIPTOR);
+
+impl OwnerOnly {
+    fn new() -> Option<OwnerOnly> {
+        let sid = user_sid()?;
+        let sddl = wide(&format!("D:P(A;;GA;;;{sid})"));
+        let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+        let ok = unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, std::ptr::null_mut()) } != 0;
+        ok.then_some(OwnerOnly(sd))
+    }
+}
+
+impl Drop for OwnerOnly {
+    fn drop(&mut self) {
+        unsafe { LocalFree(self.0 as _) };
+    }
+}
+
+/// The running user's SID as text ("S-1-5-21-...").
+fn user_sid() -> Option<String> {
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; 256];
+        let mut len = 0u32;
+        let got = GetTokenInformation(token, TokenUser, buf.as_mut_ptr() as _, buf.len() as u32, &mut len) != 0;
+        CloseHandle(token);
+        if !got {
+            return None;
+        }
+        let user = &*(buf.as_ptr() as *const TOKEN_USER);
+        let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 {
+            return None;
+        }
+        let n = (0..).take_while(|&i| *text.add(i) != 0).count();
+        let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, n));
+        LocalFree(text as _);
+        Some(s)
+    }
+}
+
+/// The next line from `r`, without its newline: Ok(None) at the end, Err(()) for a line
+/// longer than `MAX_LINE` (which is read past, never kept).
+fn read_line(r: &mut impl BufRead) -> std::io::Result<Option<Result<String, ()>>> {
+    let mut buf = Vec::new();
+    let n = r.by_ref().take(MAX_LINE as u64 + 1).read_until(b'\n', &mut buf)?;
+    if n == 0 {
+        return Ok(None);
+    }
+    if buf.last() != Some(&b'\n') && buf.len() > MAX_LINE {
+        // Too long: skip to its end.
+        loop {
+            buf.clear();
+            let m = r.by_ref().take(64 * 1024).read_until(b'\n', &mut buf)?;
+            if m == 0 || buf.last() == Some(&b'\n') {
+                break;
+            }
+        }
+        return Ok(Some(Err(())));
+    }
+    while matches!(buf.last(), Some(b'\n' | b'\r')) {
+        buf.pop();
+    }
+    Ok(Some(Ok(String::from_utf8_lossy(&buf).into_owned())))
+}
+
 fn client(main: isize, file: File) {
     log::info("mcp: an assistant connected");
-    let mut out = match file.try_clone() {
-        Ok(f) => f,
-        Err(_) => return,
-    };
-    for line in BufReader::new(file).lines() {
-        let Ok(line) = line else { break };
+    let handle = file.as_raw_handle() as isize;
+    CLIENTS_OPEN.lock().unwrap_or_else(|e| e.into_inner()).push(handle);
+    if let Ok(out) = file.try_clone() {
+        talk(main, BufReader::new(file), out);
+    }
+    CLIENTS_OPEN.lock().unwrap_or_else(|e| e.into_inner()).retain(|&h| h != handle);
+    log::info("mcp: the assistant disconnected");
+}
+
+fn talk(main: isize, mut from: BufReader<File>, mut out: File) {
+    while let Ok(Some(line)) = read_line(&mut from) {
         if !ENABLED.load(Ordering::SeqCst) {
             break;
         }
-        if line.trim().is_empty() {
-            continue;
-        }
-        let mut reply = String::new();
-        unsafe { SendMessageW(main as HWND, WM_MCP, &line as *const String as usize, &mut reply as *mut String as isize) };
+        let reply = match line {
+            Err(()) => mcp::request_too_long(),
+            Ok(l) if l.trim().is_empty() => continue,
+            Ok(l) => {
+                let (tx, rx) = mpsc::channel();
+                QUEUE.lock().unwrap_or_else(|e| e.into_inner()).push_back((l, tx));
+                unsafe { PostMessageW(main as HWND, WM_MCP, 0, 0) };
+                // The app gone (quitting) or stuck: let the assistant go.
+                match rx.recv_timeout(Duration::from_secs(120)) {
+                    Ok(r) => r,
+                    Err(_) => break,
+                }
+            }
+        };
         // One line back for every line in; empty for a notification.
         if out.write_all(reply.as_bytes()).and_then(|_| out.write_all(b"\n")).and_then(|_| out.flush()).is_err() {
             break;
         }
     }
-    log::info("mcp: the assistant disconnected");
 }
 
-/// `WM_MCP`, on the UI thread.
-pub fn on_message(wp: WPARAM, lp: LPARAM) {
-    let (line, reply) = unsafe { (&*(wp as *const String), &mut *(lp as *mut String)) };
-    *reply = mcp::handle(line, &mut WinNotes).unwrap_or_default();
+/// `WM_MCP`, on the UI thread: carry out what's queued.
+pub fn on_message() {
+    loop {
+        let Some((line, reply)) = QUEUE.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else { break };
+        let _ = reply.send(mcp::handle(&line, &mut WinNotes).unwrap_or_default());
+    }
 }
 
 // ---------------------------------------------------------------- the work
@@ -485,6 +623,18 @@ impl mcp::Notes for WinNotes {
 
 #[cfg(test)]
 mod connect_tests {
+
+    #[test]
+    fn request_lines_are_capped() {
+        let big = "x".repeat(MAX_LINE + 10);
+        let input = format!("first\r\n{big}\nlast\n");
+        let mut r = std::io::BufReader::new(input.as_bytes());
+        assert_eq!(read_line(&mut r).unwrap(), Some(Ok("first".to_string())));
+        assert_eq!(read_line(&mut r).unwrap(), Some(Err(())), "too long: refused, not kept");
+        assert_eq!(read_line(&mut r).unwrap(), Some(Ok("last".to_string())), "and the next line is read as usual");
+        assert_eq!(read_line(&mut r).unwrap(), None);
+    }
+
     use super::*;
 
     fn scratch(name: &str) -> std::path::PathBuf {

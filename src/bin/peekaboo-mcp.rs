@@ -113,19 +113,27 @@ fn app_running() -> bool {
     true
 }
 
-/// Carry `line` over and bring the answer back; reconnects once if the app went away.
+/// Carry `line` over and bring the answer back. When the app went away before taking the
+/// line, it reconnects and sends it once more; once the line has gone over, it never
+/// sends it again (the app may have done it already: a note made twice is worse than an
+/// error).
 fn exchange(link: &mut Option<Link>, started: &mut bool, line: &str) -> Result<String, String> {
     for _ in 0..2 {
         if link.is_none() {
             *link = Some(connect(started)?);
         }
         let l = link.as_mut().unwrap();
-        let mut answer = String::new();
         let sent = l.to.write_all(line.as_bytes()).and_then(|_| l.to.write_all(b"\n")).and_then(|_| l.to.flush());
-        if sent.is_ok() && l.from.read_line(&mut answer).map(|n| n > 0).unwrap_or(false) {
+        if sent.is_err() {
+            *link = None;
+            continue;
+        }
+        let mut answer = String::new();
+        if l.from.read_line(&mut answer).map(|n| n > 0).unwrap_or(false) {
             return Ok(answer.trim_end().to_string());
         }
         *link = None;
+        return Err("Lost the connection to PeekABoo Notes before it answered; the request may or may not have been carried out.".into());
     }
     Err("Lost the connection to PeekABoo Notes.".into())
 }

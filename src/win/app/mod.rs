@@ -310,7 +310,7 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
         },
         WM_ACTIVATE_OTHER => show_all_notes(false),
         mcp::WM_MCP => {
-            mcp::on_message(wp, lp);
+            mcp::on_message();
             return 0;
         }
         WM_SETTINGCHANGE => {
