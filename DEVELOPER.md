@@ -77,13 +77,14 @@ There is no network access and no telemetry.
 
 ## Import, export and share
 
-- **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)".
+- **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)", and a title Windows keeps for a device (`CON`, `NUL`, `COM1` and the like) gets a leading `_`.
+- **Front matter** (`common/frontmatter.rs`) at the top of each file keeps what Markdown can't: the colour by name, and, only when they differ from a new note's, `pinned: true`, `archived: true` and `in_deck: false`, then `created` and `updated` in UTC (`2026-10-25T14:03:07Z`). Import puts them back and leaves the block out of the note, so Export All and then Import brings every note back as it was. Only a block of exactly these keys counts: another program's front matter, or a note that just starts with a `---` line, comes in as text, as a file without front matter always has.
 - **Import** reads `.md` and `.txt` files (UTF-8, or UTF-16 with its byte order mark, as Notepad's "Unicode" saves) and turns their Markdown into real formatting: `**bold**`, `_italic_`, `~~strike~~`, `<u>underline</u>`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists, `[links](https://...)`, `> ` quotes (with lists inside, `> - item`, and under list items, `  > text` or `- > text`), fenced code blocks, pipe tables (`:---:` and `---:` align a column) and `<p align="center">` / `"right"` lines. Headings below the title come in as plain text. Plain text that only looks like a marker is written escaped (`\- not a list`) and comes back as text.
 - **Attachments** go along: export copies them into an `attachments` folder beside the Markdown and links them relatively (`![photo.jpg](attachments/photo.jpg)`); import copies linked local files back in.
 - **Readable anywhere:** plain UTF-8; lines end in Markdown's line break (two spaces) so viewers keep them apart as the note has them; an address that links to itself is written as just the address.
 - **Share** writes the same files for the selected notes into one zip (stored, not compressed) under `%TEMP%\PeekABoo Share` and hands it to the Windows share sheet; without one, Explorer shows the zip.
 
-A round trip keeps nesting, emphasis, links, attachments and ticked items intact.
+A round trip keeps nesting, emphasis, links, attachments, ticked items, colours, pins, the archive, the deck and dates intact.
 
 ## AI assistants (MCP)
 

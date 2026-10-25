@@ -45,7 +45,7 @@ pub fn color_name(i: u8) -> &'static str {
     crate::common::theme::color(i).name
 }
 
-fn color_of(name: &str) -> Option<u8> {
+pub fn color_of(name: &str) -> Option<u8> {
     (0..crate::common::theme::COLORS.len() as u8).find(|&i| color_name(i).eq_ignore_ascii_case(name.trim()))
 }
 

@@ -51,10 +51,11 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
 /// Write notes `ids` into `dir` as Markdown files, their attachments beside them: how many
 /// were written, and the last error if any weren't.
 pub(super) fn write_markdown(dir: &std::path::Path, ids: &[u64]) -> (usize, Option<std::io::Error>) {
-    let notes: Vec<(String, String)> = store(|s| ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.rtf.clone(), n.text.clone())).collect());
+    use crate::common::frontmatter::{self, Meta};
+    let notes: Vec<(String, String, Meta)> = store(|s| ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.rtf.clone(), n.text.clone(), Meta::of(n))).collect());
     let mut used = HashSet::new();
     let (mut written, mut failed) = (0, None);
-    for (rtf, text) in notes {
+    for (rtf, text, meta) in notes {
         let md = if rtf.is_empty() { text.clone() } else { rtf_to_markdown(&rtf) };
         let base = file_safe(&title_of(&text));
         let mut name = format!("{base}.md");
@@ -64,7 +65,8 @@ pub(super) fn write_markdown(dir: &std::path::Path, ids: &[u64]) -> (usize, Opti
             name = format!("{base} ({k}).md");
             k += 1;
         }
-        let md = crate::common::store::hard_breaks(&export_attachments(&md, dir));
+        // The state the Markdown can't hold goes in front matter, for import to put back.
+        let md = frontmatter::write(&meta) + &crate::common::store::hard_breaks(&export_attachments(&md, dir));
         match std::fs::write(dir.join(name), md + "\n") {
             Ok(()) => written += 1,
             Err(e) => failed = Some(e),
@@ -186,7 +188,8 @@ pub fn import(owner: HWND) -> Outcome {
             }
         };
         let text = crate::common::util::decode_text(&bytes);
-        let text = text.as_str();
+        // An export's front matter gives the note back its colour, state and dates.
+        let (meta, text) = crate::common::frontmatter::split(&text);
         if text.trim().is_empty() {
             empty += 1;
             continue;
@@ -203,7 +206,12 @@ pub fn import(owner: HWND) -> Outcome {
         crate::win::ui::note::adopt_files(w, folder, &crate::common::attach::Allowed { roots: vec![folder.to_path_buf()], except: Vec::new() });
         let rtf = rich::get_rtf(w);
         let plain = rich::to_markdown(w, false);
-        store_mut(|s| s.create(&plain, &rtf));
+        store_mut(|s| {
+            let id = s.create(&plain, &rtf);
+            if let (Some(m), Some(n)) = (&meta, s.note_mut(id)) {
+                m.apply(n);
+            }
+        });
         added += 1;
     }
     let skipped = if empty > 0 { format!(", {empty} empty skipped") } else { String::new() };

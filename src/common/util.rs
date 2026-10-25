@@ -58,7 +58,7 @@ pub fn portable() -> bool {
 }
 
 /// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm).
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -116,9 +116,9 @@ fn reserved_device(name: &str) -> bool {
 /// rather than failing the file.
 pub fn decode_text(bytes: &[u8]) -> String {
     let utf16 = |rest: &[u8], unit: fn([u8; 2]) -> u16| {
-        let pairs = rest.chunks_exact(2);
-        let cut = !pairs.remainder().is_empty();
-        let units: Vec<u16> = pairs.map(|c| unit([c[0], c[1]])).collect();
+        let (pairs, odd) = rest.as_chunks::<2>();
+        let cut = !odd.is_empty();
+        let units: Vec<u16> = pairs.iter().map(|&c| unit(c)).collect();
         let mut s = String::from_utf16_lossy(&units);
         if cut {
             s.push(char::REPLACEMENT_CHARACTER);
