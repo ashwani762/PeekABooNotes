@@ -214,16 +214,24 @@ pub(super) fn paste(h: HWND) {
         }
         return;
     }
+    let clip = crate::win::util::clipboard_text();
     if a != b
-        && let Some(url) = crate::win::util::clipboard_text().map(|s| s.trim().to_string()).filter(|s| rich::looks_like_url(s))
+        && let Some(url) = clip.as_deref().map(str::trim).filter(|s| rich::looks_like_url(s))
         && !rich::text(e)[a as usize..b as usize].contains(&13)
     {
-        rich::set_link(e, a, b, &url);
+        rich::set_link(e, a, b, url);
         let end = link_end(e, a, b);
         rich::set_sel(e, end, end);
+    } else if clip.as_deref().is_some_and(|c| paste_into_checklist(e, c)) {
+        let (end, _) = rich::sel(e);
+        rich::link_addresses(e, a.max(0) as usize, end.max(0) as usize);
     } else {
         rich::paste_plain(e);
         let (end, _) = rich::sel(e);
+        // Lines that came in starting with a box are checklist items: they get their look.
+        if clip.as_deref().is_some_and(|c| c.contains(['\u{2610}', '\u{2611}'])) {
+            rich::style_boxes(e);
+        }
         rich::link_addresses(e, a.max(0) as usize, end.max(0) as usize);
     }
     mark_dirty(h);

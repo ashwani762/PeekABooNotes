@@ -184,6 +184,13 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if c == b' ' as u32 && try_auto_list(h, e) {
                 return 0;
             }
+            // A box typed (from the emoji panel, say) at a line's start makes the line a
+            // checklist item: it gets the look at once.
+            if c == rich::BOX as u32 || c == rich::CHECKED as u32 {
+                let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+                rich::style_boxes(e);
+                return r;
+            }
             // A space or Tab ends a word: an address becomes a link.
             if c == b' ' as u32 || c == b'\t' as u32 {
                 let r = unsafe { DefSubclassProc(e, msg, wp, lp) };

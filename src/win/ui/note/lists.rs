@@ -86,6 +86,65 @@ pub(super) fn toggle_task_lines(e: HWND) {
     rich::style_boxes(e);
 }
 
+/// A pasted line's own list or checklist marker taken off: whether it was ticked, and
+/// its text.
+fn item_text(l: &str) -> (bool, &str) {
+    let l = l.trim();
+    for (m, done) in [("- [ ] ", false), ("- [x] ", true), ("- [X] ", true), ("[ ] ", false), ("[x] ", true), ("[X] ", true), ("\u{2610} ", false), ("\u{2611} ", true)] {
+        if let Some(r) = l.strip_prefix(m) {
+            return (done, r.trim_start());
+        }
+    }
+    for m in ["- ", "* ", "\u{2022} "] {
+        if let Some(r) = l.strip_prefix(m) {
+            return (false, r.trim_start());
+        }
+    }
+    (false, l)
+}
+
+/// Several lines pasted into a checklist item: each line an item of its own, as in Notes,
+/// the first going on where the caret is (lines without boxes would keep the item's
+/// indent and look like broken items). Markers on the lines (`- `, `[ ] `, `[x] `)
+/// become the items' own, and blank lines are left out. False, with nothing done, when
+/// the caret isn't in an item or the text is one line.
+pub(super) fn paste_into_checklist(e: HWND, clip: &str) -> bool {
+    let norm = clip.replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<&str> = norm.split('\n').filter(|l| !l.trim().is_empty()).collect();
+    if lines.len() < 2 {
+        return false;
+    }
+    let (a, _) = rich::sel(e);
+    let t = rich::text(e);
+    let ps = rich::para_start(&t, a);
+    if !t.get(ps as usize).copied().is_some_and(is_task) || (ps > 0 && t[ps as usize - 1] != rich::CR) {
+        return false;
+    }
+    let gap = if t.get(ps as usize + 1) == Some(&(b' ' as u16)) { 2 } else { 1 };
+    // At the start of the item's text, the first line's marker goes too.
+    let first = if a <= ps + gap { item_text(lines[0]).1 } else { lines[0].trim_end() };
+    let mut s = first.to_string();
+    for l in &lines[1..] {
+        let (done, body) = item_text(l);
+        s.push('\r');
+        s.push(if done { '\u{2611}' } else { '\u{2610}' });
+        s.push(' ');
+        s.push_str(body);
+    }
+    let first_len = first.encode_utf16().count() as i32;
+    rich::still(e, || {
+        rich::replace_sel(e, &s);
+        let (end, _) = rich::sel(e);
+        // The new items start open, whatever the one pasted into (`style_boxes` strikes
+        // the ticked ones).
+        rich::set_sel(e, a + first_len, end);
+        rich::set_effect(e, CFM_STRIKEOUT, false);
+        rich::set_sel(e, end, end);
+        rich::style_boxes(e);
+    });
+    true
+}
+
 /// "- ", "* ", "1. ", "[] " / "[ ] " at the start of a line become real lists, and "> "
 /// a quote.
 pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
@@ -598,6 +657,54 @@ mod tests {
         assert_eq!(plain(h), "T/☐ task/☐ ^");
         assert!(rich::undo_group(h));
         assert_eq!(plain(h), "T/☐ task/[]^");
+    }
+
+    /// Lines pasted into a checklist item become items, each with its box and look; their
+    /// own markers become the items' (ticked or not), and one Ctrl+Z takes it all back.
+    #[test]
+    fn lines_pasted_into_an_item_are_items() {
+        let h = editor("T\r\u{2611} one");
+        rich::style_boxes(h);
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        assert!(!paste_into_checklist(h, "just one line\n"), "one line is just text");
+        assert!(paste_into_checklist(h, " more\r\ntwo\n\n- [x] three\n- four"));
+        assert_eq!(plain(h), "T/\u{2611} one more/\u{2610} two/\u{2611} three/\u{2610} four^");
+        assert_eq!(rich::to_markdown(h, true), "# T\n- [x] one more\n- [ ] two\n- [x] three\n- [ ] four");
+        // Each new line has the item's look: the hanging indent of the one pasted into.
+        let indent = |h: HWND, cp: i32| {
+            rich::set_sel(h, cp, cp);
+            let mut pf = rich::ParaFormat2::new();
+            rich::send(h, rich::EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+            (pf.start_indent, pf.offset)
+        };
+        let t = rich::text(h);
+        let boxes: Vec<i32> = t.iter().enumerate().filter(|(_, c)| is_task(**c)).map(|(i, _)| i as i32).collect();
+        let first = indent(h, boxes[0]);
+        assert_ne!(first.1, 0);
+        for &b in &boxes[1..] {
+            assert_eq!(indent(h, b), first);
+        }
+        assert!(rich::undo_group(h));
+        assert_eq!(plain(h).replace('^', ""), "T/\u{2611} one");
+        // Into an empty item: its first line's marker goes too.
+        let h = editor("T\r\u{2610} ");
+        rich::style_boxes(h);
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        assert!(paste_into_checklist(h, "- milk\n- eggs"));
+        assert_eq!(plain(h), "T/\u{2610} milk/\u{2610} eggs^");
+        // Not in an item: not ours.
+        let h = editor("T\rplain");
+        rich::set_sel(h, 4, 4);
+        assert!(!paste_into_checklist(h, "a\nb"));
+        // A box pasted at a line's start (as text) is styled as an item once boxes are.
+        let h = editor("T\r");
+        rich::set_sel(h, 2, 2);
+        rich::replace_sel(h, "\u{2610} pasted");
+        rich::style_boxes(h);
+        assert_ne!(indent(h, 2).1, 0);
     }
 
     /// Ticking a box up the note while the caret is far below keeps the view where it is.
