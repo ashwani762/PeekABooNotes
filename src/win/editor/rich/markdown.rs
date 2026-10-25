@@ -89,6 +89,10 @@ fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: 
     match num {
         n if is_bullet(n) => prefix.push_str("- "),
         PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN => {
+            // A list's first item has its own start (a list can start at 5).
+            if numbers[level] == 0 {
+                numbers[level] = pf.numbering_start.max(1) as usize - 1;
+            }
             numbers[level] += 1;
             for n in numbers.iter_mut().skip(level + 1) {
                 *n = 0;
@@ -270,6 +274,9 @@ fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
             continue;
         }
         let n = char_len(t, i, b);
+        if literal_star(t, i) {
+            out.push('\\');
+        }
         out.push_str(&unmark_str(&t[i..i + n]));
         i += n;
     }
@@ -415,10 +422,35 @@ fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, o
             }
             cur = st;
         }
+        // (Not in an address, which is read back as it is.)
+        if !link && literal_star(t, i) {
+            out.push('\\');
+        }
         out.push_str(&unmark_str(&t[i..i + n]));
         i += n;
     }
     cur
+}
+
+/// Whether the `*` at `i` in `t` would read back as a mark (`*italic*`, `**bold**`), so
+/// it goes out as `\*`: not when its run of stars stands between spaces (2 ** 3), or is
+/// one star inside a word (2*3*4).
+fn literal_star(t: &[u16], i: usize) -> bool {
+    let star = b'*' as u16;
+    if t[i] != star {
+        return false;
+    }
+    let (mut a, mut b) = (i, i + 1);
+    while a > 0 && t[a - 1] == star {
+        a -= 1;
+    }
+    while b < t.len() && t[b] == star {
+        b += 1;
+    }
+    let gap = |k: Option<&u16>| k.is_none_or(|&c| c == CR || c == CELL || char::from_u32(c as u32).is_some_and(char::is_whitespace));
+    let word = |k: Option<&u16>| k.is_some_and(|&c| char::from_u32(c as u32).is_some_and(char::is_alphanumeric));
+    let (before, after) = (a.checked_sub(1).and_then(|k| t.get(k)), t.get(b));
+    !(gap(before) && gap(after)) && !(b - a == 1 && word(before) && word(after))
 }
 
 pub(super) fn close_marks(out: &mut String, cur: Marks, next: Marks) {
@@ -506,7 +538,8 @@ fn load_markdown_now(h: HWND, md: &str) {
 enum Kind {
     Plain,
     Bullet,
-    Number,
+    /// With the number it was written with.
+    Number(u16),
     Task(bool),
 }
 
@@ -558,7 +591,7 @@ fn parse_line(raw: &str) -> Line {
     } else {
         let d = l.chars().take_while(|c| c.is_ascii_digit()).count();
         match l[d..].strip_prefix(". ") {
-            Some(r) if d > 0 => (Kind::Number, r),
+            Some(r) if d > 0 => (Kind::Number(l[..d].parse().unwrap_or(1)), r),
             _ => (Kind::Plain, raw),
         }
     };
@@ -589,7 +622,7 @@ fn format_line(h: HWND, pos: i32, line: &Line) {
     set_sel(h, pos, pos);
     match k {
         Kind::Bullet => set_numbering(h, PFN_BULLET),
-        Kind::Number => set_numbering(h, PFN_ARABIC),
+        Kind::Number(_) => set_numbering(h, PFN_ARABIC),
         Kind::Task(true) => {
             set_sel(h, pos + 1, pos + len);
             set_effect(h, CFM_STRIKEOUT, true);
@@ -604,14 +637,17 @@ fn format_line(h: HWND, pos: i32, line: &Line) {
         set_sel(h, pos, pos);
         nest(h, 1);
     }
-    if matches!(k, Kind::Number) {
-        // After a nested sublist RichEdit would restart the count: carry it on.
-        let before = siblings_before(h, &text(h), pos, *level);
-        if before > 0 {
+    if let Kind::Number(n) = *k {
+        // After a nested sublist RichEdit would restart the count: carry it on. A list's
+        // first item has its own number (`5. item`), as in Markdown, where only the
+        // first one counts.
+        let (before, first) = siblings_before(h, &text(h), pos, *level);
+        let start = if before > 0 { first + before as u16 } else { n.max(1) };
+        if start != 1 {
             set_sel(h, pos, pos);
             let mut pf = ParaFormat2::new();
             pf.mask = PFM_NUMBERINGSTART;
-            pf.numbering_start = 1 + before as u16;
+            pf.numbering_start = start;
             send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
         }
     }
@@ -871,30 +907,44 @@ type Runs = Vec<(i32, i32, u32)>;
 type Links = Vec<(i32, i32, String)>;
 
 /// Strip `**bold**`, `_italic_` and `~~strike~~` marks from one line (as `to_markdown`
-/// writes them), returning the text and the (start, end, effect) runs in UTF-16 units.
-/// A mark without a partner stays literal text, and `_` inside a word (snake_case) is
-/// never a mark.
+/// writes them), and the other ways assistants and other apps write them (`*italic*`,
+/// `__bold__`, `***both***`), returning the text and the (start, end, effect) runs in
+/// UTF-16 units. A mark without a partner stays literal text, as do one written `\*`
+/// and a `_` or `*` inside a word (snake_case, 2*3*4).
 pub(super) fn inline_marks(s: &str) -> (String, Runs) {
     let c: Vec<char> = s.chars().collect();
     let at = |k: usize| c.get(k).copied();
     let space = |k: Option<usize>| k.and_then(at).is_none_or(char::is_whitespace);
     let word = |k: Option<usize>| k.and_then(at).is_some_and(char::is_alphanumeric);
+    // (slot, length, effect); each way of writing a mark has its slot, so `*` doesn't
+    // close what `_` opened. Slot 3 is underline's.
     let mark = |k: usize| match (at(k), at(k + 1)) {
         (Some('*'), Some('*')) => Some((0, 2, CFM_BOLD)),
         (Some('~'), Some('~')) => Some((2, 2, CFM_STRIKEOUT)),
+        (Some('_'), Some('_')) => Some((5, 2, CFM_BOLD)),
         (Some('_'), _) => Some((1, 1, CFM_ITALIC)),
+        (Some('*'), _) => Some((4, 1, CFM_ITALIC)),
         _ => None,
     };
+    // Marks made of `_` or `*` don't work inside a word.
+    let inner = |slot: usize| matches!(slot, 1 | 4 | 5);
     // Can a mark of `slot` at `k` close a run / open one?
-    let closes = |k: usize, slot: usize, len: usize| !space(k.checked_sub(1)) && (slot != 1 || !word(Some(k + len)));
-    let opens = |k: usize, slot: usize, len: usize| !space(Some(k + len)) && (slot != 1 || !word(k.checked_sub(1)));
+    let closes = |k: usize, slot: usize, len: usize| !space(k.checked_sub(1)) && (!inner(slot) || !word(Some(k + len)));
+    let opens = |k: usize, slot: usize, len: usize| !space(Some(k + len)) && (!inner(slot) || !word(k.checked_sub(1)));
     let mut out = String::new();
     let mut n = 0i32;
-    let mut open: [Option<i32>; 4] = [None; 4];
+    let mut open: [Option<i32>; 6] = [None; 6];
     let mut runs = Vec::new();
     let tag = |k: usize, s: &str| s.chars().enumerate().all(|(j, ch)| at(k + j) == Some(ch));
     let mut i = 0;
     while i < c.len() {
+        // An escaped star is a star.
+        if c[i] == '\\' && at(i + 1) == Some('*') {
+            out.push('*');
+            n += 1;
+            i += 2;
+            continue;
+        }
         // Underline, written as HTML since Markdown has none.
         if tag(i, "<u>") && open[3].is_none() && (i + 3..c.len()).any(|j| tag(j, "</u>")) {
             open[3] = Some(n);
@@ -917,7 +967,7 @@ pub(super) fn inline_marks(s: &str) -> (String, Runs) {
                     continue;
                 }
                 None if opens(i, slot, len)
-                    && (i + len..c.len()).any(|j| mark(j).is_some_and(|m| m.0 == slot) && j > i + len && closes(j, slot, len)) =>
+                    && (i + len..c.len()).any(|j| mark(j).is_some_and(|m| m.0 == slot) && j > i + len && closes(j, slot, len) && at(j - 1) != Some('\\')) =>
                 {
                     open[slot] = Some(n);
                     i += len;
@@ -948,9 +998,56 @@ mod tests {
         let (t, r) = inline_marks("**_both_**");
         assert_eq!(t, "both");
         assert_eq!(r, vec![(0, 4, CFM_ITALIC), (0, 4, CFM_BOLD)]);
-        // Not marks: snake_case, a lone star pair, spaced underscores.
-        for s in ["user_id and api_key", "2 ** 3", "a _ b _ c", "**open only"] {
+        // Not marks: snake_case, a lone star pair, spaced underscores, stars in a word.
+        for s in ["user_id and api_key", "2 ** 3", "a _ b _ c", "**open only", "2*3*4", "a * b * c", "snake__case__x"] {
             assert_eq!(inline_marks(s), (s.to_string(), vec![]), "{s}");
         }
+        // As others write them.
+        assert_eq!(inline_marks("an *aside* here"), ("an aside here".to_string(), vec![(3, 8, CFM_ITALIC)]));
+        assert_eq!(inline_marks("__strong__ start"), ("strong start".to_string(), vec![(0, 6, CFM_BOLD)]));
+        let (t, mut r) = inline_marks("***both***");
+        r.sort_by_key(|x| x.2);
+        assert_eq!((t.as_str(), r), ("both", vec![(0, 4, CFM_BOLD), (0, 4, CFM_ITALIC)]));
+        assert_eq!(inline_marks("\\*not\\* italic"), ("*not* italic".to_string(), vec![]));
+    }
+
+    fn editor() -> HWND {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, ES_MULTILINE, WS_POPUP};
+        let h = unsafe {
+            windows_sys::Win32::System::LibraryLoader::LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        setup(h);
+        h
+    }
+
+    /// `md` imported comes out as `want`, from the editor and from the RTF a note is
+    /// stored as; and `want` imported comes out the same again.
+    fn round_trip(md: &str, want: &str) {
+        let h = editor();
+        load_markdown(h, md);
+        assert_eq!(to_markdown(h, true), format!("# {want}"), "editor: {md}");
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        assert_eq!(to_markdown(h2, true), format!("# {want}"), "stored: {md}");
+        let h3 = editor();
+        load_markdown(h3, want);
+        assert_eq!(to_markdown(h3, true), format!("# {want}"), "again: {want}");
+    }
+
+    /// What assistants write: `*italic*`, `__bold__`, `***both***` (written back the way
+    /// the app writes marks), stars that are only stars, addresses with parentheses, and
+    /// numbered lists that start past 1.
+    #[test]
+    fn markdown_as_others_write_it() {
+        round_trip("T\nsome *italic*, __bold__ and ***both*** words", "T\nsome _italic_, **bold** and **_both_** words");
+        round_trip("T\n2*3*4 is 24, 2 ** 3 is 8", "T\n2*3*4 is 24, 2 ** 3 is 8");
+        // Stars typed as text stay text, however they'd read.
+        round_trip("T\na \\*starred\\* word and \\*\\*two\\*\\*", "T\na \\*starred\\* word and \\*\\*two\\*\\*");
+        round_trip("T\nsee [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) now", "T\nsee [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) now");
+        round_trip("T\n5. five\n6. six\n  1. sub\n  2. sub two\n7. seven\ntext\n3. three", "T\n5. five\n6. six\n  1. sub\n  2. sub two\n7. seven\ntext\n3. three");
+        // Only a list's first number counts, as in Markdown.
+        round_trip("T\n4. a\n9. b", "T\n4. a\n5. b");
+        round_trip("T\n> 2. quoted\n> 3. list", "T\n> 2. quoted\n> 3. list");
     }
 }

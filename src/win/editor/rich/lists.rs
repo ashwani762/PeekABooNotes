@@ -136,9 +136,11 @@ pub(super) fn para_level(h: HWND, t: &[u16], cp: i32) -> Option<(i32, bool)> {
 }
 
 /// Numbered items at `level` above paragraph `ps` in the same list, stopping at the
-/// list's start or at a shallower (parent) item.
-pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> usize {
+/// list's start or at a shallower (parent) item; and the number the first of them has
+/// (a list can start at 5), so the item at `ps` is that plus how many.
+pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> (usize, u16) {
     let mut n = 0;
+    let mut first = 1;
     let mut p = ps;
     while p > 0 {
         p = para_start(t, p - 1);
@@ -162,9 +164,11 @@ pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> usize 
         }
         if l == level {
             n += 1;
+            // The topmost one, in the end: the list's first item, which has its start.
+            first = pf.numbering_start.max(1);
         }
     }
-    n
+    (n, first)
 }
 
 /// Nesting level of the caret's paragraph, if it is a list item.
@@ -211,7 +215,8 @@ pub fn nest(h: HWND, delta: i32) -> bool {
             pf.numbering_style = PFNS_PERIOD;
             // Continue the count of this level across the nested items in between
             // (RichEdit would restart it after a change of style).
-            pf.numbering_start = 1 + siblings_before(h, &t, ps, next) as u16;
+            let (before, first) = siblings_before(h, &t, ps, next);
+            pf.numbering_start = if before > 0 { first + before as u16 } else { 1 };
             set_sel(h, ps, ps); // the count walked the selection up the list
         }
         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);

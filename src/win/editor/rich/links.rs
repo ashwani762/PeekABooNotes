@@ -526,7 +526,21 @@ pub(super) fn md_links(s: &str) -> (String, Vec<(i32, i32, String)>) {
         let parsed = after.find("](").and_then(|close| {
             let name = &after[..close];
             let tail = &after[close + 2..];
-            let end = tail.find(')')?;
+            // The `)` that closes it: an address can hold parentheses of its own, in pairs
+            // (https://en.wikipedia.org/wiki/Mercury_(planet)).
+            let mut depth = 0;
+            let end = tail.char_indices().find_map(|(i, c)| match c {
+                '(' => {
+                    depth += 1;
+                    None
+                }
+                ')' if depth == 0 => Some(i),
+                ')' => {
+                    depth -= 1;
+                    None
+                }
+                _ => None,
+            })?;
             let url = &tail[..end];
             (!name.is_empty() && !name.contains('[') && !url.is_empty() && !url.contains(char::is_whitespace)).then_some((name, url, open + 1 + close + 2 + end + 1))
         });
