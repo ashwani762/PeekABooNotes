@@ -165,15 +165,24 @@ pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Box<dyn Fn(
 pub fn tray_menu() {
     use menu::{Item, action, check};
     let hidden = store(|s| s.d.settings.deck_hidden);
-    let has_undo = ui(|u| !u.pending.is_empty());
+    // What the Undo toast would take back, while it can: notes deleted or archived.
+    let undo = ui(|u| {
+        if !u.unarchive.is_empty() {
+            Some(t!("menu_undo_archive"))
+        } else if !u.pending.is_empty() {
+            Some(t!("menu_undo_delete"))
+        } else {
+            None
+        }
+    });
     let mut v = vec![
         action(CMD_NEW, t!("menu_new_note"), &crate::common::i18n::keys(&["ctrl", "alt", "N"]), IC_ADD),
         action(CMD_ALL, t!("menu_all_notes"), &crate::common::i18n::keys(&["ctrl", "alt", "A"]), IC_LIST),
         action(CMD_ARCHIVE, t!("menu_archive"), &crate::common::i18n::keys(&["ctrl", "alt", "L"]), IC_ARCHIVE),
         action(CMD_REOPEN, t!("menu_reopen_last"), &crate::common::i18n::keys(&["ctrl", "alt", "O"]), IC_REFRESH),
     ];
-    if has_undo {
-        v.push(action(CMD_UNDO, t!("menu_undo_delete"), "", IC_UNDO));
+    if let Some(label) = undo {
+        v.push(action(CMD_UNDO, &label, "", IC_UNDO));
     }
     v.extend([
         Item::Separator,

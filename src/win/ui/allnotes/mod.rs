@@ -524,6 +524,8 @@ enum Action {
     Settings,
     OpenHere(u64),
     ClearSearch,
+    /// The Undo toast's Undo, from the keyboard.
+    Undo,
     Focus(Focus),
     Reorder(Vec<u64>),
     Close,
@@ -549,6 +551,7 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 }
         }
         Action::New => new_here(),
+        Action::Undo => app::undo_delete(),
         Action::Settings => crate::win::ui::settings::show(),
         Action::Share(ids) => app::share(hwnd, &ids),
         Action::Reorder(ids) => {
@@ -670,6 +673,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
                 Some(Action::None)
             }
             _ if ctrl && vk == b'N' as u16 => Some(Action::New),
+            // While the Undo toast shows, Ctrl+Z here (not in the note editor, whose own
+            // undo comes first) takes back the archive or delete, as its button does.
+            _ if ctrl && !shift && vk == b'Z' as u16 && app::can_undo() => Some(Action::Undo),
             _ => None,
         }
     })

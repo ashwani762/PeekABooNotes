@@ -308,6 +308,11 @@ fn confirm_delete_all(owner: HWND, n: usize) -> bool {
     popup(items, p.x, p.y, owner) == ID_DELETE
 }
 
+/// Whether the Undo toast has something to take back (it is showing).
+pub fn can_undo() -> bool {
+    ui(|u| !u.pending.is_empty() || !u.unarchive.is_empty())
+}
+
 /// The toast's Undo: the notes just deleted come back, or the ones just archived return to
 /// the deck where they were.
 pub fn undo_delete() {

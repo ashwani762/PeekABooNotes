@@ -35,6 +35,7 @@
     <string name="menu_archive">Archive</string>
     <string name="menu_reopen_last">Reopen Last Note</string>
     <string name="menu_undo_delete">Undo Delete</string>
+    <string name="menu_undo_archive">Undo Archive</string>
     <string name="menu_show_deck">Show Deck</string>
     <string name="menu_move_deck">Move Deck to Other Edge</string>
     <string name="menu_settings">Settings</string>
@@ -266,6 +267,7 @@
     <string name="shortcut_code">Code block</string>
     <string name="shortcut_table">Table</string>
     <string name="shortcut_leave_text">Leave the note's text</string>
+    <string name="shortcut_undo_toast">Undo an archive or delete</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notes folder</string>

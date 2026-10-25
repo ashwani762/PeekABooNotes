@@ -25,6 +25,7 @@
     <string name="menu_archive">Archives</string>
     <string name="menu_reopen_last">Rouvrir la dernière note</string>
     <string name="menu_undo_delete">Annuler la suppression</string>
+    <string name="menu_undo_archive">Annuler l’archivage</string>
     <string name="menu_show_deck">Afficher la pile</string>
     <string name="menu_move_deck">Déplacer la pile sur l’autre bord</string>
     <string name="menu_settings">Réglages</string>
@@ -256,6 +257,7 @@
     <string name="shortcut_code">Bloc de code</string>
     <string name="shortcut_table">Tableau</string>
     <string name="shortcut_leave_text">Quitter le texte de la note</string>
+    <string name="shortcut_undo_toast">Annuler un archivage ou une suppression</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Dossier des notes</string>
