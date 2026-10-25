@@ -99,13 +99,19 @@ pub fn note_menu(id: u64, in_note: bool) -> Vec<menu::Item> {
 pub fn popup(items: Vec<menu::Item>, x: i32, y: i32, owner: HWND) -> u32 {
     let prev = unsafe { GetForegroundWindow() };
     let cmd = menu::show(items, POINT { x, y });
+    give_back(prev, owner);
+    cmd
+}
+
+/// After a menu: the keys go back to `owner` when it's showing, or else to `prev`, the
+/// window in front before the menu took them (unless that's our hidden main window).
+fn give_back(prev: HWND, owner: HWND) {
     unsafe {
         let back = if !owner.is_null() && IsWindowVisible(owner) != 0 { owner } else { prev };
         if !back.is_null() && IsWindow(back) != 0 && back != ui(|u| u.main) {
             SetForegroundWindow(back);
         }
     }
-    cmd
 }
 
 pub(super) fn cursor() -> POINT {
@@ -156,7 +162,10 @@ fn capitalized(s: &str) -> String {
 
 /// A note's menu opened from the deck: right-aligned or not, dismissed by `leave`.
 pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Box<dyn Fn(POINT) -> bool>) {
+    // The deck never takes the keys, so they go back to whatever app had them.
+    let prev = unsafe { GetForegroundWindow() };
     let cmd = menu::show_with(note_menu(id, false), p, align_right, Some(leave));
+    give_back(prev, null_mut());
     if cmd != 0 {
         note_command(id, cmd);
     }
@@ -165,15 +174,24 @@ pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Box<dyn Fn(
 pub fn tray_menu() {
     use menu::{Item, action, check};
     let hidden = store(|s| s.d.settings.deck_hidden);
-    let has_undo = ui(|u| !u.pending.is_empty());
+    // What the Undo toast would take back, while it can: notes deleted or archived.
+    let undo = ui(|u| {
+        if !u.unarchive.is_empty() {
+            Some(t!("menu_undo_archive"))
+        } else if !u.pending.is_empty() {
+            Some(t!("menu_undo_delete"))
+        } else {
+            None
+        }
+    });
     let mut v = vec![
         action(CMD_NEW, t!("menu_new_note"), &crate::common::i18n::keys(&["ctrl", "alt", "N"]), IC_ADD),
         action(CMD_ALL, t!("menu_all_notes"), &crate::common::i18n::keys(&["ctrl", "alt", "A"]), IC_LIST),
         action(CMD_ARCHIVE, t!("menu_archive"), &crate::common::i18n::keys(&["ctrl", "alt", "L"]), IC_ARCHIVE),
         action(CMD_REOPEN, t!("menu_reopen_last"), &crate::common::i18n::keys(&["ctrl", "alt", "O"]), IC_REFRESH),
     ];
-    if has_undo {
-        v.push(action(CMD_UNDO, t!("menu_undo_delete"), "", IC_UNDO));
+    if let Some(label) = undo {
+        v.push(action(CMD_UNDO, label, "", IC_UNDO));
     }
     v.extend([
         Item::Separator,

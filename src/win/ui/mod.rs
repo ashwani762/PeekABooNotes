@@ -10,6 +10,7 @@ pub mod linkbox;
 pub mod ghost;
 pub mod menu;
 pub mod note;
+pub mod screen;
 pub mod settings;
 pub mod toast;
 pub mod tooltip;
@@ -458,4 +459,23 @@ fn mono_face() -> &'static str {
         m.set(Some(face));
         face
     })
+}
+
+/// A note's title or preview text as the lists show it. A picture or file that shares its
+/// line with text stays in the plain copy as RichEdit's object character (U+FFFC), which
+/// fonts draw as a boxed "OBJ": it is left out, with the space after it.
+pub fn without_objects(s: String) -> String {
+    if s.contains('\u{FFFC}') { s.replace("\u{FFFC} ", "").replace('\u{FFFC}', "") } else { s }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn object_characters_are_left_out_of_previews() {
+        assert_eq!(without_objects("\u{FFFC} the view from the hotel".into()), "the view from the hotel");
+        assert_eq!(without_objects("before\u{FFFC}after\n\u{FFFC}".into()), "beforeafter\n");
+        assert_eq!(without_objects("plain".into()), "plain");
+    }
 }

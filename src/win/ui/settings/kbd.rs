@@ -14,7 +14,7 @@ fn control(groups: &[Group], k: Key) -> Option<&Ctl> {
 /// The page list, then each control on the page, top to bottom. Keycaps and the preview
 /// only show things, so Tab passes them by.
 fn tab_order(w: &Win) -> Vec<Focus> {
-    let groups = page(w.page);
+    let groups = groups(w);
     let ctls = groups.iter().flat_map(|g| g.rows.iter()).filter(|r| !matches!(r.ctl, Ctl::Keys(_) | Ctl::Preview));
     std::iter::once(Focus::Pages).chain(ctls.filter_map(|r| r.key).map(Focus::Ctl)).collect()
 }
@@ -43,7 +43,7 @@ pub(super) fn move_focus(w: &mut Win, back: bool, wrap: bool) {
 
 /// Scroll a long page so the row of setting `k` is in full view.
 fn reveal(w: &mut Win, k: Key) {
-    let groups = page(w.page);
+    let groups = groups(w);
     let Some(r) = place(w, &groups).into_iter().find_map(|it| match it {
         Item::Row(pl) if pl.row.key == Some(k) => Some(pl.r),
         _ => None,
@@ -66,7 +66,7 @@ fn reveal(w: &mut Win, k: Key) {
 /// along the swatches.
 pub(super) fn nudge(w: &mut Win, by: i32) -> Option<(Key, usize)> {
     let Focus::Ctl(k) = w.kbd else { return None };
-    let groups = page(w.page);
+    let groups = groups(w);
     w.cues = true;
     anim::wake(Client::Settings);
     match control(&groups, k)? {
@@ -87,7 +87,7 @@ pub(super) fn nudge(w: &mut Win, by: i32) -> Option<(Key, usize)> {
 /// swatch focus is on is chosen.
 pub(super) fn activate(w: &mut Win) -> Option<(Key, usize)> {
     let Focus::Ctl(k) = w.kbd else { return None };
-    let groups = page(w.page);
+    let groups = groups(w);
     match control(&groups, k)? {
         Ctl::Toggle => click(w, Hit::Ctl(k, 0)),
         Ctl::Button(_) | Ctl::Choice => Some((k, 0)),
@@ -102,7 +102,7 @@ pub(super) fn menu_anchor(w: &Win, k: Key) -> Option<POINT> {
     if !w.cues {
         return None;
     }
-    let groups = page(w.page);
+    let groups = groups(w);
     let sh = place(w, &groups).into_iter().find_map(|it| match it {
         Item::Row(pl) if pl.row.key == Some(k) => match pl.row.ctl {
             Ctl::Button(label) => Some(button_shape(w, label, &pl.r)),

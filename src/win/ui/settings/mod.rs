@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ptr::null_mut;
+use std::rc::Rc;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
@@ -260,6 +261,40 @@ struct Win {
     result_a: Spring,
     /// How far the page is scrolled down (a long page, like Shortcuts).
     scroll: Spring,
+    /// The page's rows as `page` built them, for page `.0` (see `groups`).
+    built: RefCell<Option<(usize, Rc<Vec<Group>>)>>,
+}
+
+/// The shown page's rows. Building them formats every label, counts the notes and looks
+/// on disk for the portable marker, and painting, hit-testing and the keys all ask for
+/// them (each mouse move, twice a paint), so they're built once and kept until the page,
+/// a setting, the notes or the language change (`rebuild`).
+fn groups(w: &Win) -> Rc<Vec<Group>> {
+    let mut built = w.built.borrow_mut();
+    match &*built {
+        Some((p, g)) if *p == w.page => g.clone(),
+        _ => {
+            let g = Rc::new(page(w.page));
+            *built = Some((w.page, g.clone()));
+            g
+        }
+    }
+}
+
+/// Let the kept rows go, to be built afresh for the next paint.
+fn rebuild(w: &Win) {
+    w.built.borrow_mut().take();
+}
+
+/// The notes changed: the Data page counts them, so it's built again (and redrawn).
+pub fn notes_changed() {
+    if let Some((h, data)) = with(|w| {
+        rebuild(w);
+        (w.hwnd, w.page == PAGES.len() - 1)
+    }) && data
+    {
+        unsafe { InvalidateRect(h, std::ptr::null(), 0) };
+    }
 }
 
 /// How long a button shows its result before turning back.
@@ -328,7 +363,7 @@ fn choose_language() {
     }
     // Drop the list from under the button, right-aligned to it, so it never covers it.
     let anchor = with(|w| {
-        let groups = page(w.page);
+        let groups = groups(w);
         let sh = place(w, &groups).into_iter().find_map(|it| match it {
             Item::Row(pl) if matches!(pl.row.ctl, Ctl::Choice) => Some(choice_shape(w, &pl.r)),
             _ => None,
@@ -485,7 +520,9 @@ pub fn startup_changed() {
 }
 
 fn sync_knobs(w: &mut Win) {
-    let keys: Vec<Key> = page(w.page).iter().flat_map(|g| g.rows.iter().filter_map(|r| r.key)).collect();
+    // Called whenever a setting may have changed, and on a new page.
+    rebuild(w);
+    let keys: Vec<Key> = groups(w).iter().flat_map(|g| g.rows.iter().filter_map(|r| r.key)).collect();
     for k in keys {
         let v = value(w, k) as f32;
         w.knobs.entry(k).or_insert_with(|| Spring::unit(v, (0.86, 0.3))).to(v);
@@ -499,10 +536,12 @@ pub fn retheme() {
     }
 }
 
-/// The interface language changed: new title, then repaint (all other text is drawn
-/// from the string tables on every paint).
+/// The interface language changed: new title and rows, then repaint.
 pub fn relabel() {
-    if let Some(h) = with(|w| w.hwnd) {
+    if let Some(h) = with(|w| {
+        rebuild(w);
+        w.hwnd
+    }) {
         unsafe { SetWindowTextW(h, wide(&t!("window_settings", t!("app_name"))).as_ptr()) };
         paint_now(h);
     }
@@ -521,10 +560,10 @@ pub fn show() {
         return;
     }
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
-    let (work, s) = crate::win::ui::deck::monitor_geo();
-    let (w, h) = ((W * s) as i32, (H * s) as i32);
-    let x = work.left + ((work.right - work.left) - w) / 2;
-    let y = work.top + ((work.bottom - work.top) - h) / 2;
+    // On the monitor in use, at its scale (the window takes that monitor's DPI).
+    let (work, s) = crate::win::ui::screen::active();
+    let r = crate::win::ui::screen::centred(work, (W * s) as i32, (H * s) as i32);
+    let (x, y, w, h) = (r.left, r.top, r.right - r.left, r.bottom - r.top);
     unsafe {
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
@@ -576,6 +615,7 @@ fn on_create(hwnd: HWND) {
         result_a: Spring::unit(0.0, motion::DEFAULT),
         knobs: HashMap::new(),
         scroll: Spring::px(0.0, motion::SNAPPY),
+        built: RefCell::new(None),
     };
     sync_knobs(&mut w);
     WIN.with(|c| *c.borrow_mut() = Some(w));
@@ -670,7 +710,7 @@ fn click(w: &mut Win, hit: Hit) -> Option<(Key, usize)> {
             None
         }
         Hit::Ctl(k, sub) => {
-            let row_is_toggle = page(w.page).iter().flat_map(|g| g.rows.iter()).any(|r| r.key == Some(k) && matches!(r.ctl, Ctl::Toggle));
+            let row_is_toggle = groups(w).iter().flat_map(|g| g.rows.iter()).any(|r| r.key == Some(k) && matches!(r.ctl, Ctl::Toggle));
             let v = if row_is_toggle { 1 - value(w, k).min(1) } else { sub };
             Some((k, v))
         }

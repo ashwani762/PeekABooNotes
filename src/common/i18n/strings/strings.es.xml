@@ -25,6 +25,7 @@
     <string name="menu_archive">Archivo</string>
     <string name="menu_reopen_last">Reabrir la última nota</string>
     <string name="menu_undo_delete">Deshacer eliminación</string>
+    <string name="menu_undo_archive">Deshacer archivado</string>
     <string name="menu_show_deck">Mostrar el mazo</string>
     <string name="menu_move_deck">Mover el mazo al otro borde</string>
     <string name="menu_settings">Ajustes</string>
@@ -254,6 +255,7 @@
     <string name="shortcut_code">Bloque de código</string>
     <string name="shortcut_table">Tabla</string>
     <string name="shortcut_leave_text">Salir del texto de la nota</string>
+    <string name="shortcut_undo_toast">Deshacer un archivado o una eliminación</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Carpeta de notas</string>

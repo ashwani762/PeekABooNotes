@@ -31,6 +31,7 @@ use crate::win::render::anim::{self, Client, Spring, clamp01, lerp};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::common::store::{body_of, title_of};
+use crate::win::ui::without_objects;
 use crate::win::theme::{self, motion};
 use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
 
@@ -229,6 +230,16 @@ pub fn monitor_geo() -> (RECT, f32) {
         GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
         (mi.rcWork, dx.max(96) as f32 / 96.0)
     }
+}
+
+/// Whether the foreground window is on the deck's monitor (true when there is none).
+fn front_on_deck_monitor() -> bool {
+    let fg = unsafe { GetForegroundWindow() };
+    if fg.is_null() {
+        return true;
+    }
+    let (a, b) = (crate::win::ui::screen::of(fg).0, monitor_geo().0);
+    (a.left, a.top, a.right, a.bottom) == (b.left, b.top, b.right, b.bottom)
 }
 
 pub fn create() {
@@ -782,7 +793,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }),
         WM_APPBAR => with(|d| {
             if wp as u32 == ABN_FULLSCREENAPP {
-                d.fullscreen = lp != 0;
+                // Sent for a full-screen window on any monitor: the deck only steps aside
+                // for one on its own (the window in front, which just went full screen).
+                d.fullscreen = lp != 0 && front_on_deck_monitor();
                 update_visibility(d);
                 render(d);
             }

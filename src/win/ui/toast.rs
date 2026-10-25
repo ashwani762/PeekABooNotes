@@ -38,7 +38,12 @@ struct Toast {
     pressed: bool,
     alive: bool,
     canvas: Option<Canvas>,
+    /// The work area it rises in (the monitor in use when it was raised) and that
+    /// monitor's scale.
+    work: RECT,
     s: f32,
+    /// The capsule's width and the Undo pill's (`sizes`), measured when it's raised.
+    size: (i32, f32),
     body: Font,
     bold: Font,
     tiny: Font,
@@ -58,6 +63,7 @@ pub fn notice(text: String) {
 }
 
 fn raise(count: usize, archived: bool, notice: Option<String>) {
+    let (work, s) = crate::win::ui::screen::active();
     TOAST.with(|t| {
         let mut t = t.borrow_mut();
         if t.is_none() {
@@ -78,7 +84,7 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
                     null_mut(),
                 )
             };
-            let (_, s) = crate::win::ui::deck::monitor_geo();
+            let (body, bold, tiny) = fonts(s);
             *t = Some(Toast {
                 hwnd,
                 count,
@@ -90,21 +96,39 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
                 pressed: false,
                 alive: true,
                 canvas: None,
+                work,
                 s,
-                body: Font::new(13.5 * s, FW_NORMAL, theme::FACE_TEXT),
-                bold: Font::new(13.5 * s, FW_SEMIBOLD, theme::FACE_TEXT),
-                tiny: Font::new(9.5 * s, FW_SEMIBOLD, theme::FACE_SMALL),
+                size: (0, 0.0),
+                body,
+                bold,
+                tiny,
             });
         }
         let t = t.as_mut().unwrap();
+        // Raised again while showing, perhaps from another monitor: it moves there.
+        t.work = work;
+        if t.s != s {
+            (t.body, t.bold, t.tiny) = fonts(s);
+            t.s = s;
+        }
         t.count = count;
         t.archived = archived;
         t.notice = notice;
         t.left = SECONDS;
         t.alive = true;
+        t.size = measure(t);
         t.rise.to(1.0);
     });
     anim::wake(Client::Toast);
+}
+
+/// The toast's (body, bold, ring digit) fonts at scale `s`.
+fn fonts(s: f32) -> (Font, Font, Font) {
+    (
+        Font::new(13.5 * s, FW_NORMAL, theme::FACE_TEXT),
+        Font::new(13.5 * s, FW_SEMIBOLD, theme::FACE_TEXT),
+        Font::new(9.5 * s, FW_SEMIBOLD, theme::FACE_SMALL),
+    )
 }
 
 pub fn hide() {
@@ -172,7 +196,9 @@ fn hovered(h: HWND) -> bool {
 
 fn render(t: &mut Toast) {
     let s = t.s;
-    let (w, h, m) = ((320.0 * s) as i32, (52.0 * s) as i32, (24.0 * s) as i32);
+    let (w, bw) = t.size;
+    let (h, m) = ((52.0 * s) as i32, (24.0 * s) as i32);
+    let msg = message(t);
     let (cw, ch) = (w + 2 * m, h + 2 * m);
     if t.canvas.as_ref().map(|c| (c.w, c.h)) != Some((cw, ch)) {
         t.canvas = Some(Canvas::new(cw, ch));
@@ -200,11 +226,11 @@ fn render(t: &mut Toast) {
     c.ring(rcx, rcy, rr, 2.0 * s, left / SECONDS, theme::COLORS[0].accent, a);
     let secs = rect((rcx - rr) as i32, (rcy - rr) as i32, (2.0 * rr) as i32, (2.0 * rr) as i32);
     c.text(&format!("{}", left.ceil() as i32), &t.tiny, secs, 0xFFFFFF, 0.85 * a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    let msg = if t.archived { tn!("toast_archived", t.count) } else { tn!("toast_deleted", t.count) };
-    let tx = (x + 48.0 * s) as i32;
-    c.text(&msg, &t.body, rect(tx, y as i32, (w as f32 * 0.6) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    let (bw, bh) = (76.0 * s, 32.0 * s);
+    let bh = 32.0 * s;
     let button = Shape::new(x + w as f32 - bw - 10.0 * s, y + (h as f32 - bh) / 2.0, bw, bh, bh / 2.0);
+    let tx = (x + 48.0 * s) as i32;
+    let tw = (button.x - 12.0 * s) as i32 - tx;
+    c.text(&msg, &t.body, rect(tx, y as i32, tw, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     // Brighter under the pointer; pressed, it sinks a little and brightens a touch more.
     let fill = if t.pressed { button.inset(1.5 * s) } else { button };
     let lit = 0.12 * clamp01(t.hot.value) + if t.pressed { 0.08 } else { 0.0 };
@@ -215,11 +241,32 @@ fn render(t: &mut Toast) {
     present(t, cw, ch);
 }
 
+fn message(t: &Toast) -> String {
+    if t.archived { tn!("toast_archived", t.count) } else { tn!("toast_deleted", t.count) }
+}
+
+/// The capsule's width and its Undo pill's, in pixels at scale `s`, for a message and a
+/// button label measured `msg_w` and `label_w` wide: the pill fits its label (German and
+/// Hindi run longer than "Undo") and the capsule grows, within reason, to keep the
+/// message beside it.
+fn sizes(s: f32, msg_w: i32, label_w: i32) -> (i32, f32) {
+    let bw = (label_w as f32 + 2.0 * 16.0 * s).max(76.0 * s).ceil();
+    let need = (48.0 + 12.0 + 10.0) * s + msg_w as f32 + bw;
+    (need.clamp(320.0 * s, 560.0 * s).ceil() as i32, bw)
+}
+
+/// `sizes` for what the toast says now (a notice has no button: its text, with margins).
+fn measure(t: &Toast) -> (i32, f32) {
+    let s = t.s;
+    match &t.notice {
+        Some(msg) => (((t.body.measure(msg).0 as f32 + 40.0 * s).clamp(320.0 * s, 560.0 * s)).ceil() as i32, 0.0),
+        None => sizes(s, t.body.measure(&message(t)).0, t.bold.measure(t!("toast_undo")).0),
+    }
+}
+
 /// Put the drawn toast at the bottom of the work area.
 fn present(t: &mut Toast, cw: i32, ch: i32) {
-    let (work, _) = crate::win::ui::deck::monitor_geo();
-    let px = (work.left + work.right) / 2 - cw / 2;
-    let py = work.bottom - ch - (12.0 * t.s) as i32;
+    let (px, py) = crate::win::ui::screen::bottom_centre(t.work, cw, ch, (12.0 * t.s) as i32);
     if let Some(c) = t.canvas.as_mut() {
         c.present(t.hwnd, px, py);
     }
@@ -258,5 +305,24 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             _ => {}
         }
         DefWindowProcW(h, msg, wp, lp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sizes;
+
+    #[test]
+    fn the_undo_pill_fits_its_label() {
+        // A short label keeps the usual pill and capsule.
+        assert_eq!(sizes(1.0, 120, 30), (320, 76.0));
+        // "पूर्ववत करें" or "Widerrufen" in bold: the pill grows past its label, the capsule
+        // keeps the message beside it.
+        let (w, bw) = sizes(1.0, 150, 90);
+        assert_eq!(bw, 122.0);
+        assert!(w as f32 >= 48.0 + 150.0 + 12.0 + bw + 10.0);
+        // At 150% everything scales, and a very long message stops growing the capsule.
+        assert_eq!(sizes(1.5, 180, 45), (480, 114.0));
+        assert_eq!(sizes(1.0, 2000, 30).0, 560);
     }
 }

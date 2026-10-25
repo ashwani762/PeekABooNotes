@@ -25,6 +25,7 @@
     <string name="menu_archive">संग्रह</string>
     <string name="menu_reopen_last">आख़िरी नोट फिर खोलें</string>
     <string name="menu_undo_delete">हटाना पूर्ववत करें</string>
+    <string name="menu_undo_archive">संग्रहित करना पूर्ववत करें</string>
     <string name="menu_show_deck">डेक दिखाएँ</string>
     <string name="menu_move_deck">डेक को दूसरे किनारे पर ले जाएँ</string>
     <string name="menu_settings">सेटिंग्स</string>
@@ -254,6 +255,7 @@
     <string name="shortcut_code">कोड ब्लॉक</string>
     <string name="shortcut_table">तालिका</string>
     <string name="shortcut_leave_text">नोट के टेक्स्ट से बाहर जाएँ</string>
+    <string name="shortcut_undo_toast">संग्रहित करना या हटाना पूर्ववत करें</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">नोट्स फ़ोल्डर</string>

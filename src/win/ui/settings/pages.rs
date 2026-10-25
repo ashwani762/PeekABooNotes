@@ -99,7 +99,8 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 rows: vec![
                     keys(t!("shortcut_search"), &["ctrl", "F"]),
                     keys(t!("menu_archive"), &["ctrl", "shift", "A"]),
-                    keys(t!("menu_delete"), &["ctrl", "shift", "del"]),
+                    keys(t!("menu_delete"), &["del", "/", "ctrl", "shift", "del"]),
+                    keys(t!("shortcut_undo_toast"), &["ctrl", "Z"]),
                     keys(t!("shortcut_leave_text"), &["ctrl", "tab"]),
                 ],
                 footer: None,

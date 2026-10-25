@@ -13,6 +13,7 @@ pub(super) fn note_hwnd(id: u64) -> Option<HWND> {
 pub fn refresh() {
     deck::refresh();
     allnotes::refresh();
+    settings::notes_changed();
 }
 
 /// Plain text + list markers for an RTF blob, via the hidden worker editor.
@@ -311,6 +312,11 @@ fn confirm_delete_all(owner: HWND, n: usize) -> bool {
     let items = vec![action(2, t!("button_cancel"), "", ""), Item::Separator, danger(ID_DELETE, &tn!("menu_delete_all_notes", n), "", IC_DELETE)];
     let p = super::menus::cursor();
     popup(items, p.x, p.y, owner) == ID_DELETE
+}
+
+/// Whether the Undo toast has something to take back (it is showing).
+pub fn can_undo() -> bool {
+    ui(|u| !u.pending.is_empty() || !u.unarchive.is_empty())
 }
 
 /// The toast's Undo: the notes just deleted come back, or the ones just archived return to

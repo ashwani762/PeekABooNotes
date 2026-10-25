@@ -31,11 +31,11 @@ pub(super) fn rebuild(l: &mut Lib) {
                 _ => !n.archived,
             })
             .filter_map(|n| {
-                let title = title_of(&n.text);
+                let title = without_objects(title_of(&n.text));
                 let m = if searching {
                     let rest = search_rest(&n.text);
                     let m = q.score(&title, &rest)?;
-                    let snippet = m.body_at.map(|at| crate::common::search::snippet(&rest, at, 80));
+                    let snippet = m.body_at.map(|at| without_objects(crate::common::search::snippet(&rest, at, 80)));
                     let marks = snippet.as_deref().map(|s| q.marks(s)).unwrap_or_default();
                     (m.score, m.title, snippet, marks)
                 } else {
@@ -46,7 +46,7 @@ pub(super) fn rebuild(l: &mut Lib) {
                     title,
                     off_deck: n.off_deck,
                     order: n.order,
-                    body: body_of(&n.text),
+                    body: without_objects(body_of(&n.text)),
                     time: relative_time(n.updated),
                     created: n.created,
                     updated: n.updated,

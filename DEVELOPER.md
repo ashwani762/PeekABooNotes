@@ -142,7 +142,7 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 | Ctrl+Shift+Del | Delete (with Undo) |
 | Ctrl+[ / Ctrl+] | Previous / next note |
 
-**In All Notes:** Ctrl+F searches; Ctrl+Shift+A archives or restores and Ctrl+Shift+Del deletes the selected notes; Ctrl+Tab leaves the note being edited. Tab and Shift+Tab move through All Notes and Settings with a focus ring; Space or Enter presses, the arrow keys move along segments and swatches. In menus, the arrow keys reach every row, colour and format button. Paste is always plain text, so notes keep a consistent look.
+**In All Notes:** Ctrl+F searches; Ctrl+Shift+A archives or restores and Ctrl+Shift+Del deletes the selected notes (plain Del too, when the list has the keys); while the Undo toast shows, Ctrl+Z (outside the note being edited) takes the archive or delete back, as does the tray menu's Undo; Ctrl+Tab leaves the note being edited. Tab and Shift+Tab move through All Notes and Settings with a focus ring; Space or Enter presses, the arrow keys move along segments and swatches. In menus, the arrow keys reach every row, colour and format button. Paste is always plain text, so notes keep a consistent look.
 
 ## Languages
 

@@ -27,6 +27,7 @@ use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::common::store::{body_of, search_rest, title_of};
+use crate::win::ui::without_objects;
 use crate::win::theme::{self, motion};
 use crate::common::i18n::time::{edited_time, relative_time};
 use crate::win::util::{WM_MOUSELEAVE, cref, from_wide, key_down, mix, rect, wide, x_of, y_of};
@@ -44,8 +45,13 @@ use kbd::*;
 
 const CLASS: &str = "PeekABooLibrary";
 const ID_SEARCH: usize = 10;
+/// Longest search, in characters: a pasted paragraph fits, a pasted note stops there.
+const SEARCH_MAX: usize = 2000;
 /// Makes the card's editor once search typing pauses.
 const T_SYNC: usize = 1;
+/// Brings the rows' times ("Edited 2 min ago") up to date while the window is open.
+const T_TIMES: usize = 2;
+const TIMES_MS: u32 = 30_000;
 /// The filter segments: Notes, Archive, All.
 fn segments() -> [&'static str; 3] {
     [t!("segment_notes"), t!("segment_archive"), t!("segment_all")]
@@ -135,6 +141,7 @@ struct Pal {
     line: u32,
     text: u32,
     sub: u32,
+    /// The search field's shortcut hint, quieter than `sub` but still 4.5:1 on the field.
     ter: u32,
     hover: (u32, f32),
     field: (u32, f32),
@@ -151,7 +158,7 @@ fn pal(dark: bool) -> Pal {
             line: 0x38383A,
             text: 0xF5F5F7,
             sub: 0x98989D,
-            ter: 0x6C6C70,
+            ter: 0xA1A1A6,
             hover: (0xFFFFFF, 0.06),
             field: (0x767680, 0.24),
             pill: 0x636366,
@@ -165,7 +172,7 @@ fn pal(dark: bool) -> Pal {
             line: 0xE5E5EA,
             text: 0x1D1D1F,
             sub: 0x6E6E73,
-            ter: 0xA1A1A6,
+            ter: 0x6A6A6F,
             hover: (0x000000, 0.045),
             field: (0x767680, 0.12),
             pill: 0xFFFFFF,
@@ -347,10 +354,10 @@ pub fn show(archived: bool) {
     }
     START_ARCHIVED.with(|c| c.set(archived));
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
-    let (work, s) = crate::win::ui::deck::monitor_geo();
-    let (w, h) = ((960.0 * s) as i32, (620.0 * s) as i32);
-    let x = work.left + ((work.right - work.left) - w) / 2;
-    let y = work.top + ((work.bottom - work.top) - h) / 2;
+    // On the monitor in use, at its scale (the window takes that monitor's DPI).
+    let (work, s) = crate::win::ui::screen::active();
+    let r = crate::win::ui::screen::centred(work, (960.0 * s) as i32, (620.0 * s) as i32);
+    let (x, y, w, h) = (r.left, r.top, r.right - r.left, r.bottom - r.top);
     unsafe {
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
@@ -434,9 +441,21 @@ fn new_here() {
     }
 }
 
-/// Note typography changed: restyle the inline editor, if there is one.
+/// Note typography changed: the card's preview fonts (the only ones in the note's face
+/// and size) and the inline editor follow. The rest stay, among them the search field's
+/// GDI font, which the field holds on to.
 pub fn retheme_editor() {
-    with(|l| l.fonts = Fonts::new(l.s));
+    with(|l| {
+        let (title, body) = crate::win::editor::rich::preview_fonts(l.s);
+        l.fonts.card_title = title;
+        l.fonts.card_body = body;
+    });
+    restyle_editor();
+}
+
+/// The note's paper changed (its colour, or the theme): restyle the inline editor, if
+/// there is one, and redraw the card. No fonts are made for it.
+fn restyle_editor() {
     if let Some(e) = with(|l| l.editor)
         && !e.is_null() {
             crate::win::ui::note::retheme(e);
@@ -463,7 +482,7 @@ pub fn retheme() {
     theme::set_dark_titlebar(h, app::dark());
     // The inline editor's paper, the card's cached pixels and the search field (its own
     // control, which only repaints when told) all follow the new theme.
-    retheme_editor();
+    restyle_editor();
     unsafe {
         InvalidateRect(search, std::ptr::null(), 1);
         InvalidateRect(h, std::ptr::null(), 0);
@@ -474,7 +493,7 @@ pub fn retheme() {
 /// Note `id` changed colour: if the inline editor shows it, its paper follows.
 pub fn recolor(id: u64) {
     if editor_for(id).is_some() {
-        retheme_editor();
+        restyle_editor();
     }
 }
 
@@ -524,6 +543,8 @@ enum Action {
     Settings,
     OpenHere(u64),
     ClearSearch,
+    /// The Undo toast's Undo, from the keyboard.
+    Undo,
     Focus(Focus),
     Reorder(Vec<u64>),
     Close,
@@ -549,6 +570,7 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 }
         }
         Action::New => new_here(),
+        Action::Undo => app::undo_delete(),
         Action::Settings => crate::win::ui::settings::show(),
         Action::Share(ids) => app::share(hwnd, &ids),
         Action::Reorder(ids) => {
@@ -598,6 +620,19 @@ fn perform_inner(hwnd: HWND, a: Action) {
     }
 }
 
+/// Whether `e`, a control in the inline editor, is its text with the selection inside the
+/// first paragraph (the title).
+fn in_title(e: HWND) -> bool {
+    use crate::win::editor::rich;
+    let mut class = [0u16; 32];
+    let n = unsafe { GetClassNameW(e, class.as_mut_ptr(), class.len() as i32) }.max(0) as usize;
+    if !String::from_utf16_lossy(&class[..n]).eq_ignore_ascii_case(rich::CLASS) {
+        return false;
+    }
+    let (a, b) = rich::sel(e);
+    !rich::range_text(e, 0, a.max(b)).contains(&13)
+}
+
 /// Keys for the search box and list that must be seen before the EDIT consumes them,
 /// and Ctrl+Tab out of the note editor (plain Tab there indents lists).
 pub fn pre_translate(msg: &MSG) -> bool {
@@ -609,7 +644,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
     let (ctrl, shift) = (key_down(VK_CONTROL), key_down(VK_SHIFT));
     let in_editor = !editor.is_null() && (msg.hwnd == editor || unsafe { IsChild(editor, msg.hwnd) } != 0);
     if in_editor {
-        if vk != VK_TAB || !ctrl {
+        // Ctrl+Tab leaves the note, and so does Tab in its title, where a tab character
+        // has no place; elsewhere in the text Tab is the editor's (lists, tables, code).
+        if vk != VK_TAB || !(ctrl || in_title(msg.hwnd)) {
             return false;
         }
     } else if msg.hwnd != hwnd && msg.hwnd != search {
@@ -670,6 +707,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
                 Some(Action::None)
             }
             _ if ctrl && vk == b'N' as u16 => Some(Action::New),
+            // While the Undo toast shows, Ctrl+Z here (not in the note editor, whose own
+            // undo comes first) takes back the archive or delete, as its button does.
+            _ if ctrl && !shift && vk == b'Z' as u16 && app::can_undo() => Some(Action::Undo),
             _ => None,
         }
     })
@@ -695,6 +735,7 @@ fn on_create(hwnd: HWND) {
     unsafe {
         SendMessageW(search, WM_SETFONT, fonts.edit_gdi as usize, 1);
         SendMessageW(search, EM_SETCUEBANNER, 1, wide(t!("search_placeholder")).as_ptr() as isize);
+        SendMessageW(search, windows_sys::Win32::UI::Controls::EM_SETLIMITTEXT, SEARCH_MAX, 0);
         let m = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
         DwmExtendFrameIntoClientArea(hwnd, &m);
     }
@@ -741,6 +782,7 @@ fn on_create(hwnd: HWND) {
     };
     lib.list_a.to(1.0);
     LIB.with(|l| *l.borrow_mut() = Some(lib));
+    unsafe { SetTimer(hwnd, T_TIMES, TIMES_MS, None) };
     with(|l| {
         rebuild(l);
         place_search(l);
@@ -912,8 +954,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 if id == ID_SEARCH {
                     match code {
                         EN_CHANGE => {
-                            let mut buf = [0u16; 256];
-                            GetWindowTextW(lp as HWND, buf.as_mut_ptr(), 256);
+                            // All of it: the field holds up to SEARCH_MAX characters.
+                            let n = GetWindowTextLengthW(lp as HWND).max(0) as usize + 1;
+                            let mut buf = vec![0u16; n];
+                            GetWindowTextW(lp as HWND, buf.as_mut_ptr(), n as i32);
                             let q = from_wide(&buf);
                             with(|l| {
                                 // The list fades in as a search starts or ends, not again with
@@ -968,6 +1012,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_TIMER if wp == T_SYNC => {
                 KillTimer(hwnd, T_SYNC);
                 sync_editor();
+                return 0;
+            }
+            WM_TIMER if wp == T_TIMES => {
+                // Redrawn only when a row's time reads differently now.
+                let changed = with(|l| {
+                    let mut changed = false;
+                    for r in &mut l.rows {
+                        let now = relative_time(r.updated);
+                        if now != r.time {
+                            r.time = now;
+                            changed = true;
+                        }
+                    }
+                    changed
+                });
+                if changed == Some(true) {
+                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                }
                 return 0;
             }
             WM_SETFOCUS => {
@@ -1207,5 +1269,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             _ => {}
         }
         DefWindowProcW(hwnd, msg, wp, lp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::theme::contrast;
+
+    #[test]
+    fn quiet_text_still_reads() {
+        for dark in [false, true] {
+            let p = pal(dark);
+            // The search field's hint on the field, secondary text on the list.
+            assert!(contrast(p.ter, field_color(dark)) >= 4.5, "hint, dark: {dark}");
+            assert!(contrast(p.sub, p.list) >= 4.5, "secondary, dark: {dark}");
+        }
     }
 }

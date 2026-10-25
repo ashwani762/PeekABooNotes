@@ -59,7 +59,9 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     let count = tn!("notes_count", l.rows.len());
     c.line_ct(&count, &f.count, px(24.0) + tw + px(10.0), base, px(120.0), None, p.sub, DT_LEFT);
     for (hit, r) in header_buttons(lay, s) {
-        if l.hover == hit {
+        // Share has nothing to share in an empty list: greyed, and it doesn't light up.
+        let off = hit == Hit::Share && share_count(l) == 0;
+        if l.hover == hit && !off {
             let a = p.hover.1 * if l.pressed == hit { 2.4 } else { 1.6 };
             c.shape(&Shape::new(r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32, 8.0 * s), p.hover.0, a, 1.0, 0.0);
         }
@@ -68,7 +70,7 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             Hit::Share => "\u{E72D}",
             _ => "\u{E713}",
         };
-        icon(c, glyph, &f.icons, r, p.text);
+        icon(c, glyph, &f.icons, r, if off { mix(p.list, p.text, 0.3) } else { p.text });
         if ring_hit == Some(hit) {
             focus::ring(c, &shape_of(r, 8.0 * s), p.focus, 1.0, s);
         }
@@ -143,7 +145,9 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     let row_x = 10.0 * s;
     let row_w = lay.list_w - 20.0 * s;
     let row_shape = |y: f32| clip_shape(Shape::new(row_x, y, row_w, lay.row_h - 2.0 * s, 10.0 * s), top);
-    if l.hover_a.value > 0.01 {
+    // Only on a row that is there: a search can shrink the list under a resting pointer.
+    let hover_row = ((l.hover_y.target - lay.list_top) / lay.row_h).round();
+    if l.hover_a.value > 0.01 && hover_row >= 0.0 && (hover_row as usize) < l.rows.len() {
         let y = l.hover_y.value - l.scroll.value + slide;
         if y + lay.row_h > top && y < bottom {
             c.shape(&row_shape(y), p.hover.0, p.hover.1 * l.hover_a.value * la, 1.0, 0.0);

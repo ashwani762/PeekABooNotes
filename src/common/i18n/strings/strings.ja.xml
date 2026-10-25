@@ -25,6 +25,7 @@
     <string name="menu_archive">アーカイブ</string>
     <string name="menu_reopen_last">最後のメモを再び開く</string>
     <string name="menu_undo_delete">削除を取り消す</string>
+    <string name="menu_undo_archive">アーカイブを取り消す</string>
     <string name="menu_show_deck">デッキを表示</string>
     <string name="menu_move_deck">デッキを反対の端へ移動</string>
     <string name="menu_settings">設定</string>
@@ -242,6 +243,7 @@
     <string name="shortcut_code">コードブロック</string>
     <string name="shortcut_table">表</string>
     <string name="shortcut_leave_text">メモの本文から移動</string>
+    <string name="shortcut_undo_toast">アーカイブや削除を取り消す</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">メモのフォルダ</string>

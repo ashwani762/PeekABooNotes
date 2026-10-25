@@ -45,6 +45,11 @@ pub(super) fn header_buttons(lay: &Layout, s: f32) -> [(Hit, RECT); 3] {
     [(Hit::Settings, r(0)), (Hit::Share, r(1)), (Hit::New, r(2))]
 }
 
+/// How many notes Share would share: the selected ones the list shows.
+pub(super) fn share_count(l: &Lib) -> usize {
+    l.rows.iter().filter(|r| l.sel.contains(&r.id)).count()
+}
+
 /// The tooltip for a toolbar icon, detail button or colour swatch under the pointer, or none.
 pub(super) fn header_tip(l: &Lib, hit: Hit) {
     use crate::win::ui::tooltip;
@@ -66,13 +71,14 @@ pub(super) fn header_tip(l: &Lib, hit: Hit) {
         tooltip::hover(l.hwnd, r, label, &crate::common::i18n::keys(&keys));
         return;
     }
-    let Some((_, r)) = header_buttons(&lay, l.s).into_iter().find(|(x, _)| *x == hit) else {
+    // Share with nothing selected (an empty list) is greyed out and says nothing.
+    let Some((_, r)) = header_buttons(&lay, l.s).into_iter().find(|(x, _)| *x == hit).filter(|_| hit != Hit::Share || share_count(l) > 0) else {
         tooltip::leave(l.hwnd);
         return;
     };
     let (label, keys) = match hit {
         Hit::New => (t!("menu_new_note").to_string(), crate::common::i18n::keys(&["ctrl", "N"])),
-        Hit::Share => (tn!("tip_share", l.rows.iter().filter(|r| l.sel.contains(&r.id)).count()), String::new()),
+        Hit::Share => (tn!("tip_share", share_count(l)), String::new()),
         _ => (t!("menu_settings").to_string(), String::new()),
     };
     tooltip::hover(l.hwnd, r, &label, &keys);
