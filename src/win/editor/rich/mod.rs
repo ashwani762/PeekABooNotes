@@ -303,6 +303,12 @@ fn strip_weights(rtf: &str) -> String {
     out
 }
 
+/// How many characters `h` holds (as `text` counts them), without copying them.
+pub fn text_len(h: HWND) -> usize {
+    let gtl = GetTextLengthEx { flags: GTL_PRECISE | GTL_NUMCHARS, codepage: CP_UTF16 };
+    send(h, EM_GETTEXTLENGTHEX, &gtl as *const _ as usize, 0).max(0) as usize
+}
+
 /// Full text with bare `\r` paragraph marks; indices match RichEdit character positions.
 pub fn text(h: HWND) -> Vec<u16> {
     let gtl = GetTextLengthEx { flags: GTL_PRECISE | GTL_NUMCHARS, codepage: CP_UTF16 };

@@ -375,7 +375,9 @@ fn is_link(h: HWND, cp: i32) -> bool {
 /// The link around char `cp` (or just before it, for a caret at a link's end):
 /// its extent and address.
 pub fn link_at(h: HWND, cp: i32) -> Option<(i32, i32, String)> {
-    let len = text(h).len() as i32;
+    // The length only: copying the whole text here, once per link, made a note with
+    // many links take seconds to write out or restyle.
+    let len = text_len(h) as i32;
     let cp = if cp < len && is_link(h, cp) {
         cp
     } else if cp > 0 && is_link(h, cp - 1) {
