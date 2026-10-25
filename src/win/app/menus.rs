@@ -191,7 +191,7 @@ pub fn tray_menu() {
         action(CMD_REOPEN, t!("menu_reopen_last"), &crate::common::i18n::keys(&["ctrl", "alt", "O"]), IC_REFRESH),
     ];
     if let Some(label) = undo {
-        v.push(action(CMD_UNDO, &label, "", IC_UNDO));
+        v.push(action(CMD_UNDO, label, "", IC_UNDO));
     }
     v.extend([
         Item::Separator,
