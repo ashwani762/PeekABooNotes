@@ -179,11 +179,14 @@ pub fn import(owner: HWND) -> Outcome {
     let w = ui(|u| u.worker);
     let (mut added, mut empty, mut failed) = (0, 0, None);
     let total = files.len();
+    // The log says what went wrong and with what kind of file, never which file: its name
+    // and folder are the user's.
+    let ext = |f: &std::path::Path| f.extension().map(|e| format!(".{}", e.to_string_lossy().to_lowercase())).unwrap_or_else(|| "no extension".into());
     for f in files {
         let bytes = match std::fs::read(&f) {
             Ok(b) => b,
             Err(e) => {
-                failed = Some(e);
+                failed = Some(format!("{:?} reading a file ({})", e.kind(), ext(&f)));
                 continue;
             }
         };
@@ -195,7 +198,7 @@ pub fn import(owner: HWND) -> Outcome {
             continue;
         }
         if text.chars().count() > crate::common::store::MAX_NOTE_CHARS {
-            failed = Some(std::io::Error::other(format!("{} is longer than a note holds", f.display())));
+            failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
             continue;
         }
         rich::load_markdown(w, text);
@@ -216,7 +219,7 @@ pub fn import(owner: HWND) -> Outcome {
     }
     let skipped = if empty > 0 { format!(", {empty} empty skipped") } else { String::new() };
     match &failed {
-        Some(e) => log::warn(&format!("import: added {added} of {total} files{skipped}; last read error: {e}")),
+        Some(e) => log::warn(&format!("import: added {added} of {total} files{skipped}; last error: {e}")),
         None => log::info(&format!("import: added {added} of {total} files{skipped}")),
     }
     if added == 0 {

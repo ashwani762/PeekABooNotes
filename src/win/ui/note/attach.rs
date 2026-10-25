@@ -216,7 +216,11 @@ pub(super) fn add(e: HWND, cp: i32, paths: &[PathBuf]) -> usize {
     for p in paths.iter().filter(|p| p.is_file()) {
         match attach::copy_in(p) {
             Ok(name) => names.push(name),
-            Err(err) => crate::common::log::warn(&format!("attach: couldn't copy {}: {err}", p.display())),
+            // The kind of file and of failure, not the user's path.
+            Err(err) => {
+                let ext = p.extension().map_or("no extension".into(), |e| format!(".{}", e.to_string_lossy().to_lowercase()));
+                crate::common::log::warn(&format!("attach: couldn't copy a file ({ext}): {:?}", err.kind()));
+            }
         }
     }
     put(e, cp, &names)
