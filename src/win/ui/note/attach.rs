@@ -400,6 +400,22 @@ fn hdrop_files(hdrop: HDROP) -> Vec<PathBuf> {
     }
 }
 
+/// Plain Unicode text on the clipboard.
+const CF_UNICODETEXT_ID: u16 = 13;
+
+/// RichEdit's own clipboard format: text dragged out of a RichEdit (another note).
+fn richedit_format() -> u16 {
+    thread_local! {
+        static ID: std::cell::OnceCell<u16> = const { std::cell::OnceCell::new() };
+    }
+    ID.with(|id| *id.get_or_init(|| unsafe { windows_sys::Win32::System::DataExchange::RegisterClipboardFormatW(crate::win::util::wide("RichEdit Text and Objects").as_ptr()) } as u16))
+}
+
+/// A FORMATETC asking for clipboard format `cf` in global memory.
+fn format_etc(cf: u16) -> windows::Win32::System::Com::FORMATETC {
+    windows::Win32::System::Com::FORMATETC { cfFormat: cf, ptd: std::ptr::null_mut(), dwAspect: windows::Win32::System::Com::DVASPECT_CONTENT.0, lindex: -1, tymed: windows::Win32::System::Com::TYMED_HGLOBAL.0 as u32 }
+}
+
 fn hdrop_format() -> FORMATETC {
     FORMATETC { cfFormat: CF_HDROP, ptd: std::ptr::null_mut(), dwAspect: DVASPECT_CONTENT.0, lindex: -1, tymed: TYMED_HGLOBAL.0 as u32 }
 }
@@ -461,11 +477,19 @@ impl IRichEditOleCallback_Impl for Callback_Impl {
     fn DeleteObject(&self, _: Ref<IOleObject>) -> windows::core::Result<()> {
         Ok(())
     }
-    fn QueryAcceptData(&self, data: Ref<IDataObject>, _: *mut u16, _: RECO_FLAGS, really: BOOL, _: HGLOBAL) -> windows::core::Result<()> {
+    fn QueryAcceptData(&self, data: Ref<IDataObject>, format: *mut u16, _: RECO_FLAGS, really: BOOL, _: HGLOBAL) -> windows::core::Result<()> {
         let Some(d) = data.as_ref() else { return Ok(()) };
         // S_FALSE says "not here" too.
         if unsafe { d.QueryGetData(&hdrop_format()) } != windows::Win32::Foundation::S_OK {
-            return Ok(()); // text and the like: RichEdit's business
+            // Text: from another note (RichEdit's own format) it keeps its formatting;
+            // from anywhere else it comes in plain, as a paste does, rather than with
+            // another app's fonts, sizes and colours.
+            let own = unsafe { d.QueryGetData(&format_etc(richedit_format())) } == windows::Win32::Foundation::S_OK;
+            let plain = unsafe { d.QueryGetData(&format_etc(CF_UNICODETEXT_ID)) } == windows::Win32::Foundation::S_OK;
+            if !own && plain && !format.is_null() {
+                unsafe { *format = CF_UNICODETEXT_ID };
+            }
+            return Ok(());
         }
         if really.as_bool() {
             // Where the pointer let go.
