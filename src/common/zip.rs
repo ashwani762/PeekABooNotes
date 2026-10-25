@@ -56,19 +56,46 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> io::Res
     Ok(())
 }
 
+/// The most entries a zip without the zip64 extensions holds: its count is 16 bits.
+const MAX_ENTRIES: usize = u16::MAX as usize;
+
+/// Sizes and offsets are 32 bits without zip64, and all ones means "see zip64": a value
+/// that doesn't fit is refused rather than written wrapped around.
+fn fits(n: u64, what: &str) -> io::Result<u32> {
+    u32::try_from(n).ok().filter(|&v| v != u32::MAX).ok_or_else(|| io::Error::other(format!("{what} is past the 4 GB a zip holds")))
+}
+
+fn entries_fit(count: usize) -> io::Result<u16> {
+    if count > MAX_ENTRIES {
+        return Err(io::Error::other(format!("{count} files are more than the {MAX_ENTRIES} a zip holds")));
+    }
+    Ok(count as u16)
+}
+
 /// Zip every file under `root`, named by their paths inside it, into `out`. How many went in.
+/// A zip that can't hold them all isn't left behind half written.
 pub fn zip_dir(root: &Path, out: &Path) -> io::Result<usize> {
     let mut files = Vec::new();
     collect(root, root, &mut files)?;
     files.sort();
+    let count = entries_fit(files.len())?;
+    let written = write_zip(&files, count, out);
+    if written.is_err() {
+        let _ = std::fs::remove_file(out);
+    }
+    written
+}
+
+fn write_zip(files: &[(String, PathBuf)], count: u16, out: &Path) -> io::Result<usize> {
     let mut w = io::BufWriter::new(std::fs::File::create(out)?);
     let (mut central, mut offset) = (Vec::new(), 0u64);
-    for (name, path) in &files {
+    for (name, path) in files {
         let data = std::fs::read(path)?;
-        if data.len() >= u32::MAX as usize || offset + data.len() as u64 >= u32::MAX as u64 {
-            return Err(io::Error::other("too large to zip"));
+        let (n, crc, size) = (name.as_bytes(), crc32(&data), fits(data.len() as u64, "a file")?);
+        let at = fits(offset, "the zip")?;
+        if n.len() > u16::MAX as usize {
+            return Err(io::Error::other("a file name is longer than a zip holds"));
         }
-        let (n, crc, size) = (name.as_bytes(), crc32(&data), data.len() as u32);
         let (time, date) = dos_time(&modified(path));
         // Version 2.0, UTF-8 names (flag bit 11), stored.
         let common = |v: &mut Vec<u8>| {
@@ -90,18 +117,18 @@ pub fn zip_dir(root: &Path, out: &Path) -> io::Result<usize> {
         central.extend(20u16.to_le_bytes());
         common(&mut central);
         central.extend([0u8; 10]); // comment length, disk, internal and external attributes
-        central.extend((offset as u32).to_le_bytes());
+        central.extend(at.to_le_bytes());
         central.extend(n);
         offset += (local.len() + data.len()) as u64;
     }
+    let (directory, directory_at) = (fits(central.len() as u64, "the zip's directory")?, fits(offset, "the zip")?);
     w.write_all(&central)?;
-    let count = files.len() as u16;
     let mut end = 0x0605_4b50u32.to_le_bytes().to_vec();
     for x in [0u16, 0, count, count] {
         end.extend(x.to_le_bytes());
     }
-    end.extend((central.len() as u32).to_le_bytes());
-    end.extend((offset as u32).to_le_bytes());
+    end.extend(directory.to_le_bytes());
+    end.extend(directory_at.to_le_bytes());
     end.extend(0u16.to_le_bytes());
     w.write_all(&end)?;
     w.flush()?;
@@ -139,5 +166,15 @@ mod tests {
         let second = cd + 46 + u16_at(cd + 28) as usize;
         assert_eq!(&z[second + 46..second + 46 + u16_at(second + 28) as usize], b"attachments/a.txt");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refuses_what_a_zip_cant_hold() {
+        assert_eq!(entries_fit(65_535).unwrap(), 65_535);
+        assert!(entries_fit(65_536).unwrap_err().to_string().contains("65535"));
+        assert_eq!(fits(u32::MAX as u64 - 1, "the zip").unwrap(), u32::MAX - 1);
+        // All ones is zip64's marker, and past it would wrap around.
+        assert!(fits(u32::MAX as u64, "the zip").is_err());
+        assert!(fits(5 << 30, "a file").unwrap_err().to_string().contains("4 GB"));
     }
 }
