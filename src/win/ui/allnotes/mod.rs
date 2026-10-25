@@ -27,6 +27,7 @@ use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::common::store::{body_of, search_rest, title_of};
+use crate::win::ui::without_objects;
 use crate::win::theme::{self, motion};
 use crate::common::i18n::time::{edited_time, relative_time};
 use crate::win::util::{WM_MOUSELEAVE, cref, from_wide, key_down, mix, rect, wide, x_of, y_of};
@@ -44,8 +45,13 @@ use kbd::*;
 
 const CLASS: &str = "PeekABooLibrary";
 const ID_SEARCH: usize = 10;
+/// Longest search, in characters: a pasted paragraph fits, a pasted note stops there.
+const SEARCH_MAX: usize = 2000;
 /// Makes the card's editor once search typing pauses.
 const T_SYNC: usize = 1;
+/// Brings the rows' times ("Edited 2 min ago") up to date while the window is open.
+const T_TIMES: usize = 2;
+const TIMES_MS: u32 = 30_000;
 /// The filter segments: Notes, Archive, All.
 fn segments() -> [&'static str; 3] {
     [t!("segment_notes"), t!("segment_archive"), t!("segment_all")]
@@ -601,6 +607,19 @@ fn perform_inner(hwnd: HWND, a: Action) {
     }
 }
 
+/// Whether `e`, a control in the inline editor, is its text with the selection inside the
+/// first paragraph (the title).
+fn in_title(e: HWND) -> bool {
+    use crate::win::editor::rich;
+    let mut class = [0u16; 32];
+    let n = unsafe { GetClassNameW(e, class.as_mut_ptr(), class.len() as i32) }.max(0) as usize;
+    if !String::from_utf16_lossy(&class[..n]).eq_ignore_ascii_case(rich::CLASS) {
+        return false;
+    }
+    let (a, b) = rich::sel(e);
+    !rich::range_text(e, 0, a.max(b)).contains(&13)
+}
+
 /// Keys for the search box and list that must be seen before the EDIT consumes them,
 /// and Ctrl+Tab out of the note editor (plain Tab there indents lists).
 pub fn pre_translate(msg: &MSG) -> bool {
@@ -612,7 +631,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
     let (ctrl, shift) = (key_down(VK_CONTROL), key_down(VK_SHIFT));
     let in_editor = !editor.is_null() && (msg.hwnd == editor || unsafe { IsChild(editor, msg.hwnd) } != 0);
     if in_editor {
-        if vk != VK_TAB || !ctrl {
+        // Ctrl+Tab leaves the note, and so does Tab in its title, where a tab character
+        // has no place; elsewhere in the text Tab is the editor's (lists, tables, code).
+        if vk != VK_TAB || !(ctrl || in_title(msg.hwnd)) {
             return false;
         }
     } else if msg.hwnd != hwnd && msg.hwnd != search {
@@ -701,6 +722,7 @@ fn on_create(hwnd: HWND) {
     unsafe {
         SendMessageW(search, WM_SETFONT, fonts.edit_gdi as usize, 1);
         SendMessageW(search, EM_SETCUEBANNER, 1, wide(t!("search_placeholder")).as_ptr() as isize);
+        SendMessageW(search, windows_sys::Win32::UI::Controls::EM_SETLIMITTEXT, SEARCH_MAX, 0);
         let m = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
         DwmExtendFrameIntoClientArea(hwnd, &m);
     }
@@ -747,6 +769,7 @@ fn on_create(hwnd: HWND) {
     };
     lib.list_a.to(1.0);
     LIB.with(|l| *l.borrow_mut() = Some(lib));
+    unsafe { SetTimer(hwnd, T_TIMES, TIMES_MS, None) };
     with(|l| {
         rebuild(l);
         place_search(l);
@@ -918,8 +941,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 if id == ID_SEARCH {
                     match code {
                         EN_CHANGE => {
-                            let mut buf = [0u16; 256];
-                            GetWindowTextW(lp as HWND, buf.as_mut_ptr(), 256);
+                            // All of it: the field holds up to SEARCH_MAX characters.
+                            let n = GetWindowTextLengthW(lp as HWND).max(0) as usize + 1;
+                            let mut buf = vec![0u16; n];
+                            GetWindowTextW(lp as HWND, buf.as_mut_ptr(), n as i32);
                             let q = from_wide(&buf);
                             with(|l| {
                                 // The list fades in as a search starts or ends, not again with
@@ -974,6 +999,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_TIMER if wp == T_SYNC => {
                 KillTimer(hwnd, T_SYNC);
                 sync_editor();
+                return 0;
+            }
+            WM_TIMER if wp == T_TIMES => {
+                // Redrawn only when a row's time reads differently now.
+                let changed = with(|l| {
+                    let mut changed = false;
+                    for r in &mut l.rows {
+                        let now = relative_time(r.updated);
+                        if now != r.time {
+                            r.time = now;
+                            changed = true;
+                        }
+                    }
+                    changed
+                });
+                if changed == Some(true) {
+                    InvalidateRect(hwnd, std::ptr::null(), 0);
+                }
                 return 0;
             }
             WM_SETFOCUS => {

@@ -44,7 +44,7 @@ pub(super) fn compute_geo(n_items: usize) -> Geo {
 /// Rebuild the tab list from the store, keeping the springs of tabs that still exist.
 pub(super) fn sync(d: &mut Deck) {
     let rows: Vec<(u64, String, String, u8)> = app::store(|s| {
-        s.active_ids().iter().filter_map(|id| s.note(*id)).filter(|n| !n.off_deck).map(|n| (n.id, title_of(&n.text), body_of(&n.text), n.color)).collect()
+        s.active_ids().iter().filter_map(|id| s.note(*id)).filter(|n| !n.off_deck).map(|n| (n.id, without_objects(title_of(&n.text)), without_objects(body_of(&n.text)), n.color)).collect()
     });
     let open: Vec<u64> = app::ui(|u| u.notes.keys().copied().collect());
     let in_deck = rows.iter().filter(|r| !open.contains(&r.0)).count();

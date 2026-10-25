@@ -31,6 +31,7 @@ use crate::win::render::anim::{self, Client, Spring, clamp01, lerp};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::common::store::{body_of, title_of};
+use crate::win::ui::without_objects;
 use crate::win::theme::{self, motion};
 use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
 
