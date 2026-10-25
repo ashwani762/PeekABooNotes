@@ -261,12 +261,20 @@ pub fn style_boxes(h: HWND) {
     // Each box is formatted through the selection: hold the view still meanwhile. The
     // looks follow from the text, so they're no step for Ctrl+Z (which would otherwise
     // first undo the formatting of a new item, selecting its box, before the item).
-    still(h, || unrecorded(h, || style_boxes_now(h)));
+    still(h, || unrecorded(h, || style_boxes_now(h, None)));
 }
 
-fn style_boxes_now(h: HWND) {
+/// `style_boxes` for the items whose paragraphs start from `a` to `b` only: a tick, or a
+/// new item, restyles its own line, not every item in the note (a few messages each,
+/// thousands in a long checklist).
+pub fn style_boxes_in(h: HWND, a: i32, b: i32) {
+    still(h, || unrecorded(h, || style_boxes_now(h, Some((a.max(0) as usize, b.max(a).max(0) as usize)))));
+}
+
+fn style_boxes_now(h: HWND, only: Option<(usize, usize)>) {
     let t = text(h);
-    if !t.iter().any(|&c| is_task(c)) {
+    let (from, to) = only.map_or((0, t.len()), |(a, b)| (para_start(&t, a as i32) as usize, (b + 1).min(t.len())));
+    if !t[from..to].iter().any(|&c| is_task(c)) {
         return;
     }
     let (ink, done, normal) = BOX_COLORS.with(|m| m.borrow().get(&(h as isize)).copied()).unwrap_or((0x444444, 0x888888, 0x1D1D1F));
@@ -295,7 +303,7 @@ fn style_boxes_now(h: HWND) {
     indent.line_spacing = single;
     indent.space_after = PARA_AFTER + (rhythm - single).max(0);
     set_face(&mut boxf, "Segoe UI Symbol");
-    for (i, &c) in t.iter().enumerate() {
+    for (i, &c) in t.iter().enumerate().take(to).skip(from) {
         if !is_task(c) || (i > 0 && t[i - 1] != CR) {
             continue; // only markers at the start of a paragraph
         }

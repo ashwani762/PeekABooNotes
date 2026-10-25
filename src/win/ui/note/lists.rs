@@ -29,7 +29,7 @@ pub(super) fn toggle_check(e: HWND, cp: i32) {
         // A caret before the box would draw inside the circle: keep it after it.
         let (a, b) = if a == b && a == cp { (cp + 1, cp + 1) } else { (a, b) };
         rich::set_sel(e, a, b);
-        rich::style_boxes(e); // completed items turn secondary; reopened ones regain full ink
+        rich::style_boxes_in(e, cp, cp); // completed items turn secondary; reopened ones regain full ink
     });
     crate::win::editor::checks::animate(e, cp, !checked);
 }
@@ -82,7 +82,7 @@ pub(super) fn toggle_task_lines(e: HWND) {
         }
     }
     rich::set_sel(e, na.max(0), nb.max(na.max(0)));
-    rich::style_boxes(e);
+    rich::style_boxes_in(e, na, nb);
 }
 
 /// A pasted line's own list or checklist marker taken off: whether it was ticked, and
@@ -139,7 +139,7 @@ pub(super) fn paste_into_checklist(e: HWND, clip: &str) -> bool {
         rich::set_sel(e, a + first_len, end);
         rich::set_effect(e, CFM_STRIKEOUT, false);
         rich::set_sel(e, end, end);
-        rich::style_boxes(e);
+        rich::style_boxes_in(e, a, end);
     });
     true
 }
@@ -205,7 +205,7 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
             (AutoKind::Task, ticked) => {
                 rich::numbering_to_task(e);
                 rich::replace_sel(e, if ticked == 1 { "\u{2611} " } else { "\u{2610} " });
-                rich::style_boxes(e);
+                rich::style_boxes_in(e, ps, ps);
                 if ticked == 1 {
                     // What's typed next is done text: struck and faded.
                     rich::set_done_format(e);
@@ -414,7 +414,7 @@ pub(super) fn handle_enter(h: HWND, e: HWND) -> bool {
                 rich::set_sel(e, c - 2, c);
                 rich::set_effect(e, CFM_STRIKEOUT, false);
                 rich::set_sel(e, c, c);
-                rich::style_boxes(e);
+                rich::style_boxes_in(e, c - 2, c - 2);
             });
         }
         mark_dirty(h);
@@ -732,7 +732,10 @@ mod tests {
     fn nested_bullets_become_nested_items() {
         let h = editor("");
         rich::load_markdown(h, "T\n- a\n  - b\n    - c");
-        let at = |h: HWND, s: &str| String::from_utf16_lossy(&rich::text(h)).find(s).unwrap() as i32;
+        let at = |h: HWND, s: &str| {
+            let w: Vec<u16> = s.encode_utf16().collect();
+            rich::text(h).windows(w.len()).position(|v| v == &w[..]).unwrap() as i32
+        };
         let b = at(h, "b");
         rich::set_sel(h, b, b);
         rich::replace_sel(h, "[]");
@@ -793,6 +796,79 @@ mod tests {
         assert_eq!(rich::to_markdown(h, true), "# T\n- [x] done");
         rich::set_sel(h, end + 1, end + 3);
         assert_ne!(rich::char_format(h, rich::SCF_SELECTION).effects & CFM_STRIKEOUT, 0, "done text is struck");
+    }
+
+    /// A tick restyles its own item (struck, faded) and an untick brings its ink back;
+    /// a new item from Enter or "[] " has the item look, while the rest are left alone.
+    #[test]
+    fn ticks_and_new_items_restyle_their_own_line() {
+        let h = editor("T\r\u{2610} one\r\u{2610} two");
+        rich::set_box_colors(h, 0xFFFFFF, 0x888888, 0x1D1D1F);
+        rich::style_boxes(h);
+        // Where `w` is, in UTF-16 units (a box is three bytes as UTF-8).
+        let pos = |h: HWND, w: &str| {
+            let w: Vec<u16> = w.encode_utf16().collect();
+            rich::text(h).windows(w.len()).position(|v| v == &w[..]).unwrap() as i32
+        };
+        let look = |h: HWND, word: &str| {
+            let at = pos(h, word);
+            rich::set_sel(h, at, at + word.len() as i32);
+            let cf = rich::char_format(h, rich::SCF_SELECTION);
+            let mut pf = rich::ParaFormat2::new();
+            rich::send(h, rich::EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+            (cf.effects & CFM_STRIKEOUT != 0, cf.color, pf.offset)
+        };
+        let (_, ink, offset) = look(h, "two");
+        let done = crate::win::util::cref(0x888888);
+        let two = pos(h, "two") - 2;
+        toggle_check(h, two);
+        assert_eq!(look(h, "two"), (true, done, offset));
+        assert_eq!(look(h, "one"), (false, ink, offset));
+        toggle_check(h, two);
+        assert_eq!(look(h, "two"), (false, ink, offset));
+        // Enter after "one": the new item, typed into, looks like the others.
+        let at = pos(h, "one") + 3;
+        rich::set_sel(h, at, at);
+        assert!(handle_enter(null_mut(), h));
+        rich::replace_sel(h, "new");
+        assert_eq!(look(h, "new"), (false, ink, offset));
+        // "[] " on a line of its own.
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        rich::replace_sel(h, "\r[]");
+        assert!(try_auto_list(null_mut(), h));
+        rich::replace_sel(h, "typed");
+        assert_eq!(look(h, "typed"), (false, ink, offset));
+    }
+
+    /// Timing (run with --ignored --nocapture): a tick, and Enter on an item, in a
+    /// checklist of 2,000 items.
+    #[test]
+    #[ignore]
+    fn probe_checklist_costs() {
+        let mut md = String::from("T\n");
+        for i in 0..2000 {
+            md.push_str(&format!("- [ ] item {i}\n"));
+        }
+        let h = editor("");
+        rich::load_markdown(h, md.trim_end());
+        rich::style_boxes(h);
+        let boxes: Vec<i32> = rich::text(h).iter().enumerate().filter(|(_, c)| is_task(**c)).map(|(i, _)| i as i32).collect();
+        let n = 10;
+        let t0 = std::time::Instant::now();
+        for k in 0..n {
+            toggle_check(h, boxes[1000 + k as usize]);
+        }
+        let tick = t0.elapsed() / n;
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        let t0 = std::time::Instant::now();
+        for k in 0..n {
+            rich::replace_sel(h, &format!("x{k}"));
+            handle_enter(null_mut(), h);
+        }
+        let enter = t0.elapsed() / n;
+        eprintln!("PROBE 2,000 items: tick {tick:?}, Enter {enter:?}");
     }
 
     /// Ticking a box up the note while the caret is far below keeps the view where it is.

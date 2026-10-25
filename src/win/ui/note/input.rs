@@ -188,7 +188,8 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             // checklist item: it gets the look at once.
             if c == rich::BOX as u32 || c == rich::CHECKED as u32 {
                 let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
-                rich::style_boxes(e);
+                let (at, _) = rich::sel(e);
+                rich::style_boxes_in(e, at - 1, at - 1);
                 return r;
             }
             // A space or Tab ends a word: an address becomes a link.

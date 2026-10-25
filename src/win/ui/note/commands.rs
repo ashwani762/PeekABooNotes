@@ -230,7 +230,7 @@ pub(super) fn paste(h: HWND) {
         let (end, _) = rich::sel(e);
         // Lines that came in starting with a box are checklist items: they get their look.
         if clip.as_deref().is_some_and(|c| c.contains(['\u{2610}', '\u{2611}'])) {
-            rich::style_boxes(e);
+            rich::style_boxes_in(e, a, end);
         }
         rich::link_addresses(e, a.max(0) as usize, end.max(0) as usize);
     }
