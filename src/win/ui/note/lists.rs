@@ -616,6 +616,33 @@ mod tests {
         assert_eq!(rich::send(h, EM_CANUNDO, 0, 0), 0);
     }
 
+    /// Blocks of a kind side by side stay apart through export and import: a quote typed
+    /// right after another, a quote under an item then one after the list, two tables.
+    #[test]
+    fn neighbouring_blocks_stay_apart() {
+        let h = editor("Title\r");
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        let t = rich::text(h);
+        rich::wrap(h, rich::para_start(&t, end), end, Block::Quote);
+        rich::replace_sel(h, "first");
+        assert_eq!(block_enter(h), None);
+        rich::replace_sel(h, "\r");
+        assert_eq!(block_enter(h), Some(true));
+        rich::replace_sel(h, ">");
+        assert!(try_auto_list(null_mut(), h));
+        rich::replace_sel(h, "second");
+        let md = rich::to_markdown(h, true);
+        assert_eq!(md, "# Title\n> first\n\n> second");
+        for md in ["T\n> first\n\n> second", "T\n- item\n  > under\n\n> top", "T\n| a |\n| --- |\n| 1 |\n\n| b |\n| --- |\n| 2 |"] {
+            let h = editor("");
+            rich::load_markdown(h, md);
+            let t = rich::text(h);
+            assert_eq!(rich::blocks(h, &t).len(), 2, "{md}");
+            assert_eq!(rich::to_markdown(h, true), format!("# {md}"));
+        }
+    }
+
     #[test]
     fn undo_after_restyle_and_save() {
         const EM_UNDO: u32 = 0x00C7;

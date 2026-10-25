@@ -12,6 +12,8 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
     let mut out = String::new();
     let mut start = 0usize;
     let mut numbers = [0usize; MAX_LEVEL as usize + 1];
+    // The block just written, while nothing else has come after it.
+    let mut last_block = None;
     while start <= t.len() {
         // Two blocks always have an empty paragraph between them (RichEdit won't let two
         // tables touch): that's their gap, not a blank line.
@@ -23,6 +25,12 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         if t.get(start) == Some(&ROW_START)
             && let Some((kind, rows)) = block_at(h, &t, start as i32)
         {
+            // Two quotes (or tables) in a row would read back as one: a blank line keeps
+            // them two (and import drops it again).
+            if last_block == Some(kind) && kind != Block::Code {
+                out.push('\n');
+            }
+            last_block = Some(kind);
             out.push_str(&block_md(h, &t, kind, &rows, inline));
             out.push('\n');
             // A quote under a list item is part of it: the list's count goes on after it.
@@ -36,6 +44,7 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
             continue;
         }
         let end = t[start..].iter().position(|&c| c == CR).map(|i| start + i).unwrap_or(t.len());
+        last_block = None;
         out.push_str(&para_md(h, &t, start, end, inline, &mut numbers));
         out.push('\n');
         if end >= t.len() {
@@ -700,10 +709,12 @@ fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
     };
     if let Some((lead, first)) = quoted(raw) {
         let mut paras = vec![parse_line(&first)];
+        // The quote goes on while its lines are indented as its first: a quote under a
+        // list item and a quote after the list are two.
         for n in next {
             match quoted(n) {
-                Some((_, q)) => paras.push(parse_line(&q)),
-                None => break,
+                Some((l, q)) if l == lead => paras.push(parse_line(&q)),
+                _ => break,
             }
         }
         let used = paras.len() - 1;
