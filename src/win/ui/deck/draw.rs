@@ -131,23 +131,27 @@ pub(super) fn render(d: &mut Deck) {
     }
 }
 
-/// How far a scrolling spine label has moved after `t` seconds: rest at the start, glide
-/// to the end, rest, glide back, and so on.
-fn marquee_offset(t: f32, span: f32, s: f32) -> f32 {
+/// How far a scrolling spine label has moved after `t` seconds, and whether it's still
+/// moving: rest at the start, glide to the end, rest, glide back, once. A pointer resting
+/// on the card then costs nothing: the label settles at its start (moving the pointer
+/// off the tab and back shows it again).
+fn marquee_offset(t: f32, span: f32, s: f32) -> (f32, bool) {
     const REST: f32 = 1.2;
     let travel = (span / (34.0 * s)).max(0.3);
-    let k = t % (2.0 * (REST + travel));
+    if t >= 2.0 * (REST + travel) {
+        return (0.0, false);
+    }
     let ease = |x: f32| x * x * (3.0 - 2.0 * x);
-    let f = if k < REST {
+    let f = if t < REST {
         0.0
-    } else if k < REST + travel {
-        ease((k - REST) / travel)
-    } else if k < 2.0 * REST + travel {
+    } else if t < REST + travel {
+        ease((t - REST) / travel)
+    } else if t < 2.0 * REST + travel {
         1.0
     } else {
-        1.0 - ease((k - 2.0 * REST - travel) / travel)
+        1.0 - ease((t - 2.0 * REST - travel) / travel)
     };
-    f * span
+    (f * span, true)
 }
 
 pub(super) fn draw_card(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, origin_y: f32, dark: bool) {
@@ -228,10 +232,15 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
                 now
             }
         };
-        d.marquee_live = true;
         let span = (lf.measure(&d.tabs[i].label).0 - max_len).max(0) as f32;
-        (d.tabs[i].label.clone(), max_len, marquee_offset(t0.elapsed().as_secs_f32(), span, s))
+        let (offset, moving) = marquee_offset(t0.elapsed().as_secs_f32(), span, s);
+        d.marquee_live |= moving;
+        if moving { (d.tabs[i].label.clone(), max_len, offset) } else { (label, len, 0.0) }
     } else {
+        // Off this tab: the next time it's pointed at, its label scrolls again.
+        if d.hover != Hit::Tab(i) && d.marquee.is_some_and(|(m, _)| m == d.tabs[i].id) {
+            d.marquee = None;
+        }
         (label, len, 0.0)
     };
     let spine_cx = cp.spine_x + dir * spine_w / 2.0;
@@ -283,5 +292,22 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
             let br = rect(cx0 as i32, top as i32, (cx1 - cx0) as i32, (sh.y + sh.h - 12.0 * s - top) as i32);
             crate::win::ui::draw_body(c, &t.body, &bf, br, color, dark, ca, s);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marquee_runs_once_then_rests() {
+        let (span, s) = (68.0, 1.0);
+        assert_eq!(marquee_offset(0.0, span, s), (0.0, true));
+        let (mid, moving) = marquee_offset(2.2, span, s);
+        assert!(moving && mid > 0.0 && mid <= span);
+        assert_eq!(marquee_offset(3.5, span, s), (span, true));
+        // There and back once, then still at the start for as long as the pointer stays.
+        assert_eq!(marquee_offset(7.0, span, s), (0.0, false));
+        assert_eq!(marquee_offset(600.0, span, s), (0.0, false));
     }
 }
