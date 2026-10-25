@@ -54,7 +54,7 @@ Notes are Windows' RichEdit (Msftedit), with a few things layered on:
 - **Bulk changes** (loading a note, applying a theme) freeze layout, drawing, notifications and undo until they're done, so a long note is laid out once instead of once per paragraph.
 - **Pictures fit the note** (`rich/pictures.rs`): one wider than the text column (or its table cell) is narrowed to fit, keeping its shape, and grows back to its own size (at most 240 DIP, read from the PNG or JPEG header) when the note is wider again. RichEdit keeps a picture's shown size only in its RTF, so the picture is written through RTF again, as an edit outside the undo history and without change notifications: resizing never marks the note changed.
 - **Each editor's text object model** (`ITextDocument2`) is fetched once and kept (`rich::doc`, dropped in the editor's WM_NCDESTROY), and link colouring after typing moves one range from link to link: a note with hundreds of links costs a fraction of a millisecond per pause.
-- The overlays look only at the text on screen, so they cost the same in a long note as in a short one.
+- The overlays look only at the text on screen, so they cost the same in a long note as in a short one. The checklist circles are drawn on one canvas taken from the window and copied back in one go, so the screen never shows rows with only some of their circles. A scrolled note fades into the paper at the top while there is text above, and at the bottom while there is text below (`editor/fade.rs`). A band is faded only right after RichEdit has drawn it fresh, and on a scroll only the rows the faded band was moved onto are redrawn, never the whole note.
 
 ### Limits
 
