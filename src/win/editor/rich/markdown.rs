@@ -56,7 +56,9 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
     if !inline {
         out = out.lines().map(light_task).collect::<Vec<_>>().join("\n");
     }
-    out.trim_end().to_string()
+    // A line break within a paragraph (Shift+Enter) goes out as a line: never as the
+    // control character RichEdit keeps it as.
+    out.replace('\u{B}', "\n").trim_end().to_string()
 }
 
 /// A task line without the `- `, past any indent and quote marks.
@@ -194,7 +196,7 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
                 let cs = cells(t, *row);
                 let line: Vec<String> = cs
                     .iter()
-                    .map(|&(a, b)| paras(a, b).into_iter().map(|(x, y)| text_of(x, y).replace('|', "\\|")).collect::<Vec<_>>().join("<br>"))
+                    .map(|&(a, b)| paras(a, b).into_iter().map(|(x, y)| text_of(x, y).replace('|', "\\|").replace('\u{B}', "<br>")).collect::<Vec<_>>().join("<br>"))
                     .collect();
                 out.push_str(&format!("| {} |\n", line.join(" | ")));
                 if n == 0 {

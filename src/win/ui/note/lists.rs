@@ -790,6 +790,22 @@ mod tests {
         assert_eq!(rich::to_markdown(h, true), "# T\n```\nline one\nline two\n```\n> quoted");
     }
 
+    /// A Shift+Enter line break goes out as a line (in a table cell, as <br>), never as
+    /// a control character.
+    #[test]
+    fn soft_breaks_go_out_as_lines() {
+        let h = editor("T\rfirst\u{B}second");
+        assert_eq!(rich::to_markdown(h, true), "# T\nfirst\nsecond");
+        assert_eq!(rich::to_markdown(h, false), "T\nfirst\nsecond");
+        let h = editor("");
+        rich::load_markdown(h, "T\n| a |\n| --- |\n| x |");
+        let t = rich::text(h);
+        let x = t.iter().position(|&c| c == b'x' as u16).unwrap() as i32;
+        rich::set_sel(h, x + 1, x + 1);
+        rich::replace_sel(h, "\u{B}y");
+        assert_eq!(rich::to_markdown(h, true), "# T\n| a |\n| --- |\n| x<br>y |");
+    }
+
     #[test]
     fn undo_after_restyle_and_save() {
         const EM_UNDO: u32 = 0x00C7;
