@@ -48,7 +48,6 @@ pub const NC_CLOSE: u32 = 205;
 pub const NC_NEXT: u32 = 206;
 pub const NC_PREV: u32 = 207;
 pub const NC_CYCLE_COLOR: u32 = 208;
-pub const NC_VERSIONS: u32 = 209;
 pub const NC_BOLD: u32 = 210;
 pub const NC_ITALIC: u32 = 211;
 pub const NC_UNDERLINE: u32 = 212;
@@ -77,6 +76,10 @@ pub const NC_ROW_DELETE: u32 = 234;
 pub const NC_COL_DELETE: u32 = 235;
 pub const NC_TABLE_DELETE: u32 = 236;
 pub const NC_COLOR0: u32 = 300;
+/// Previous Versions lists a note's earlier versions newest first; choosing the one at
+/// place `i` sends `NC_VERSION0 + i`. A note keeps no more than `NC_VERSION_ROWS`.
+pub const NC_VERSION0: u32 = 400;
+pub const NC_VERSION_ROWS: u32 = 10;
 
 // App commands (tray menu, hotkeys).
 const CMD_NEW: u32 = 1;

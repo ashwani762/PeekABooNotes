@@ -409,7 +409,6 @@ pub fn note_command(id: u64, cmd: u32) {
     match cmd {
         NC_OPEN => open_note(id),
         NC_PIN => toggle_pin(id),
-        NC_VERSIONS => versions_menu(id),
         NC_DECK => {
             store_mut(|s| {
                 if let Some(n) = s.note_mut(id) {
@@ -433,6 +432,12 @@ pub fn note_command(id: u64, cmd: u32) {
             set_color(id, theme::next_color(c));
         }
         c if (NC_COLOR0..NC_COLOR0 + theme::COLORS.len() as u32).contains(&c) => set_color(id, (c - NC_COLOR0) as u8),
+        // Listed again, newest first, as the submenu listed them.
+        c if (NC_VERSION0..NC_VERSION0 + NC_VERSION_ROWS).contains(&c) => {
+            if let Some(v) = crate::win::ui::note::versions::list(id).get((c - NC_VERSION0) as usize) {
+                crate::win::ui::note::restore_version(id, v);
+            }
+        }
         _ => {
             if let Some(h) = note_hwnd(id) {
                 unsafe { PostMessageW(h, note::WM_NOTE_CMD, cmd as usize, 0) };
