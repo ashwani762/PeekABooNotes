@@ -94,6 +94,12 @@ pub(super) fn block_command(e: HWND, kind: rich::Block) {
         }
         return;
     }
+    // A selection running on into a block stops before it: the lines above become the
+    // new block, and the one below stays whole (its row marks never go into another).
+    let b = match t[a as usize..(b.max(a) as usize).min(t.len())].iter().position(|&c| c == rich::ROW_START) {
+        Some(i) => (a + i as i32 - 1).max(a),
+        None => b,
+    };
     let (ps, pe) = (rich::para_start(&t, a), rich::para_end(&t, b.max(a)));
     // The title stays the title: a block goes below it.
     if ps == 0 {

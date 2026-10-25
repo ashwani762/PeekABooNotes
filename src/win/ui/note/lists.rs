@@ -776,6 +776,20 @@ mod tests {
         assert!(!try_auto_list(null_mut(), h));
     }
 
+    /// A selection from a line into the quote below it: the line becomes a code block,
+    /// the quote stays a quote, and no row marks end up as text.
+    #[test]
+    fn block_command_stops_at_a_block() {
+        let h = editor("");
+        rich::load_markdown(h, "T\nline one\nline two\n> quoted");
+        let t = rich::text(h);
+        let one = t.iter().position(|&c| c == b'l' as u16).unwrap() as i32;
+        let q = t.iter().position(|&c| c == b'q' as u16).unwrap() as i32;
+        rich::set_sel(h, one, q + 3);
+        block_command(h, Block::Code);
+        assert_eq!(rich::to_markdown(h, true), "# T\n```\nline one\nline two\n```\n> quoted");
+    }
+
     #[test]
     fn undo_after_restyle_and_save() {
         const EM_UNDO: u32 = 0x00C7;
