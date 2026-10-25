@@ -82,7 +82,7 @@ pub fn note_menu(id: u64, in_note: bool) -> Vec<menu::Item> {
     if !archived {
         v.push(menu::check(NC_DECK, t!("menu_show_in_deck"), "", !off_deck));
     }
-    v.push(action(NC_VERSIONS, t!("menu_previous_versions"), "", IC_HISTORY));
+    v.push(menu::submenu(t!("menu_previous_versions"), IC_HISTORY, move || versions_items(id)));
     v.push(action(NC_ARCHIVE, if archived { t!("menu_restore") } else { t!("menu_archive") }, &if archived { String::new() } else { crate::common::i18n::keys(&["ctrl", "shift", "A"]) }, IC_ARCHIVE));
     v.push(danger(NC_DELETE, t!("menu_delete"), &crate::common::i18n::keys(&["ctrl", "shift", "del"]), IC_DELETE));
     if in_note {
@@ -130,28 +130,23 @@ pub fn note_menu_at_cursor(id: u64, owner: HWND, before: impl FnOnce()) {
     }
 }
 
-/// Note `id`'s earlier versions, newest first, at the pointer; the one chosen is put back.
-pub(super) fn versions_menu(id: u64) {
-    use crate::win::ui::note::versions;
-    let list = versions::list(id);
-    let items: Vec<menu::Item> = if list.is_empty() {
-        vec![menu::action(0, t!("versions_none"), "", "").enabled(false)]
-    } else {
-        list.iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let when = crate::common::i18n::time::long_time(v.at);
-                let words = v.md.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count();
-                menu::action(i as u32 + 1, &capitalized(&when), &crate::tn!("versions_words", words), "")
-            })
-            .collect()
-    };
-    let p = cursor();
-    let owner = ui(|u| u.notes.get(&id).copied()).unwrap_or(std::ptr::null_mut());
-    let cmd = popup(items, p.x, p.y, owner);
-    if let Some(v) = (cmd as usize).checked_sub(1).and_then(|i| list.get(i)) {
-        crate::win::ui::note::restore_version(id, v);
+/// The Previous Versions submenu: note `id`'s earlier versions, newest first, by when and
+/// how many words. Read only when the submenu opens, so the note's menu itself never
+/// waits on `versions.json`.
+fn versions_items(id: u64) -> Vec<menu::Item> {
+    let list = crate::win::ui::note::versions::list(id);
+    if list.is_empty() {
+        return vec![menu::action(0, t!("versions_none"), "", "").enabled(false)];
     }
+    list.iter()
+        .take(NC_VERSION_ROWS as usize)
+        .enumerate()
+        .map(|(i, v)| {
+            let when = crate::common::i18n::time::long_time(v.at);
+            let words = v.md.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count();
+            menu::action(NC_VERSION0 + i as u32, &capitalized(&when), &crate::tn!("versions_words", words), "")
+        })
+        .collect()
 }
 
 /// "today at 3:42 PM" as a menu row starts: "Today at 3:42 PM".
