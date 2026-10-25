@@ -51,10 +51,11 @@ pub fn export(owner: HWND, ids: &[u64]) -> Outcome {
 /// Write notes `ids` into `dir` as Markdown files, their attachments beside them: how many
 /// were written, and the last error if any weren't.
 pub(super) fn write_markdown(dir: &std::path::Path, ids: &[u64]) -> (usize, Option<std::io::Error>) {
-    let notes: Vec<(String, String)> = store(|s| ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.rtf.clone(), n.text.clone())).collect());
+    use crate::common::frontmatter::{self, Meta};
+    let notes: Vec<(String, String, Meta)> = store(|s| ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.rtf.clone(), n.text.clone(), Meta::of(n))).collect());
     let mut used = HashSet::new();
     let (mut written, mut failed) = (0, None);
-    for (rtf, text) in notes {
+    for (rtf, text, meta) in notes {
         let md = if rtf.is_empty() { text.clone() } else { rtf_to_markdown(&rtf) };
         let base = file_safe(&title_of(&text));
         let mut name = format!("{base}.md");
@@ -64,7 +65,8 @@ pub(super) fn write_markdown(dir: &std::path::Path, ids: &[u64]) -> (usize, Opti
             name = format!("{base} ({k}).md");
             k += 1;
         }
-        let md = crate::common::store::hard_breaks(&export_attachments(&md, dir));
+        // The state the Markdown can't hold goes in front matter, for import to put back.
+        let md = frontmatter::write(&meta) + &crate::common::store::hard_breaks(&export_attachments(&md, dir));
         match std::fs::write(dir.join(name), md + "\n") {
             Ok(()) => written += 1,
             Err(e) => failed = Some(e),
@@ -177,22 +179,26 @@ pub fn import(owner: HWND) -> Outcome {
     let w = ui(|u| u.worker);
     let (mut added, mut empty, mut failed) = (0, 0, None);
     let total = files.len();
+    // The log says what went wrong and with what kind of file, never which file: its name
+    // and folder are the user's.
+    let ext = |f: &std::path::Path| f.extension().map(|e| format!(".{}", e.to_string_lossy().to_lowercase())).unwrap_or_else(|| "no extension".into());
     for f in files {
         let bytes = match std::fs::read(&f) {
             Ok(b) => b,
             Err(e) => {
-                failed = Some(e);
+                failed = Some(format!("{:?} reading a file ({})", e.kind(), ext(&f)));
                 continue;
             }
         };
-        let text = String::from_utf8_lossy(&bytes);
-        let text = text.trim_start_matches('\u{FEFF}');
+        let text = crate::common::util::decode_text(&bytes);
+        // An export's front matter gives the note back its colour, state and dates.
+        let (meta, text) = crate::common::frontmatter::split(&text);
         if text.trim().is_empty() {
             empty += 1;
             continue;
         }
         if text.chars().count() > crate::common::store::MAX_NOTE_CHARS {
-            failed = Some(std::io::Error::other(format!("{} is longer than a note holds", f.display())));
+            failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
             continue;
         }
         rich::load_markdown(w, text);
@@ -203,12 +209,17 @@ pub fn import(owner: HWND) -> Outcome {
         crate::win::ui::note::adopt_files(w, folder, &crate::common::attach::Allowed { roots: vec![folder.to_path_buf()], except: Vec::new() });
         let rtf = rich::get_rtf(w);
         let plain = rich::to_markdown(w, false);
-        store_mut(|s| s.create(&plain, &rtf));
+        store_mut(|s| {
+            let id = s.create(&plain, &rtf);
+            if let (Some(m), Some(n)) = (&meta, s.note_mut(id)) {
+                m.apply(n);
+            }
+        });
         added += 1;
     }
     let skipped = if empty > 0 { format!(", {empty} empty skipped") } else { String::new() };
     match &failed {
-        Some(e) => log::warn(&format!("import: added {added} of {total} files{skipped}; last read error: {e}")),
+        Some(e) => log::warn(&format!("import: added {added} of {total} files{skipped}; last error: {e}")),
         None => log::info(&format!("import: added {added} of {total} files{skipped}")),
     }
     if added == 0 {

@@ -176,6 +176,27 @@ pub struct Data {
     pub notes: Vec<Note>,
     #[serde(default)]
     pub settings: Settings,
+    /// The form of light text (`LIGHT_TEXT`) the notes' `text` was last brought up to.
+    #[serde(default)]
+    pub light_text: u32,
+}
+
+/// The form the notes' light text is written in. 1: pictures and files on a line of their
+/// own are links (`![name](attachment:name)`), so previews can show them. Raised when a
+/// change needs older notes' text rebuilt from their RTF, which then happens once.
+pub const LIGHT_TEXT: u32 = 1;
+
+impl Data {
+    /// The notes whose light text predates `LIGHT_TEXT` and has to be rebuilt: those with
+    /// an attachment, whose links an older form left out. None once that's been done,
+    /// since a link inside a sentence never gets the line form, and its note would
+    /// otherwise look out of date at every start.
+    pub fn stale_light_text(&self) -> Vec<u64> {
+        if self.light_text >= LIGHT_TEXT {
+            return Vec::new();
+        }
+        self.notes.iter().filter(|n| n.rtf.contains(crate::common::attach::SCHEME) && !n.text.contains("](attachment:")).map(|n| n.id).collect()
+    }
 }
 
 pub struct Store {
@@ -319,7 +340,7 @@ impl Store {
     /// at once. Cheap: a few fields a note, never the text.
     fn content_stamp(&self) -> u64 {
         let mut h = std::hash::DefaultHasher::new();
-        self.d.next_id.hash(&mut h);
+        (self.d.next_id, self.d.light_text).hash(&mut h);
         for n in &self.d.notes {
             (n.id, n.color, n.archived, n.pinned, n.off_deck, n.created, n.updated, n.order, n.text.len(), n.rtf.len()).hash(&mut h);
         }
@@ -778,6 +799,30 @@ mod tests {
         assert_eq!(strip_marker("[plan.pdf](attachment:plan.pdf)"), "plan.pdf");
         assert_eq!(summary_line("![sunset.jpg](attachment:sunset.jpg)"), "sunset.jpg");
         assert_eq!(title_of("![sunset.jpg](attachment:sunset.jpg)\nmore"), "sunset.jpg");
+    }
+
+    #[test]
+    fn light_text_is_rebuilt_once() {
+        let note = |id, text: &str| Note { id, rtf: r#"{\rtf1 {\field{\*\fldinst{HYPERLINK "attachment:plan.pdf"}}{\fldrslt plan.pdf}}}"#.into(), text: text.into(), ..Default::default() };
+        let mut d = Data {
+            notes: vec![
+                // Saved before previews showed files: just the name.
+                note(1, "Trip\nplan.pdf"),
+                // Its link inside a sentence, which the light text never writes as a link.
+                note(2, "Trip\nSee plan.pdf before Friday"),
+                note(3, "Trip\n[plan.pdf](attachment:plan.pdf)"),
+                Note { id: 4, rtf: r"{\rtf1 plain}".into(), text: "plain".into(), ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(d.stale_light_text(), [1, 2]);
+        // What refresh_light_text does: rebuild them (note 2 comes out the same) and mark it done.
+        d.notes[0].text = "Trip\n[plan.pdf](attachment:plan.pdf)".into();
+        d.light_text = LIGHT_TEXT;
+        assert!(d.stale_light_text().is_empty(), "note 2 isn't picked again");
+        // And so after the next load.
+        let d: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert!(d.stale_light_text().is_empty());
     }
 
 

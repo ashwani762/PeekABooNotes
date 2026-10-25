@@ -129,12 +129,26 @@ pub fn list(id: u64) -> Vec<Version> {
     l
 }
 
-/// Note `id` is gone for good: its versions too.
-pub fn forget(id: u64) {
+/// Notes `ids` are gone for good: their versions too.
+pub fn forget(ids: &[u64]) {
     let mut b = load();
-    if b.notes.remove(&id).is_some() {
+    let before = b.notes.len();
+    b.notes.retain(|id, _| !ids.contains(id));
+    if b.notes.len() != before {
         store(&b);
     }
+}
+
+/// Every version kept, of every note, as Markdown: what still links to attachments when a
+/// note's files are about to go. None when `versions.json` is there but can't be read, as
+/// then nobody can say which files its versions need.
+pub fn markdown() -> Option<Vec<String>> {
+    let b: Book = match std::fs::read(path()) {
+        Ok(bytes) => serde_json::from_slice(&bytes).ok()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Book::default(),
+        Err(_) => return None,
+    };
+    Some(b.notes.into_values().flatten().map(|v| v.md).collect())
 }
 
 #[cfg(test)]

@@ -218,7 +218,6 @@ pub fn install() {
         let place = p.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
         let msg = p.payload().downcast_ref::<&str>().copied().or(p.payload().downcast_ref::<String>().map(String::as_str)).unwrap_or("");
         let what = format!("panic at {place}: {}", redact(msg));
-        // Symbolizing can be slow (see above), so only for developers who asked for detail.
         // Raw addresses (symbolized later from the dump): std's own backtrace would pull a
         // symbol demangler into the exe for names it can't find without the PDB anyway.
         report(&what, std::ptr::null(), raw_stack);

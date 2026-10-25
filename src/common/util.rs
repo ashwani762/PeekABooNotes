@@ -58,7 +58,7 @@ pub fn portable() -> bool {
 }
 
 /// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm).
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -88,5 +88,81 @@ pub fn file_safe(s: &str) -> String {
         .take(60)
         .collect();
     out = out.trim().trim_end_matches('.').to_string();
-    if out.is_empty() { crate::t!("file_untitled").into() } else { out }
+    if out.is_empty() {
+        return crate::t!("file_untitled").into();
+    }
+    if reserved_device(&out) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// Windows opens a device, not a file, for a name whose part before the first dot is CON,
+/// PRN, AUX, NUL, COM0-9 or LPT0-9 (any case, trailing spaces ignored), so "Con.md" or
+/// "nul" as a note's title would export into nothing.
+fn reserved_device(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        s => {
+            let port = s.strip_prefix("COM").or_else(|| s.strip_prefix("LPT"));
+            port.is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+        }
+    }
+}
+
+/// A text file's bytes as text, by its byte order mark: UTF-16 LE or BE (what Notepad's
+/// "Unicode" saves), else UTF-8 with or without one. Bytes that don't decode become U+FFFD
+/// rather than failing the file.
+pub fn decode_text(bytes: &[u8]) -> String {
+    let utf16 = |rest: &[u8], unit: fn([u8; 2]) -> u16| {
+        let (pairs, odd) = rest.as_chunks::<2>();
+        let cut = !odd.is_empty();
+        let units: Vec<u16> = pairs.iter().map(|&c| unit(c)).collect();
+        let mut s = String::from_utf16_lossy(&units);
+        if cut {
+            s.push(char::REPLACEMENT_CHARACTER);
+        }
+        s
+    };
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, u16::from_le_bytes),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, u16::from_be_bytes),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_files_decode_by_their_mark() {
+        let text = "Café ☑ 写真\r\n- one";
+        let mut le = vec![0xFF, 0xFE];
+        le.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        let mut be = vec![0xFE, 0xFF];
+        be.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend(text.as_bytes());
+        for bytes in [le, be, bom, text.as_bytes().to_vec()] {
+            assert_eq!(decode_text(&bytes), text);
+        }
+        // A cut-off last unit or a stray byte comes through as a replacement, not an error.
+        assert_eq!(decode_text(&[0xFF, 0xFE, b'a', 0, b'b']), "a\u{FFFD}");
+        assert_eq!(decode_text(b"a\xFFb"), "a\u{FFFD}b");
+        assert_eq!(decode_text(&[]), "");
+    }
+
+    #[test]
+    fn device_names_are_kept_off() {
+        for name in ["CON", "con", "Prn", "aux", "NUL", "COM1", "com9", "LPT1", "lpt9", "con.md", "Nul.txt", "CON .md", "COM¹"] {
+            assert_eq!(file_safe(name), format!("_{name}"), "{name}");
+        }
+        for name in ["Console", "CON notes", "COM10", "LPT", "Auxiliary.md", "Standup - Tue", "nul-hypothesis"] {
+            assert_eq!(file_safe(name), name, "{name}");
+        }
+        assert_eq!(file_safe("nul.: x"), "_nul. - x");
+    }
 }

@@ -24,7 +24,7 @@ Both take the version from `Cargo.toml`.
 
 - `PEEKABOO_THEME=light|dark` forces an appearance.
 - `PEEKABOO_PERF=1` logs frame times, and which parts asked for the frames, to `%TEMP%\peekaboo-perf.txt`.
-- `PEEKABOO_TRACE=1` adds DEBUG lines (menu events and the like) to `logs\peekaboo.log`, and symbolized stacks to panic reports.
+- `PEEKABOO_TRACE=1` adds DEBUG lines (menu events and the like) to `logs\peekaboo.log`. Panic reports have raw `module+offset` stacks either way (see below).
 - `PEEKABOO_CRASH=panic|fault|overflow` crashes on purpose right after startup, to test crash reporting.
 
 A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three are kept), and its report, with raw `module+offset` stack addresses, to the log and to `crash.log` in the notes folder. Open the dump in Visual Studio or WinDbg next to the matching build's `.pdb`.
@@ -58,7 +58,7 @@ Notes are Windows' RichEdit (Msftedit), with a few things layered on:
 
 A note holds up to 100,000 characters (`MAX_NOTE_CHARS` in `store.rs`): typing and pasting stop there and the footer says the note is full; import skips longer files and assistants are told the text is too long. A note saved longer (from an older version) opens whole and just can't grow.
 
-Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start to the deck in 0.16 s, about 5 MB of memory at rest, All Notes open in under a second, a 3.6 MB save in 6 ms.
+Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start to the deck in 0.16 s, a working set of about 5 MB at rest (once the app has trimmed it, with no note, All Notes or Settings open; the memory it has committed is more), All Notes open in under a second, a 3.6 MB save in 6 ms.
 
 ## Your data
 
@@ -67,7 +67,7 @@ Notes live in one readable file, `Documents\PeekABoo Notes\notes.json`:
 - each note keeps its RTF and a plain-text Markdown copy (for search, previews and assistants);
 - writes are atomic (temp file, then rename);
 - `notes.backup.json` holds the last good copy from the previous launch. If `notes.json` can't be read (locked by another program, or damaged), the app opens the backup instead and never writes over the original;
-- attachments are copied into `attachments\` beside it and linked by name.
+- attachments are copied into `attachments\` beside it and linked by name. A note deleted for good (once its Undo has passed, or at quit) takes its files with it, except those another note or a saved version still links.
 
 There is no network access and no telemetry.
 
@@ -77,13 +77,14 @@ There is no network access and no telemetry.
 
 ## Import, export and share
 
-- **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)".
-- **Import** reads `.md` and `.txt` files and turns their Markdown into real formatting: `**bold**`, `_italic_`, `~~strike~~`, `<u>underline</u>`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists, `[links](https://...)`, `> ` quotes (with lists inside, `> - item`, and under list items, `  > text` or `- > text`), fenced code blocks, pipe tables (`:---:` and `---:` align a column) and `<p align="center">` / `"right"` lines. Headings below the title come in as plain text. Plain text that only looks like a marker is written escaped (`\- not a list`) and comes back as text.
+- **Export** writes one Markdown file per note into a folder you pick (the picker remembers it). It never overwrites a file; a name already in the folder gets "(2)", and a title Windows keeps for a device (`CON`, `NUL`, `COM1` and the like) gets a leading `_`.
+- **Front matter** (`common/frontmatter.rs`) at the top of each file keeps what Markdown can't: the colour by name, and, only when they differ from a new note's, `pinned: true`, `archived: true` and `in_deck: false`, then `created` and `updated` in UTC (`2026-10-25T14:03:07Z`). Import puts them back and leaves the block out of the note, so Export All and then Import brings every note back as it was. Only a block of exactly these keys counts: another program's front matter, or a note that just starts with a `---` line, comes in as text, as a file without front matter always has.
+- **Import** reads `.md` and `.txt` files (UTF-8, or UTF-16 with its byte order mark, as Notepad's "Unicode" saves) and turns their Markdown into real formatting: `**bold**`, `_italic_`, `~~strike~~`, `<u>underline</u>`, bullets, numbers, `[ ]` / `[x]` checklists, nested lists, `[links](https://...)`, `> ` quotes (with lists inside, `> - item`, and under list items, `  > text` or `- > text`), fenced code blocks, pipe tables (`:---:` and `---:` align a column) and `<p align="center">` / `"right"` lines. Headings below the title come in as plain text. Plain text that only looks like a marker is written escaped (`\- not a list`) and comes back as text.
 - **Attachments** go along: export copies them into an `attachments` folder beside the Markdown and links them relatively (`![photo.jpg](attachments/photo.jpg)`); import copies linked local files back in.
 - **Readable anywhere:** plain UTF-8; lines end in Markdown's line break (two spaces) so viewers keep them apart as the note has them; an address that links to itself is written as just the address.
 - **Share** writes the same files for the selected notes into one zip (stored, not compressed) under `%TEMP%\PeekABoo Share` and hands it to the Windows share sheet; without one, Explorer shows the zip.
 
-A round trip keeps nesting, emphasis, links, attachments and ticked items intact.
+A round trip keeps nesting, emphasis, links, attachments, ticked items, colours, pins, the archive, the deck and dates intact.
 
 ## AI assistants (MCP)
 
