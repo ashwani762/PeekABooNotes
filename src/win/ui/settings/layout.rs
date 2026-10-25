@@ -115,10 +115,10 @@ pub(super) fn button_shape(w: &Win, label: &str, r: &RECT) -> Shape {
     Shape::new(r.right as f32 - INSET * s - bw, (r.top + r.bottom) as f32 / 2.0 - bh / 2.0, bw, bh, bh / 2.0)
 }
 
-/// The language pop-up button: its current choice, a gap and a chevron.
-pub(super) fn choice_shape(w: &Win, r: &RECT) -> Shape {
+/// Setting `k`'s pop-up button: its current choice, a gap and a chevron.
+pub(super) fn choice_shape(w: &Win, k: Key, r: &RECT) -> Shape {
     let s = w.s;
-    let bw = w.fonts.button.measure(&language_label()).0 as f32 + 44.0 * s;
+    let bw = w.fonts.button.measure(&choice_label(k)).0 as f32 + 44.0 * s;
     let bh = 28.0 * s;
     Shape::new(r.right as f32 - INSET * s - bw, (r.top + r.bottom) as f32 / 2.0 - bh / 2.0, bw, bh, 8.0 * s)
 }
@@ -179,7 +179,7 @@ pub(super) fn hit_test(w: &Win, x: i32, y: i32) -> Hit {
                 }
             }
             Ctl::Choice => {
-                if inside(&choice_shape(w, &p.r), x, y, 2.0 * s) {
+                if inside(&choice_shape(w, k, &p.r), x, y, 2.0 * s) {
                     Hit::Ctl(k, 0)
                 } else {
                     Hit::None

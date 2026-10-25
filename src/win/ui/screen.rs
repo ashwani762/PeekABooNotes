@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Ashwani Kumar
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Which monitor a window opens on. The deck keeps to the primary monitor, but All
+//! Which monitor a window opens on. The deck keeps to the display chosen in Settings
+//! (see `displays`), and a note opened from it the first time goes beside it; All
 //! Notes, Settings and the Undo toast go where the user is looking: the monitor of our
 //! window in front, or else the one under the pointer.
 

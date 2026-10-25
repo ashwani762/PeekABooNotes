@@ -300,12 +300,15 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
         }
         Ctl::Preview => draw_preview(w, c, p, &r),
         Ctl::Choice => {
-            let sh = choice_shape(w, &r);
+            let key = row.key.unwrap_or(Key::Language);
+            let sh = choice_shape(w, key, &r);
             let k = if pressed(0) { 2.4 } else if hovered(0) { 1.6 } else { 1.0 };
             c.shape(&sh, p.field.0, p.field.1 * k, 1.0, 0.0);
             ring(c, &sh);
-            let label = language_label();
-            c.line_ct(&label, &f.button, (sh.x + 12.0 * s) as i32, mid + f.button.cap / 2, (sh.w - 36.0 * s) as i32, None, p.text, DT_LEFT);
+            let label = choice_label(key);
+            // A chosen display that isn't connected reads as out of reach.
+            let ink = if key == Key::DeckDisplay && display_away() { p.sub } else { p.text };
+            c.line_ct(&label, &f.button, (sh.x + 12.0 * s) as i32, mid + f.button.cap / 2, (sh.w - 36.0 * s) as i32, None, ink, DT_LEFT);
             let chev = rect((sh.x + sh.w - 26.0 * s) as i32, sh.y as i32, (16.0 * s) as i32, sh.h as i32);
             c.text_ct("\u{E70D}", &f.chrome, chev, None, p.sub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
@@ -399,7 +402,7 @@ pub(super) fn px_ctl(w: &Win, row: &Row, r: &RECT) -> i32 {
         Ctl::Seg(l) => seg_metrics(w, l, r).0.x,
         Ctl::Swatches => swatch_x(w, r, 0).0,
         Ctl::Button(l) => button_shape(w, l, r).x,
-        Ctl::Choice => choice_shape(w, r).x,
+        Ctl::Choice => choice_shape(w, row.key.unwrap_or(Key::Language), r).x,
         Ctl::Keys(ks) => r.right as f32 - INSET * s - keys_width(w, ks),
         Ctl::Preview => r.right as f32,
     };

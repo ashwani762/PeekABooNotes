@@ -20,9 +20,8 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DT_CENTER,
-    FW_NORMAL, FW_SEMIBOLD, GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
+    FW_NORMAL, FW_SEMIBOLD,
 };
-use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows_sys::Win32::UI::Shell::{ABM_NEW, ABM_REMOVE, ABN_FULLSCREENAPP, APPBARDATA, SHAppBarMessage};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -220,16 +219,22 @@ fn with<R>(f: impl FnOnce(&mut Deck) -> R) -> Option<R> {
     DECK.with(|d| d.try_borrow_mut().ok().and_then(|mut d| d.as_mut().map(f)))
 }
 
+/// The deck's display: (work area, DPI scale). The one chosen in Settings, or the main
+/// display while that one isn't connected; worked out once per display change.
 pub fn monitor_geo() -> (RECT, f32) {
-    unsafe {
-        let mon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
-        let mut mi: MONITORINFO = std::mem::zeroed();
-        mi.cbSize = size_of::<MONITORINFO>() as u32;
-        GetMonitorInfoW(mon, &mut mi);
-        let (mut dx, mut dy) = (96u32, 96u32);
-        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
-        (mi.rcWork, dx.max(96) as f32 / 96.0)
-    }
+    crate::win::ui::displays::deck()
+}
+
+/// The deck is going to another display: fold it at once and fade the pill in there,
+/// rather than have it blink from one screen to the other (with reduced motion the
+/// spring settles at once, so it just appears).
+pub fn arrive() {
+    with(|d| {
+        set_open(d, false, true);
+        d.pill.snap(0.0);
+        d.pill.to(1.0);
+        anim::wake(Client::Deck);
+    });
 }
 
 /// Whether the foreground window is on the deck's monitor (true when there is none).
@@ -802,6 +807,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             Action::None
         }),
         WM_DISPLAYCHANGE | WM_DPICHANGED | WM_SETTINGCHANGE => with(|d| {
+            // A display, a work area or a scale changed: the deck's display is worked
+            // out again (and is back on the chosen one if it was just reconnected).
+            crate::win::ui::displays::forget();
             sync(d);
             render(d);
             Action::None

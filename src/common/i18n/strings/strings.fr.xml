@@ -218,6 +218,12 @@
     <string name="settings_screen_edge">Bord de l’écran</string>
     <string name="edge_left">Gauche</string>
     <string name="edge_right">Droite</string>
+    <string name="settings_deck_display">Afficher la pile sur</string>
+    <string name="settings_deck_display_away">Tant qu’il n’est pas reconnecté, la pile est sur l’écran principal</string>
+    <string name="display_main">Écran principal</string>
+    <string name="display_builtin">Écran intégré</string>
+    <string name="display_numbered">Écran %d</string>
+    <string name="display_not_connected">%s (non connecté)</string>
     <string name="settings_cards">Cartes dans la pile</string>
     <string name="settings_cards_sub">Autant que l’écran en affiche, les autres dans Toutes les notes</string>
     <string name="settings_new_notes">Nouvelles notes</string>

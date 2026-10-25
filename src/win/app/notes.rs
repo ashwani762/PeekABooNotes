@@ -126,7 +126,9 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             if text.trim().is_empty() {
                 content.title.clear();
             }
-            let (_, s) = deck::monitor_geo();
+            // Rounded as the window will be, at the scale of the display it opens on
+            // (a note back in its own place may be on another one than the deck).
+            let (_, s) = crate::win::ui::screen::at(POINT { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 });
             crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, Some(Box::new(move || note::reveal(h))));
         }
         _ => {

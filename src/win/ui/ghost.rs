@@ -92,7 +92,12 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
         }
         return;
     }
-    let (_, s) = crate::win::ui::deck::monitor_geo();
+    // The card shows the note's own typography, so it's drawn at the scale of the note's
+    // display: the window it becomes, or the one it leaves. That is the deck's display
+    // for a note opened from it the first time, but a note back in its own place, or the
+    // deck on another display, can be elsewhere.
+    let note = if kind == Kind::Open { &to.0 } else { &from.0 };
+    let (_, s) = crate::win::ui::screen::at(windows_sys::Win32::Foundation::POINT { x: (note.left + note.right) / 2, y: (note.top + note.bottom) / 2 });
     let pad = (48.0 * s) as i32;
     let b = union(&from.0, &to.0, pad);
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);

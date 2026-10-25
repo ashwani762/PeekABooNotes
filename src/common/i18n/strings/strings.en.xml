@@ -228,6 +228,14 @@
     <string name="settings_screen_edge">Screen edge</string>
     <string name="edge_left">Left</string>
     <string name="edge_right">Right</string>
+    <string name="settings_deck_display">Show the deck on</string>
+    <string name="settings_deck_display_away">Until it's connected again, the deck is on the main display</string>
+    <string name="display_main">Main display</string>
+    <string name="display_builtin">Built-in display</string>
+    <!-- A display without a name of its own: %d is its place in the list -->
+    <string name="display_numbered">Display %d</string>
+    <!-- %s is the display's name -->
+    <string name="display_not_connected">%s (not connected)</string>
     <string name="settings_cards">Cards in deck</string>
     <string name="settings_cards_sub">As many as fit on the screen; the rest are in All Notes</string>
     <string name="settings_new_notes">New notes</string>
