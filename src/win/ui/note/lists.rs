@@ -342,18 +342,53 @@ pub(super) fn handle_enter(h: HWND, e: HWND) -> bool {
 pub(super) fn checkbox_at(e: HWND, x: i32, y: i32) -> Option<i32> {
     let cp = rich::char_from_pos(e, x, y);
     let t = rich::text(e);
-    for c in [cp, cp - 1] {
-        if c < 0 || !t.get(c as usize).copied().is_some_and(is_task) {
-            continue;
-        }
-        let p0 = rich::pos_from_char(e, c);
-        let p1 = rich::pos_from_char(e, c + 1);
-        let w = if p1.y == p0.y && p1.x > p0.x { p1.x - p0.x } else { 16 };
-        if x >= p0.x - 2 && x <= p0.x + w + 2 && y >= p0.y - 2 && y <= p0.y + w * 2 {
-            return Some(c);
-        }
+    // The box of the line under the point: the circle is drawn left of the text, over
+    // the glyph and the gap after it.
+    let ps = rich::para_start(&t, cp.max(0));
+    [ps, cp, cp - 1]
+        .into_iter()
+        .find(|&c| c >= 0 && t.get(c as usize).copied().is_some_and(is_task) && (c == 0 || t[c as usize - 1] == rich::CR) && crate::win::editor::checks::hits(e, c, x, y))
+}
+
+/// The caret never rests in front of a checkbox or between it and its text (typed there,
+/// a letter would bury the box in the line): it goes to the start of the item's text, or,
+/// moving left (`left`), on to the end of the line before.
+pub(super) fn caret_off_box(e: HWND, left: bool) {
+    let (a, b) = rich::sel(e);
+    if a != b {
+        return;
     }
-    None
+    let t = rich::text(e);
+    let ps = rich::para_start(&t, a);
+    if !t.get(ps as usize).copied().is_some_and(is_task) || (ps > 0 && t[ps as usize - 1] != rich::CR) {
+        return;
+    }
+    let gap = if t.get(ps as usize + 1) == Some(&(b' ' as u16)) { 2 } else { 1 };
+    if a >= ps + gap {
+        return;
+    }
+    let to = if left && ps > 0 { ps - 1 } else { ps + gap };
+    rich::set_sel(e, to, to);
+}
+
+/// Delete at the end of a line whose next line is a checklist item: the item's text joins
+/// this line, without its box (which would sit in the middle of the line, invisible).
+pub(super) fn delete_into_item(e: HWND) -> bool {
+    let (a, b) = rich::sel(e);
+    if a != b {
+        return false;
+    }
+    let t = rich::text(e);
+    let n = a as usize + 1;
+    if t.get(a as usize) != Some(&rich::CR) || !t.get(n).copied().is_some_and(is_task) {
+        return false;
+    }
+    let gap = if t.get(n + 1) == Some(&(b' ' as u16)) { 2 } else { 1 };
+    rich::still(e, || {
+        rich::set_sel(e, a, (n + gap) as i32);
+        rich::replace_sel(e, "");
+    });
+    true
 }
 
 #[cfg(test)]
@@ -658,6 +693,32 @@ mod tests {
         toggle_check(h, done);
         toggle_check(h, done);
         assert_eq!(rich::to_markdown(h, true), format!("# {md}"));
+    }
+
+    /// The caret is kept off the box, and Delete joins the next item's text, not its box.
+    #[test]
+    fn caret_stays_off_the_box() {
+        let h = editor("T\r\u{2610} one\r\u{2610} two");
+        rich::style_boxes(h);
+        let t = rich::text(h);
+        let first = t.iter().position(|&c| c == rich::BOX).unwrap() as i32;
+        // Home on the item: after the box.
+        rich::set_sel(h, first, first);
+        caret_off_box(h, false);
+        assert_eq!(rich::sel(h), (first + 2, first + 2));
+        // Between the box and the space: the same.
+        rich::set_sel(h, first + 1, first + 1);
+        caret_off_box(h, false);
+        assert_eq!(rich::sel(h), (first + 2, first + 2));
+        // Left from the text's start: on to the line before.
+        rich::set_sel(h, first, first);
+        caret_off_box(h, true);
+        assert_eq!(rich::sel(h), (first - 1, first - 1));
+        // Delete at the end of "one": "two" joins it, without its box.
+        let end_one = first + 5;
+        rich::set_sel(h, end_one, end_one);
+        assert!(delete_into_item(h));
+        assert_eq!(plain(h), "T/\u{2610} one^two");
     }
 
     #[test]

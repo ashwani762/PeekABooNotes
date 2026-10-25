@@ -153,6 +153,11 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     mark_dirty(h);
                     return 0;
                 }
+                if vk == VK_DELETE && !ctrl && delete_into_item(e) {
+                    st.swallow = true;
+                    mark_dirty(h);
+                    return 0;
+                }
                 if vk == VK_RETURN {
                     rich::link_word_before(e);
                 }
@@ -308,6 +313,11 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         _ => {}
     }
     let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+    // Moved by a key or a click to in front of a checkbox: after it instead.
+    let moved = matches!(wp as u16, VK_HOME | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_PRIOR | VK_NEXT | VK_END);
+    if (msg == WM_KEYDOWN && moved && !key_down(VK_SHIFT)) || msg == WM_LBUTTONUP {
+        caret_off_box(e, msg == WM_KEYDOWN && wp as u16 == VK_LEFT);
+    }
     // Quotes, code and tables stay as wide as the text column.
     if msg == WM_SIZE {
         rich::style_blocks(e);

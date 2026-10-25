@@ -145,9 +145,9 @@ pub fn paint(e: HWND) {
 /// The (invisible) marker glyph's size in points, as set by rich::style_boxes.
 const BOX_PT: f32 = 9.0;
 
-#[allow(clippy::too_many_arguments)]
-fn draw_box(dc: HDC, e: HWND, cp: i32, p0: POINT, t: &[u16], st: Style, v: f32, hot: bool) {
-    let s = st.s;
+/// Where the circle for the box at `cp` goes: (where the item's text starts, the circle's
+/// centre height, its diameter, the gap before the text). Drawing and clicking share it.
+fn place(e: HWND, cp: i32, p0: POINT, t: &[u16], s: f32) -> (i32, f32, f32, f32) {
     let pt = |p: f32| p * 96.0 / 72.0 * s;
     // Where the item's text starts (after the space, if there is one): the list column.
     let after = if t.get(cp as usize + 1) == Some(&(b' ' as u16)) { cp + 2 } else { cp + 1 };
@@ -160,7 +160,25 @@ fn draw_box(dc: HDC, e: HWND, cp: i32, p0: POINT, t: &[u16], st: Style, v: f32, 
     let (sym, body) = fonts(s);
     let baseline = if p1.y >= p0.y && p1.y - p0.y < (d * 2.0) as i32 && p1.x > p0.x { p1.y as f32 + body.0 } else { p0.y as f32 + sym.0 };
     // The circle's centre on the capitals' midpoint.
-    let cy = baseline - body.1 * 0.5;
+    (text_x, baseline - body.1 * 0.5, d, gap)
+}
+
+/// Whether point (`x`, `y`) in editor `e` is on the circle of the box at `cp`: the drawn
+/// circle and a little around it, not the invisible glyph under it.
+pub fn hits(e: HWND, cp: i32, x: i32, y: i32) -> bool {
+    let s = STYLES.with(|m| m.borrow().get(&(e as isize)).map(|st| st.s)).unwrap_or(1.0);
+    let t = rich::text(e);
+    let p0 = rich::pos_from_char(e, cp);
+    let (text_x, cy, d, gap) = place(e, cp, p0, &t, s);
+    let cx = text_x as f32 - gap - d / 2.0;
+    let r = d / 2.0 + 4.0 * s;
+    (x as f32 - cx).abs() <= r && (y as f32 - cy).abs() <= r
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_box(dc: HDC, e: HWND, cp: i32, p0: POINT, t: &[u16], st: Style, v: f32, hot: bool) {
+    let s = st.s;
+    let (text_x, cy, d, gap) = place(e, cp, p0, t, s);
     // The circle sits in the hanging indent, ending `gap` before the text; the canvas
     // stops short of the text so it never covers a letter.
     let x0 = (text_x as f32 - gap - d - 3.0 * s).floor().max(0.0) as i32;
