@@ -643,6 +643,23 @@ mod tests {
         }
     }
 
+    /// A word struck out in an open checklist item stays struck through restyling, and
+    /// ticking and unticking the item.
+    #[test]
+    fn struck_words_in_open_items_stay() {
+        let md = "T\n- [ ] keep ~~this~~ struck\n- [x] done item";
+        let h = editor("");
+        rich::load_markdown(h, md);
+        rich::style_boxes(h);
+        assert_eq!(rich::to_markdown(h, true), format!("# {md}"));
+        // Another box ticked and unticked: the struck word is still struck.
+        let t = rich::text(h);
+        let done = t.iter().position(|&c| c == rich::CHECKED).unwrap() as i32;
+        toggle_check(h, done);
+        toggle_check(h, done);
+        assert_eq!(rich::to_markdown(h, true), format!("# {md}"));
+    }
+
     #[test]
     fn undo_after_restyle_and_save() {
         const EM_UNDO: u32 = 0x00C7;

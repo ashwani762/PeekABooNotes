@@ -289,12 +289,21 @@ fn style_boxes_now(h: HWND) {
         let end = para_end(&t, i as i32);
         if end > i as i32 + 1 {
             let mut body = CharFormat2::new();
-            body.mask = CFM_COLOR | CFM_STRIKEOUT | CFM_SIZE | CFM_FACE;
+            // Strikethrough is left as it is: a word struck out in an open item stays so
+            // (ticking strikes the line, unticking clears it, in `toggle_check`).
+            body.mask = CFM_COLOR | CFM_SIZE | CFM_FACE;
             body.height = body_size();
             set_face(&mut body, body_face());
             body.color = crate::win::util::cref(normal);
             set_sel(h, i as i32 + 1, end);
             send(h, EM_SETCHARFORMAT, SCF_SELECTION, &body as *const _ as isize);
+            // The gap after the box is never struck: the line starts at the text.
+            if gap == 2 {
+                let mut plain = CharFormat2::new();
+                plain.mask = CFM_STRIKEOUT;
+                set_sel(h, i as i32 + 1, i as i32 + 2);
+                send(h, EM_SETCHARFORMAT, SCF_SELECTION, &plain as *const _ as isize);
+            }
             // Completed items: secondary colour, struck through from the text (not the gap).
             if checked && end > i as i32 + gap {
                 body.mask = CFM_COLOR | CFM_STRIKEOUT;
