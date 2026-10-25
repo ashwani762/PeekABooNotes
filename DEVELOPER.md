@@ -64,6 +64,8 @@ Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start t
 
 **A pause in typing** (250 ms) saves the note: its RTF is made text in the hidden worker editor, `notes.json` is written, and the deck and All Notes update only that note's card and row (`app::note_edited`), drawing again only when they read differently. All Notes does nothing while it's closed, and makes all its rows again only while a search or a newest-first order depends on the note's text. With 500 notes (`probe_typing_pause` in `allnotes`, run with `--ignored --nocapture`) a pause costs about 0.4 ms for the text and 3 ms for the save; making every row and card again, as it once did, added 2.3 ms for All Notes, 1.6 ms for the deck and a full repaint.
 
+**Searching** in All Notes scores every note at each keystroke (`common/search.rs`). A `Query` keeps its buffers from note to note (the folded title and body, an in-order match's letters, the three rows of the edit distance, which one table per word serves for all three lengths it's compared at), folds the body only when a term needs it (a title match no body match could beat settles that term), and a snippet takes apart only its own line. The buffers go with the query, so nothing is kept between searches; folded copies of every note were left out, as they would hold four bytes a character for as long as All Notes is open. With 500 notes of about a kilobyte (`probe_search_keystrokes`, `--ignored --nocapture`) a keystroke costs 8 ms for all the rows, of which 2.9 ms is scoring, from 12 ms and 6.1 ms; `same_results_as_before` checks that it finds, ranks and marks exactly as the earlier search did.
+
 ## Your data
 
 Notes live in one readable file, `Documents\PeekABoo Notes\notes.json`:

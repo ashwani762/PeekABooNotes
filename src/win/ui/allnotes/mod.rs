@@ -1343,6 +1343,52 @@ mod tests {
         notes
     }
 
+    /// Timing (run with --ignored --nocapture): what each keystroke of a search costs over
+    /// 500 notes of about a kilobyte, mixed words and a few accents: all the rows, and the
+    /// scoring alone.
+    #[test]
+    #[ignore]
+    fn probe_search_keystrokes() {
+        crate::common::i18n::init("en");
+        const WORDS: [&str; 24] = [
+            "release", "checklist", "passport", "hotel", "station", "Friday", "café", "résumé", "meeting", "budget", "groceries", "garden", "invoice", "flight", "dentist", "report", "staging", "deploy", "birthday",
+            "recipe", "relay", "chapter", "relevant", "check",
+        ];
+        let mut seed = 7u32;
+        let mut word = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            WORDS[(seed >> 16) as usize % WORDS.len()]
+        };
+        let notes: Vec<crate::common::store::Note> = (0..500)
+            .map(|i| {
+                let mut text = format!("{} {} {i}\n", word(), word());
+                for line in 0..14 {
+                    let marker = ["- [ ] ", "- ", "", "1. "][line % 4];
+                    let words: Vec<&str> = (0..10).map(|_| word()).collect();
+                    text.push_str(&format!("{marker}{}\n", words.join(" ")));
+                }
+                crate::common::store::Note { id: i as u64 + 1, text, ..Default::default() }
+            })
+            .collect();
+        let typed = "relaese chk";
+        let (mut rows, mut scoring) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        let prepared: Vec<(String, String)> = notes.iter().map(|n| (without_objects(title_of(&n.text)), search_rest(&n.text))).collect();
+        let mut found = 0;
+        for k in 1..=typed.len() {
+            let q = crate::common::search::Query::new(&typed[..k]);
+            let t0 = Instant::now();
+            found += std::hint::black_box(notes.iter().filter_map(|n| row_of(n, &q, true)).collect::<Vec<_>>()).len();
+            rows += t0.elapsed();
+            let t0 = Instant::now();
+            for (title, rest) in &prepared {
+                std::hint::black_box(q.score(title, rest));
+            }
+            scoring += t0.elapsed();
+        }
+        let n = typed.len() as u32;
+        eprintln!("PROBE search over 500 notes, a keystroke: rows {:?}, scoring alone {:?} ({found} rows over {n} keystrokes)", rows / n, scoring / n);
+    }
+
     /// Timing (run with --ignored --nocapture): what one pause in typing costs with 500
     /// notes: the note's RTF made text, notes.json written, and the deck's and All Notes'
     /// texts made again for every note (as each pause once did) or for the edited one.
