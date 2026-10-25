@@ -185,8 +185,8 @@ pub fn import(owner: HWND) -> Outcome {
                 continue;
             }
         };
-        let text = String::from_utf8_lossy(&bytes);
-        let text = text.trim_start_matches('\u{FEFF}');
+        let text = crate::common::util::decode_text(&bytes);
+        let text = text.as_str();
         if text.trim().is_empty() {
             empty += 1;
             continue;

@@ -111,9 +111,49 @@ fn reserved_device(name: &str) -> bool {
     }
 }
 
+/// A text file's bytes as text, by its byte order mark: UTF-16 LE or BE (what Notepad's
+/// "Unicode" saves), else UTF-8 with or without one. Bytes that don't decode become U+FFFD
+/// rather than failing the file.
+pub fn decode_text(bytes: &[u8]) -> String {
+    let utf16 = |rest: &[u8], unit: fn([u8; 2]) -> u16| {
+        let pairs = rest.chunks_exact(2);
+        let cut = !pairs.remainder().is_empty();
+        let units: Vec<u16> = pairs.map(|c| unit([c[0], c[1]])).collect();
+        let mut s = String::from_utf16_lossy(&units);
+        if cut {
+            s.push(char::REPLACEMENT_CHARACTER);
+        }
+        s
+    };
+    match bytes {
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, u16::from_le_bytes),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, u16::from_be_bytes),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_files_decode_by_their_mark() {
+        let text = "Café ☑ 写真\r\n- one";
+        let mut le = vec![0xFF, 0xFE];
+        le.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        let mut be = vec![0xFE, 0xFF];
+        be.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend(text.as_bytes());
+        for bytes in [le, be, bom, text.as_bytes().to_vec()] {
+            assert_eq!(decode_text(&bytes), text);
+        }
+        // A cut-off last unit or a stray byte comes through as a replacement, not an error.
+        assert_eq!(decode_text(&[0xFF, 0xFE, b'a', 0, b'b']), "a\u{FFFD}");
+        assert_eq!(decode_text(b"a\xFFb"), "a\u{FFFD}b");
+        assert_eq!(decode_text(&[]), "");
+    }
 
     #[test]
     fn device_names_are_kept_off() {
