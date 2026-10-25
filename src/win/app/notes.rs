@@ -351,15 +351,48 @@ pub fn undo_delete() {
 }
 
 pub fn finalize_delete() {
-    ui(|u| {
-        // Gone for good: their saved versions too.
-        for (_, n) in &u.pending {
-            crate::win::ui::note::versions::forget(n.id);
-        }
-        u.pending.clear();
+    let gone: Vec<Note> = ui(|u| {
         u.unarchive.clear();
+        u.pending.drain(..).map(|(_, n)| n).collect()
     });
     toast::hide();
+    if gone.is_empty() {
+        return;
+    }
+    // Gone for good: their saved versions too, and then the files only they linked.
+    crate::win::ui::note::versions::forget(&gone.iter().map(|n| n.id).collect::<Vec<_>>());
+    delete_attachments(&gone);
+}
+
+/// Take the attachments notes `gone` linked out of the folder, unless another note or a
+/// saved version (another note's, put back later) still links them.
+fn delete_attachments(gone: &[Note]) {
+    use crate::common::attach;
+    let names: std::collections::BTreeSet<String> = gone.iter().flat_map(|n| attach::linked(&n.rtf).into_iter().chain(attach::linked(&n.text))).collect();
+    if names.is_empty() {
+        return;
+    }
+    let Some(versions) = crate::win::ui::note::versions::markdown() else {
+        log::warn("attachments kept: versions.json couldn't be read");
+        return;
+    };
+    // Each copy in gets a name of its own, so another note links one of these only through
+    // what's saved (an assistant's change, a version put back), never just in its window.
+    let orphans = store(|s| attach::orphans(&names, s.d.notes.iter().flat_map(|n| [n.rtf.as_str(), n.text.as_str()]).chain(versions.iter().map(String::as_str))));
+    let dir = attach::dir();
+    let (mut removed, mut failed) = (0, None);
+    for name in &orphans {
+        match std::fs::remove_file(dir.join(name)) {
+            Ok(()) => removed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => failed = Some(e.kind()),
+        }
+    }
+    match failed {
+        Some(kind) => log::warn(&format!("deleted {removed} attachments of deleted notes; some couldn't be ({kind:?})")),
+        None if removed > 0 => log::info(&format!("deleted {removed} attachments of deleted notes")),
+        None => {}
+    }
 }
 
 pub fn show_all_notes(archived: bool) {

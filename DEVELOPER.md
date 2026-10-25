@@ -67,7 +67,7 @@ Notes live in one readable file, `Documents\PeekABoo Notes\notes.json`:
 - each note keeps its RTF and a plain-text Markdown copy (for search, previews and assistants);
 - writes are atomic (temp file, then rename);
 - `notes.backup.json` holds the last good copy from the previous launch. If `notes.json` can't be read (locked by another program, or damaged), the app opens the backup instead and never writes over the original;
-- attachments are copied into `attachments\` beside it and linked by name.
+- attachments are copied into `attachments\` beside it and linked by name. A note deleted for good (once its Undo has passed, or at quit) takes its files with it, except those another note or a saved version still links.
 
 There is no network access and no telemetry.
 

@@ -5,6 +5,7 @@
 //! notes, and a note points at it as `attachment:<name>`: relative, so a portable copy
 //! (or a moved data folder) keeps working.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub const SCHEME: &str = "attachment:";
@@ -90,6 +91,49 @@ pub fn path_of(url: &str) -> Option<PathBuf> {
     name_of(url).map(|n| dir().join(n))
 }
 
+/// The attachments `text` links to, by name: a note's RTF (`HYPERLINK "attachment:..."`),
+/// its light text (`](attachment:...)`), or Markdown as export and the saved versions
+/// write it (`](attachments/...)`).
+pub fn linked(text: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    // RTF may break a long line anywhere, also inside an address, and its line breaks
+    // mean nothing: read it joined up as well as it stands.
+    let joined = if text.starts_with("{\\rtf") { text.replace(['\r', '\n'], "") } else { String::new() };
+    for s in [text, joined.as_str()] {
+        for prefix in [SCHEME, "attachments/"] {
+            for (i, _) in s.match_indices(prefix) {
+                let rest = &s[i + prefix.len()..];
+                let end = rest.find(|c: char| c.is_whitespace() || "\"'<>[]{}|\\".contains(c)).unwrap_or(rest.len());
+                let mut token = &rest[..end];
+                // A Markdown link's closing bracket, not one of the name's ("plan (2).pdf").
+                while token.ends_with(')') && token.matches(')').count() > token.matches('(').count() {
+                    token = &token[..token.len() - 1];
+                }
+                if let Some(name) = name_of(&format!("{SCHEME}{token}")) {
+                    names.insert(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Of the attachments `gone` (what notes deleted for good linked to), those nothing in
+/// `kept` (the other notes' RTF and text, the saved versions) still links to: the files
+/// that can go. A name kept anywhere in any form stays, so this errs on keeping a file.
+pub fn orphans<'a>(gone: &BTreeSet<String>, kept: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut left: Vec<&String> = gone.iter().collect();
+    for k in kept {
+        if left.is_empty() {
+            break;
+        }
+        let joined = k.replace(['\r', '\n'], "");
+        let named = linked(k);
+        left.retain(|n| !named.contains(*n) && !joined.contains(&url(n)) && !joined.contains(&export_link(n)));
+    }
+    left.into_iter().cloned().collect()
+}
+
 /// Where export puts attachments, beside the Markdown files.
 pub const EXPORT_DIR: &str = "attachments";
 
@@ -159,6 +203,26 @@ mod tests {
         assert_eq!(name_of("attachment:..%2Fsecret"), None);
         assert_eq!(name_of("attachment:a%5Cb"), None);
         assert_eq!(name_of("https://x.org"), None);
+    }
+
+    #[test]
+    fn only_files_nothing_links_are_orphans() {
+        let rtf = format!(r#"{{\rtf1 {{\field{{\*\fldinst{{HYPERLINK "{}"}}}}{{\fldrslt plan}}}} and {{\field{{\*\fldinst{{HYPERLINK "{}"}}}}{{\fldrslt x}}}}}}"#, url("Q3 plan (2).pdf"), url("sunset.jpg"));
+        let text = format!("Trip\n[Q3 plan (2).pdf]({})\nSee [chart.png]({}) first", url("Q3 plan (2).pdf"), url("chart.png"));
+        let gone: BTreeSet<String> = linked(&rtf).into_iter().chain(linked(&text)).collect();
+        assert_eq!(gone.iter().map(String::as_str).collect::<Vec<_>>(), ["Q3 plan (2).pdf", "chart.png", "sunset.jpg"]);
+        // An address broken across RTF lines is still read whole.
+        assert!(linked("{\\rtf1 HYPERLINK \"attachment:long%20na\r\nme.pdf\"}").contains("long name.pdf"));
+        // Not a way out of the folder.
+        assert!(linked("](attachment:..%2Fnotes.json)").is_empty());
+
+        // Another note's RTF still shows the picture; a saved version (Markdown, as export
+        // writes it) still has the chart. Only the plan can go.
+        let other = format!(r#"{{\rtf1 {{\field{{\*\fldinst{{HYPERLINK "{}"}}}}{{\fldrslt x}}}}}}"#, url("sunset.jpg"));
+        let version = format!("Old\n![chart.png]({})", export_link("chart.png"));
+        assert_eq!(orphans(&gone, [other.as_str(), version.as_str(), "unrelated"]), ["Q3 plan (2).pdf"]);
+        assert_eq!(orphans(&gone, []).len(), 3, "nothing kept: all go");
+        assert!(orphans(&BTreeSet::new(), [other.as_str()]).is_empty());
     }
 
     #[test]
