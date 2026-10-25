@@ -26,8 +26,13 @@ pub fn rtf_to_text(rtf: &str) -> String {
 /// light text: bring it up to date from their rich text, once, without touching when
 /// they were edited.
 pub(super) fn refresh_light_text() {
-    let stale: Vec<(u64, String)> =
-        store(|s| s.d.notes.iter().filter(|n| n.rtf.contains(crate::common::attach::SCHEME) && !n.text.contains("](attachment:")).map(|n| (n.id, n.rtf.clone())).collect());
+    let stale: Vec<(u64, String)> = store_mut(|s| {
+        let ids = s.d.stale_light_text();
+        // Done from here on, also for notes whose links sit inside a sentence (which never
+        // get the line form): they're rebuilt now and not at every start.
+        s.d.light_text = crate::common::store::LIGHT_TEXT;
+        ids.iter().filter_map(|id| s.note(*id)).map(|n| (n.id, n.rtf.clone())).collect()
+    });
     if stale.is_empty() {
         return;
     }
