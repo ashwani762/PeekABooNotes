@@ -10,6 +10,7 @@ pub mod linkbox;
 pub mod ghost;
 pub mod menu;
 pub mod note;
+pub mod screen;
 pub mod settings;
 pub mod toast;
 pub mod tooltip;

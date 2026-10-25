@@ -347,10 +347,10 @@ pub fn show(archived: bool) {
     }
     START_ARCHIVED.with(|c| c.set(archived));
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
-    let (work, s) = crate::win::ui::deck::monitor_geo();
-    let (w, h) = ((960.0 * s) as i32, (620.0 * s) as i32);
-    let x = work.left + ((work.right - work.left) - w) / 2;
-    let y = work.top + ((work.bottom - work.top) - h) / 2;
+    // On the monitor in use, at its scale (the window takes that monitor's DPI).
+    let (work, s) = crate::win::ui::screen::active();
+    let r = crate::win::ui::screen::centred(work, (960.0 * s) as i32, (620.0 * s) as i32);
+    let (x, y, w, h) = (r.left, r.top, r.right - r.left, r.bottom - r.top);
     unsafe {
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,

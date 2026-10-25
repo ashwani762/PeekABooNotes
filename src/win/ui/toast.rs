@@ -38,6 +38,9 @@ struct Toast {
     pressed: bool,
     alive: bool,
     canvas: Option<Canvas>,
+    /// The work area it rises in (the monitor in use when it was raised) and that
+    /// monitor's scale.
+    work: RECT,
     s: f32,
     body: Font,
     bold: Font,
@@ -58,6 +61,7 @@ pub fn notice(text: String) {
 }
 
 fn raise(count: usize, archived: bool, notice: Option<String>) {
+    let (work, s) = crate::win::ui::screen::active();
     TOAST.with(|t| {
         let mut t = t.borrow_mut();
         if t.is_none() {
@@ -78,7 +82,7 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
                     null_mut(),
                 )
             };
-            let (_, s) = crate::win::ui::deck::monitor_geo();
+            let (body, bold, tiny) = fonts(s);
             *t = Some(Toast {
                 hwnd,
                 count,
@@ -90,13 +94,20 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
                 pressed: false,
                 alive: true,
                 canvas: None,
+                work,
                 s,
-                body: Font::new(13.5 * s, FW_NORMAL, theme::FACE_TEXT),
-                bold: Font::new(13.5 * s, FW_SEMIBOLD, theme::FACE_TEXT),
-                tiny: Font::new(9.5 * s, FW_SEMIBOLD, theme::FACE_SMALL),
+                body,
+                bold,
+                tiny,
             });
         }
         let t = t.as_mut().unwrap();
+        // Raised again while showing, perhaps from another monitor: it moves there.
+        t.work = work;
+        if t.s != s {
+            (t.body, t.bold, t.tiny) = fonts(s);
+            t.s = s;
+        }
         t.count = count;
         t.archived = archived;
         t.notice = notice;
@@ -105,6 +116,15 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
         t.rise.to(1.0);
     });
     anim::wake(Client::Toast);
+}
+
+/// The toast's (body, bold, ring digit) fonts at scale `s`.
+fn fonts(s: f32) -> (Font, Font, Font) {
+    (
+        Font::new(13.5 * s, FW_NORMAL, theme::FACE_TEXT),
+        Font::new(13.5 * s, FW_SEMIBOLD, theme::FACE_TEXT),
+        Font::new(9.5 * s, FW_SEMIBOLD, theme::FACE_SMALL),
+    )
 }
 
 pub fn hide() {
@@ -217,9 +237,7 @@ fn render(t: &mut Toast) {
 
 /// Put the drawn toast at the bottom of the work area.
 fn present(t: &mut Toast, cw: i32, ch: i32) {
-    let (work, _) = crate::win::ui::deck::monitor_geo();
-    let px = (work.left + work.right) / 2 - cw / 2;
-    let py = work.bottom - ch - (12.0 * t.s) as i32;
+    let (px, py) = crate::win::ui::screen::bottom_centre(t.work, cw, ch, (12.0 * t.s) as i32);
     if let Some(c) = t.canvas.as_mut() {
         c.present(t.hwnd, px, py);
     }
