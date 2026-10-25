@@ -155,12 +155,15 @@ fn place(e: HWND, cp: i32, p0: POINT, t: &[u16], s: f32) -> (i32, f32, f32, f32)
     let d = (pt(rich::body_size() as f32 / 20.0) * 1.04).round();
     let gap = 6.0 * s;
     let text_x = if p1.y == p0.y && p1.x > p0.x { p1.x } else { p0.x + (d + gap) as i32 };
-    // Centre on the item's own text: its first letter's top plus the body ascent is the
-    // baseline (an empty item falls back to the marker glyph's metrics).
+    // Centre on the item's text: the line's own baseline, as RichEdit laid it out (failing
+    // that, the first letter's top plus the body ascent; the marker glyph's for an empty
+    // item).
     let (sym, body) = fonts(s);
-    let baseline = if p1.y >= p0.y && p1.y - p0.y < (d * 2.0) as i32 && p1.x > p0.x { p1.y as f32 + body.0 } else { p0.y as f32 + sym.0 };
-    // The circle's centre on the capitals' midpoint.
-    (text_x, baseline - body.1 * 0.5, d, gap)
+    let baseline = rich::baseline_at(e, cp).map(|b| b as f32).unwrap_or_else(|| if p1.y >= p0.y && p1.y - p0.y < (d * 2.0) as i32 && p1.x > p0.x { p1.y as f32 + body.0 } else { p0.y as f32 + sym.0 });
+    // The circle's centre on the text's middle as the eye takes it: between the capitals'
+    // middle and the lowercase letters' (most of a line), a little below half the cap
+    // height.
+    (text_x, baseline - body.1 * 0.42, d, gap)
 }
 
 /// Whether point (`x`, `y`) in editor `e` is on the circle of the box at `cp`: the drawn

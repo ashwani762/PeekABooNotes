@@ -223,6 +223,21 @@ pub fn unrecorded<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// The baseline of the line holding `cp`, in px from the top of `h`'s client area: where
+/// RichEdit really put it (its line spacing adds room above the text, so a line's top
+/// plus the font's ascent falls short of it).
+pub fn baseline_at(h: HWND, cp: i32) -> Option<i32> {
+    use windows::Win32::Graphics::Gdi::TA_BASELINE;
+    use windows::Win32::UI::Controls::RichEdit::{tomAllowOffClient, tomStart};
+    let r = range(h, cp, cp + 1)?;
+    let (mut x, mut y) = (0i32, 0i32);
+    let kind = windows::Win32::UI::Controls::RichEdit::tomConstants(tomStart.0 | TA_BASELINE.0 as i32 | tomAllowOffClient.0);
+    unsafe { r.GetPoint(kind, &mut x, &mut y).ok()? };
+    let mut p = windows_sys::Win32::Foundation::POINT { x, y };
+    unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(h, &mut p) };
+    Some(p.y)
+}
+
 /// Where the text ends, in px from the top of `h`'s client area (below it when scrolled
 /// that far): the bottom of the last line, however tall that line is (a picture).
 pub fn content_bottom(h: HWND) -> Option<i32> {
