@@ -7,7 +7,7 @@
 ; passes the version and the paths.
 
 #ifndef AppVersion
-  #define AppVersion "0.5.0"
+  #define AppVersion "0.5.2"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\..\target\release"
