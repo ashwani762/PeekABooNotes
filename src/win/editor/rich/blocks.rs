@@ -835,6 +835,39 @@ mod tests {
         set_typography(0, 1);
     }
 
+    /// Code follows the text size in Settings (a little smaller than the text around it),
+    /// as a note opens and when the size is changed with it open.
+    #[test]
+    fn code_follows_the_text_size() {
+        let code_size = |h: HWND| {
+            let t = text(h);
+            let c = t.iter().position(|&c| c == b'x' as u16).unwrap() as i32;
+            set_sel(h, c, c + 1);
+            let cf = char_format(h, SCF_SELECTION);
+            (cf.height, face_is(&cf, mono_face()))
+        };
+        let h = editor();
+        for size in 0..3 {
+            set_typography(0, size);
+            // Opened, as a note is: content in, then the note's look.
+            let o = editor();
+            load_markdown(o, "T\nbody\n```\nx = 1\n```");
+            apply_base_format(o, 0x1D1D1F, 0xFFFFFF);
+            style_blocks(o);
+            assert_eq!(code_size(o), (body_size() * 9 / 10, true), "opened at size {size}");
+            // Open while the size changes: the note's look again.
+            if size == 0 {
+                load_markdown(h, "T\nbody\n```\nx = 1\n```");
+            }
+            bulk(h, || {
+                apply_base_format(h, 0x1D1D1F, 0xFFFFFF);
+                style_blocks(h);
+            });
+            assert_eq!(code_size(h), (body_size() * 9 / 10, true), "changed to size {size}");
+        }
+        set_typography(0, 1);
+    }
+
     /// A checklist line holding something taller than text (a picture, large type) grows
     /// to hold it, rather than being clipped to a body line.
     #[test]
