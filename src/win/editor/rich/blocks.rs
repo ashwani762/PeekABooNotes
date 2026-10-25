@@ -836,6 +836,27 @@ mod tests {
         assert_eq!(lines(to_markdown(h2, true)), lines(to_markdown(h, true)));
     }
 
+    /// The text's bottom is measured, not guessed: a tall last line (a picture, a big
+    /// font) ends below where a body line would.
+    #[test]
+    fn content_bottom_follows_a_tall_last_line() {
+        let h = editor();
+        insert_text(h, "T\rone\rtwo");
+        let t = text(h);
+        let two = t.iter().position(|&c| c == b'w' as u16).unwrap() as i32 - 1;
+        let top = pos_from_char(h, two).y;
+        let normal = content_bottom(h).unwrap() - top;
+        assert!(normal > 5, "a line has height: {normal}");
+        set_sel(h, two, two + 3);
+        let mut cf = CharFormat2::new();
+        cf.mask = CFM_SIZE;
+        cf.height = 1200;
+        send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+        let top = pos_from_char(h, two).y;
+        let tall = content_bottom(h).unwrap() - top;
+        assert!(tall > normal * 2, "{tall} vs {normal}");
+    }
+
     #[test]
     fn resizing_is_not_an_undo_step() {
         use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;

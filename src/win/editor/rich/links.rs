@@ -210,6 +210,21 @@ pub fn unrecorded<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// Where the text ends, in px from the top of `h`'s client area (below it when scrolled
+/// that far): the bottom of the last line, however tall that line is (a picture).
+pub fn content_bottom(h: HWND) -> Option<i32> {
+    use windows::Win32::Graphics::Gdi::TA_BOTTOM;
+    use windows::Win32::UI::Controls::RichEdit::{tomAllowOffClient, tomEnd};
+    let n = text_len(h) as i32;
+    let r = range(h, (n - 1).max(0), n)?;
+    let (mut x, mut y) = (0i32, 0i32);
+    let kind = windows::Win32::UI::Controls::RichEdit::tomConstants(tomEnd.0 | TA_BOTTOM.0 as i32 | tomAllowOffClient.0);
+    unsafe { r.GetPoint(kind, &mut x, &mut y).ok()? };
+    let mut p = windows_sys::Win32::Foundation::POINT { x, y };
+    unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(h, &mut p) };
+    Some(p.y)
+}
+
 /// The font size (points) of the character at `cp`, without touching the selection.
 pub fn size_at(h: HWND, cp: i32) -> Option<f32> {
     range(h, cp, cp + 1).and_then(|r| unsafe { r.GetFont().ok()?.GetSize().ok() })

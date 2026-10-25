@@ -23,9 +23,14 @@ fn metrics(edit: HWND) -> Option<(f32, f32, f32)> {
 fn measure(edit: HWND) -> (f32, f32, f32) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(edit, &mut rc) };
-    let (last, line_h) = last_line(edit);
     let scroll = rich::scroll_y(edit) as f32;
-    (scroll, scroll + (last + line_h.unwrap_or(rc.bottom)) as f32, rc.bottom as f32)
+    // Where the text really ends; failing that, the last line taken as tall as the one
+    // before (which a picture at the end isn't).
+    let bottom = rich::content_bottom(edit).unwrap_or_else(|| {
+        let (last, line_h) = last_line(edit);
+        last + line_h.unwrap_or(rc.bottom)
+    });
+    (scroll, scroll + bottom as f32, rc.bottom as f32)
 }
 
 /// The last line's top (in the editor) and its height, taken as the line before it's:
