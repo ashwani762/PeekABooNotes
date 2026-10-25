@@ -42,11 +42,18 @@ pub(super) fn refresh_light_text() {
     save();
 }
 
-pub(super) fn rtf_to_markdown(rtf: &str) -> String {
+pub fn rtf_to_markdown(rtf: &str) -> String {
     let w = ui(|u| u.worker);
     rich::set_rtf(w, rtf);
     rich::to_markdown(w, true)
 }
+/// Markdown (as `rtf_to_markdown` writes it) as a note's RTF.
+pub fn markdown_to_rtf(md: &str) -> String {
+    let w = ui(|u| u.worker);
+    rich::load_markdown(w, md);
+    rich::get_rtf(w)
+}
+
 
 pub(super) fn placement(id: u64) -> RECT {
     let saved = store(|s| s.note(id).and_then(|n| n.rect));
@@ -321,7 +328,7 @@ pub fn finalize_delete() {
     ui(|u| {
         // Gone for good: their saved versions too.
         for (_, n) in &u.pending {
-            crate::win::ui::note::history::forget(n.id);
+            crate::win::ui::note::versions::forget(n.id);
         }
         u.pending.clear();
         u.unarchive.clear();
@@ -337,6 +344,7 @@ pub fn note_command(id: u64, cmd: u32) {
     match cmd {
         NC_OPEN => open_note(id),
         NC_PIN => toggle_pin(id),
+        NC_VERSIONS => versions_menu(id),
         NC_DECK => {
             store_mut(|s| {
                 if let Some(n) = s.note_mut(id) {

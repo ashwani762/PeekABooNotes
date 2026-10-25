@@ -35,6 +35,12 @@
     <string name="menu_restore">संग्रह से वापस लाएँ</string>
     <string name="menu_delete">हटाएँ</string>
     <string name="menu_previous_note">पिछला नोट</string>
+    <string name="menu_previous_versions">पिछले संस्करण</string>
+    <string name="versions_none">कोई पिछला संस्करण नहीं</string>
+    <plurals name="versions_words">
+        <item quantity="one">%d शब्द</item>
+        <item quantity="other">%d शब्द</item>
+    </plurals>
     <string name="menu_next_note">अगला नोट</string>
     <string name="menu_cut">काटें</string>
     <string name="menu_copy">कॉपी करें</string>

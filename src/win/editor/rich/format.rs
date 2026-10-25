@@ -173,6 +173,12 @@ pub(super) fn face_is(cf: &CharFormat2, face: &str) -> bool {
 /// Make the first paragraph the title (Display face, semibold, larger). Only touches
 /// formatting when it is not already styled, so typing in the title adds no undo steps.
 pub fn style_title(h: HWND) {
+    // Follows from the text: no step for Ctrl+Z (which would otherwise first take back
+    // the title's look, then the letter typed).
+    unrecorded(h, || style_title_now(h));
+}
+
+fn style_title_now(h: HWND) {
     let t = text(h);
     let end = t.iter().position(|&c| c == CR).unwrap_or(t.len());
     if end == 0 || t[..end].iter().any(|&c| is_task(c)) {

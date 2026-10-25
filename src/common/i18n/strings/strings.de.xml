@@ -35,6 +35,12 @@
     <string name="menu_restore">Aus dem Archiv holen</string>
     <string name="menu_delete">Löschen</string>
     <string name="menu_previous_note">Vorherige Notiz</string>
+    <string name="menu_previous_versions">Frühere Versionen</string>
+    <string name="versions_none">Keine früheren Versionen</string>
+    <plurals name="versions_words">
+        <item quantity="one">%d Wort</item>
+        <item quantity="other">%d Wörter</item>
+    </plurals>
     <string name="menu_next_note">Nächste Notiz</string>
     <string name="menu_cut">Ausschneiden</string>
     <string name="menu_copy">Kopieren</string>

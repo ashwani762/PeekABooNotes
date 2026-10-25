@@ -28,13 +28,36 @@ pub(super) fn range(h: HWND, a: i32, b: i32) -> Option<ITextRange2> {
 
 thread_local! {
     static BULK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// How deep `suspend_undo` calls are: TOM's suspend is a switch, not a count, so only
+    /// the outermost one may turn recording back on.
+    static SUSPENDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+fn suspend_undo(d: &Option<ITextDocument2>) {
+    use windows::Win32::UI::Controls::RichEdit::tomSuspend;
+    if SUSPENDED.with(|s| s.replace(s.get() + 1)) == 0
+        && let Some(d) = d
+    {
+        let _ = unsafe { d.Undo(tomSuspend.0) };
+    }
+}
+
+fn resume_undo(d: &Option<ITextDocument2>) {
+    use windows::Win32::UI::Controls::RichEdit::tomResume;
+    if SUSPENDED.with(|s| {
+        s.set(s.get().saturating_sub(1));
+        s.get()
+    }) == 0
+        && let Some(d) = d
+    {
+        let _ = unsafe { d.Undo(tomResume.0) };
+    }
 }
 
 /// Make many changes in a row as one: drawing, layout, change notifications and undo
 /// recording wait until they're all made. One at a time, the ten thousand lines of a long
 /// list took RichEdit seconds. Nests (only the outermost call holds and releases).
 pub fn bulk<R>(h: HWND, f: impl FnOnce() -> R) -> R {
-    use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
     if BULK.with(|b| b.replace(b.get() + 1)) > 0 {
         let r = f();
         BULK.with(|b| b.set(b.get() - 1));
@@ -46,13 +69,13 @@ pub fn bulk<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     if let Some(d) = &d {
         unsafe {
             let _ = d.Freeze();
-            let _ = d.Undo(tomSuspend.0);
         }
     }
+    suspend_undo(&d);
     let r = f();
+    resume_undo(&d);
     if let Some(d) = &d {
         unsafe {
-            let _ = d.Undo(tomResume.0);
             let _ = d.Unfreeze();
         }
     }
@@ -105,6 +128,10 @@ type Group = (isize, Vec<u16>, Vec<u16>, (i32, i32));
 
 thread_local! {
     static LAST_GROUP: std::cell::RefCell<Option<Group>> = const { std::cell::RefCell::new(None) };
+    /// The group `undo_group` took back last, for `redo_group`, and how many of
+    /// RichEdit's steps that was (a format step doesn't change the text, so the text
+    /// alone can't tell redo when to stop).
+    static UNDONE_GROUP: std::cell::RefCell<Option<(Group, u32)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Ctrl+Z straight after a change made through `still` (a quote, a table, a checkbox):
@@ -116,28 +143,70 @@ pub fn undo_group(h: HWND) -> bool {
     if e != h as isize || text(h) != after {
         return false;
     }
+    let mut steps = 0;
     for _ in 0..32 {
-        if send(h, EM_UNDO, 0, 0) == 0 || text(h) == before {
+        if send(h, EM_UNDO, 0, 0) == 0 {
+            break;
+        }
+        steps += 1;
+        if text(h) == before {
             break;
         }
     }
     // Where it was, not wherever RichEdit's last undone step left it.
     set_sel(h, caret.0, caret.1);
+    UNDONE_GROUP.with(|g| *g.borrow_mut() = Some(((e, before, after, caret), steps)));
     true
+}
+
+/// Ctrl+Y straight after `undo_group`: the whole change again, as one. False when
+/// anything has changed since.
+pub fn redo_group(h: HWND) -> bool {
+    const EM_REDO: u32 = WM_USER + 84;
+    let Some(((e, before, after, caret), steps)) = UNDONE_GROUP.with(|g| g.borrow_mut().take()) else { return false };
+    if e != h as isize || text(h) != before {
+        return false;
+    }
+    let (a, b) = sel(h);
+    for _ in 0..steps {
+        if send(h, EM_REDO, 0, 0) == 0 {
+            break;
+        }
+    }
+    set_sel(h, a, b);
+    // Ctrl+Z takes it back whole again.
+    LAST_GROUP.with(|g| *g.borrow_mut() = Some((e, before, after, caret)));
+    true
+}
+
+/// Replace everything in `h` with `rtf`, as one edit Ctrl+Z takes back.
+pub fn replace_all_rtf(h: HWND, rtf: &str) {
+    still(h, || {
+        set_sel(h, 0, -1);
+        insert_rtf(h, rtf);
+        // The document's own last paragraph comes in before the editor's: one too many.
+        let t = text(h);
+        if t.len() >= 2 && t[t.len() - 1] == CR && t[t.len() - 2] == CR {
+            let n = t.len() as i32;
+            set_sel(h, n - 1, n);
+            replace_sel(h, "");
+        }
+    });
+}
+
+/// Anything other than undo or redo was done: neither group is the latest any more.
+pub fn forget_groups() {
+    LAST_GROUP.with(|g| *g.borrow_mut() = None);
+    UNDONE_GROUP.with(|g| *g.borrow_mut() = None);
 }
 
 /// Run `f`, which only changes how things look (no text moves), outside the undo history:
 /// Ctrl+Z steps over it to the last thing the user did.
 pub fn unrecorded<R>(h: HWND, f: impl FnOnce() -> R) -> R {
-    use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
     let d = doc(h);
-    if let Some(d) = &d {
-        let _ = unsafe { d.Undo(tomSuspend.0) };
-    }
+    suspend_undo(&d);
     let r = f();
-    if let Some(d) = &d {
-        let _ = unsafe { d.Undo(tomResume.0) };
-    }
+    resume_undo(&d);
     r
 }
 

@@ -32,24 +32,6 @@ pub(super) fn toggle_check(e: HWND, cp: i32) {
         rich::style_boxes(e); // completed items turn secondary; reopened ones regain full ink
     });
     crate::win::editor::checks::animate(e, cp, !checked);
-    LAST_TOGGLE.with(|l| l.set(Some((e as isize, cp, rich::text(e).len()))));
-}
-
-thread_local! {
-    /// The last tick, so an immediate Ctrl+Z reverses it whole (a tick is several
-    /// RichEdit edits: glyph, strikeout and colours).
-    pub(super) static LAST_TOGGLE: std::cell::Cell<Option<(isize, i32, usize)>> = const { std::cell::Cell::new(None) };
-}
-
-/// Ctrl+Z straight after a tick: untick (or re-tick) instead of a partial RichEdit undo.
-pub(super) fn undo_toggle(e: HWND) -> bool {
-    let Some((le, cp, len)) = LAST_TOGGLE.with(|l| l.take()) else { return false };
-    if le != e as isize || rich::text(e).len() != len {
-        return false;
-    }
-    toggle_check(e, cp);
-    LAST_TOGGLE.with(|l| l.set(None));
-    true
 }
 
 pub(super) fn toggle_check_at_caret(e: HWND) {
@@ -568,6 +550,70 @@ mod tests {
         toggle_check(h, cp);
         assert_eq!(rich::scroll_y(h), 0, "the view jumped to the caret");
         assert_eq!(rich::sel(h), (end, end), "the caret stays where it was");
+    }
+
+    /// A tick: Ctrl+Z unticks it whole (box and strike), Ctrl+Y ticks it again, and so on,
+    /// without the undo itself becoming a new tick.
+    #[test]
+    fn tick_undo_and_redo() {
+        let h = editor("T\r\u{2610} task\r\u{2610} other");
+        rich::style_boxes(h);
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        let cp = rich::text(h).iter().position(|&c| c == rich::BOX).unwrap() as i32;
+        let struck = |h: HWND| {
+            rich::set_sel(h, cp + 2, cp + 6);
+            let cf = rich::char_format(h, rich::SCF_SELECTION);
+            rich::set_sel(h, end, end);
+            cf.effects & CFM_STRIKEOUT != 0
+        };
+        toggle_check(h, cp);
+        assert_eq!(rich::text(h)[cp as usize], rich::CHECKED);
+        assert!(struck(h));
+        for _ in 0..2 {
+            assert!(rich::undo_group(h));
+            assert_eq!(rich::text(h)[cp as usize], rich::BOX, "undo unticks");
+            assert!(!struck(h), "and unstrikes");
+            assert!(rich::redo_group(h));
+            assert_eq!(rich::text(h)[cp as usize], rich::CHECKED, "redo ticks again");
+            assert!(struck(h));
+        }
+    }
+
+    /// An assistant's change (or a version put back) in an open note: one Ctrl+Z takes it
+    /// back, Ctrl+Y brings it again, and the content is just as the note was saved.
+    #[test]
+    fn whole_content_replaced_as_one_edit() {
+        let h = editor("");
+        rich::load_markdown(h, "Mine\n- one\n- two");
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        let mine = rich::text(h);
+        let w = editor("");
+        rich::load_markdown(w, "Theirs\n> quoted\n- [ ] task\n| a | b |\n| --- | --- |\n| 1 | 2 |");
+        let theirs_rtf = rich::get_rtf(w);
+        let theirs = rich::text(w);
+        rich::replace_all_rtf(h, &theirs_rtf);
+        assert_eq!(rich::text(h), theirs);
+        assert!(rich::undo_group(h));
+        assert_eq!(rich::text(h), mine);
+        assert!(rich::redo_group(h));
+        assert_eq!(rich::text(h), theirs);
+    }
+
+    /// Restyling inside a bulk change stays out of the undo history all the way through,
+    /// even after a nested `unrecorded` ends.
+    #[test]
+    fn nested_unrecorded_keeps_bulk_unrecorded() {
+        const EM_CANUNDO: u32 = 0x00C6;
+        let h = editor("T\rbody");
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        rich::bulk(h, || {
+            rich::unrecorded(h, || rich::style_title(h));
+            rich::set_sel(h, 0, 1);
+            rich::toggle_effect(h, CFM_BOLD);
+        });
+        assert_eq!(rich::send(h, EM_CANUNDO, 0, 0), 0);
     }
 
     #[test]

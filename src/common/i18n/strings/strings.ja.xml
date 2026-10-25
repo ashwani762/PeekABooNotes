@@ -35,6 +35,11 @@
     <string name="menu_restore">アーカイブから戻す</string>
     <string name="menu_delete">削除</string>
     <string name="menu_previous_note">前のメモ</string>
+    <string name="menu_previous_versions">以前のバージョン</string>
+    <string name="versions_none">以前のバージョンはありません</string>
+    <plurals name="versions_words">
+        <item quantity="other">%d 語</item>
+    </plurals>
     <string name="menu_next_note">次のメモ</string>
     <string name="menu_cut">切り取り</string>
     <string name="menu_copy">コピー</string>

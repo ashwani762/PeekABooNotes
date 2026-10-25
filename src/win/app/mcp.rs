@@ -426,9 +426,10 @@ impl mcp::Notes for WinNotes {
             load(w, markdown);
         }
         let (text, rtf) = take(w);
-        // The user can take an assistant's change back with Ctrl+Z.
+        // Before an assistant's change, the note as it was is kept as a version; an open
+        // note takes the change as an edit Ctrl+Z takes back (see `note::reload`).
         if rtf != n.rtf {
-            crate::win::ui::note::history::saved(id, &n.rtf);
+            crate::win::ui::note::versions::keep(id);
         }
         store_mut(|s| {
             if let Some(n) = s.note_mut(id) {

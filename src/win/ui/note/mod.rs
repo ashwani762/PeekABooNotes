@@ -27,7 +27,7 @@ mod attach;
 pub use attach::{adopt_files, thumbnail};
 mod chrome;
 mod commands;
-pub mod history;
+pub mod versions;
 mod lists;
 mod input;
 mod scrollbar;
@@ -85,6 +85,9 @@ struct NoteWin {
     dirty: bool,
     loading: bool,
     discard: bool,
+    /// A version of the note was kept (or found recent enough) since this window opened:
+    /// it's the first change of a visit that takes one.
+    kept: bool,
     /// When typing last ran into the note limit (the footer says so for a moment).
     full_at: Option<std::time::Instant>,
     swallow: bool,
@@ -165,6 +168,7 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
+        kept: false,
         full_at: None,
         swallow: false,
         icons: None,
@@ -240,6 +244,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
+        kept: false,
         full_at: None,
         swallow: false,
         icons: None,
@@ -504,16 +509,26 @@ pub fn flush(h: HWND) {
     }
     st.dirty = false;
     let rtf = rich::get_rtf(edit);
+    // A command that changed nothing (bold with nothing selected, an undo and its redo)
+    // isn't an edit: the note keeps its edited time and place in the order.
+    if app::store(|s| s.note(id).is_some_and(|n| n.rtf == rtf)) {
+        if app::store(|s| s.note(id).map(|n| n.view)) != Some(view) {
+            app::store_mut(|s| {
+                if let Some(n) = s.note_mut(id) {
+                    n.view = view;
+                }
+            });
+            app::save();
+        }
+        return;
+    }
+    // The first change since the window opened: keep the note as it was (see `versions`).
+    if !st.kept {
+        st.kept = true;
+        versions::keep_for_edit(id);
+    }
     let text = app::rtf_to_text(&rtf);
     let title = title_of(&text);
-    // The version it was saved as before, for Ctrl+Z past what the editor itself holds
-    // (not when it's a step through those versions that's being saved).
-    if !RESTORING.with(|r| r.get())
-        && let Some(before) = app::store(|s| s.note(id).map(|n| n.rtf.clone()))
-        && before != rtf
-    {
-        history::saved(id, &before);
-    }
     app::store_mut(|s| {
         if let Some(n) = s.note_mut(id) {
             n.rtf = rtf;
@@ -530,36 +545,25 @@ pub fn flush(h: HWND) {
     app::refresh();
 }
 
-thread_local! {
-    /// Saving a version stepped to through `history`, which isn't a version of its own.
-    static RESTORING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Ctrl+Z (`back`) or redo once the editor's own history is spent: step through the
-/// note's saved versions instead (see `history`). False when there's none to go to.
-pub(super) fn step_history(h: HWND, back: bool) -> bool {
-    flush(h);
-    let Some(st) = state(h) else { return false };
-    let id = st.id;
-    let Some(current) = app::store(|s| s.note(id).map(|n| n.rtf.clone())) else { return false };
-    let Some(rtf) = (if back { history::back(id, &current) } else { history::forward(id, &current) }) else { return false };
-    let (a, _) = rich::sel(st.edit);
-    let y = rich::scroll_y(st.edit);
-    st.loading = true;
-    rich::bulk(st.edit, || {
-        rich::set_rtf(st.edit, &rtf);
-        apply_theme(h);
+/// Put note `id` back as its version `v` (see `versions`); what it was goes into the
+/// versions first. In an open window it's an edit Ctrl+Z takes back.
+pub fn restore_version(id: u64, v: &versions::Version) {
+    for h in [app::ui(|u| u.notes.get(&id).copied()), crate::win::ui::allnotes::editor_for(id)].into_iter().flatten() {
+        flush(h);
+    }
+    versions::keep(id);
+    let rtf = app::markdown_to_rtf(&v.md);
+    let text = app::rtf_to_text(&rtf);
+    app::store_mut(|s| {
+        if let Some(n) = s.note_mut(id) {
+            n.rtf = rtf;
+            n.text = text;
+            n.updated = now();
+        }
     });
-    rich::send(st.edit, rich::EM_EMPTYUNDOBUFFER, 0, 0);
-    let len = rich::text(st.edit).len() as i32;
-    rich::set_sel(st.edit, a.min(len), a.min(len));
-    rich::set_scroll_y(st.edit, y);
-    st.loading = false;
-    st.dirty = true;
-    RESTORING.with(|r| r.set(true));
-    flush(h);
-    RESTORING.with(|r| r.set(false));
-    true
+    app::save();
+    reload(id);
+    app::refresh();
 }
 
 /// Close without saving (the note is being deleted or archived by the caller).
@@ -630,7 +634,8 @@ pub fn reload(id: u64) {
         if rtf.is_empty() {
             rich::load_markdown(st.edit, &text);
         } else {
-            rich::set_rtf(st.edit, &rtf);
+            // As an edit, so Ctrl+Z takes an assistant's change back like one's own.
+            rich::replace_all_rtf(st.edit, &rtf);
         }
         st.dirty = false;
         apply_theme(h);

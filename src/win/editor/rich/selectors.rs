@@ -72,6 +72,10 @@ pub fn hide_marks(h: HWND) {
     if !t.iter().any(|&c| c == VS16_MARK || c == VS15_MARK) {
         return;
     }
+    unrecorded(h, || hide_marks_now(h, &t));
+}
+
+fn hide_marks_now(h: HWND, t: &[u16]) {
     let (a, b) = sel(h);
     send(h, EM_HIDESELECTION, 1, 0);
     for (i, _) in t.iter().enumerate().filter(|&(_, &c)| c == VS16_MARK || c == VS15_MARK) {

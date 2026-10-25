@@ -35,6 +35,12 @@
     <string name="menu_restore">Restaurar del archivo</string>
     <string name="menu_delete">Eliminar</string>
     <string name="menu_previous_note">Nota anterior</string>
+    <string name="menu_previous_versions">Versiones anteriores</string>
+    <string name="versions_none">Sin versiones anteriores</string>
+    <plurals name="versions_words">
+        <item quantity="one">%d palabra</item>
+        <item quantity="other">%d palabras</item>
+    </plurals>
     <string name="menu_next_note">Nota siguiente</string>
     <string name="menu_cut">Cortar</string>
     <string name="menu_copy">Copiar</string>

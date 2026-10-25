@@ -45,6 +45,12 @@
     <string name="menu_restore">Restore from Archive</string>
     <string name="menu_delete">Delete</string>
     <string name="menu_previous_note">Previous Note</string>
+    <string name="menu_previous_versions">Previous Versions</string>
+    <string name="versions_none">No earlier versions</string>
+    <plurals name="versions_words">
+        <item quantity="one">%d word</item>
+        <item quantity="other">%d words</item>
+    </plurals>
     <string name="menu_next_note">Next Note</string>
     <string name="menu_cut">Cut</string>
     <string name="menu_copy">Copy</string>
