@@ -227,8 +227,6 @@
     <string name="settings_screen_edge">Screen edge</string>
     <string name="edge_left">Left</string>
     <string name="edge_right">Right</string>
-    <string name="edge_top">Top</string>
-    <string name="edge_bottom">Bottom</string>
     <string name="settings_cards">Cards in deck</string>
     <string name="settings_cards_sub">As many as fit on the screen; the rest are in All Notes</string>
     <string name="settings_new_notes">New notes</string>

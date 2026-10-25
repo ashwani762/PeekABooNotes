@@ -217,8 +217,6 @@
     <string name="settings_screen_edge">Bildschirmrand</string>
     <string name="edge_left">Links</string>
     <string name="edge_right">Rechts</string>
-    <string name="edge_top">Oben</string>
-    <string name="edge_bottom">Unten</string>
     <string name="settings_cards">Karten im Stapel</string>
     <string name="settings_cards_sub">So viele, wie Platz haben; der Rest liegt in „Alle Notizen“</string>
     <string name="settings_new_notes">Neue Notizen</string>

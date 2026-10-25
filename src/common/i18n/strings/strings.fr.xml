@@ -217,8 +217,6 @@
     <string name="settings_screen_edge">Bord de l’écran</string>
     <string name="edge_left">Gauche</string>
     <string name="edge_right">Droite</string>
-    <string name="edge_top">Haut</string>
-    <string name="edge_bottom">Bas</string>
     <string name="settings_cards">Cartes dans la pile</string>
     <string name="settings_cards_sub">Autant que l’écran en affiche, les autres dans Toutes les notes</string>
     <string name="settings_new_notes">Nouvelles notes</string>
