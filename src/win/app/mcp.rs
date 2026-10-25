@@ -115,7 +115,7 @@ pub fn setup_for(i: usize) -> String {
         "ChatGPT (desktop app)" => exe,
         "Claude Code" => format!("claude mcp add peekaboo-notes -- \"{exe}\""),
         // TOML for ~/.codex/config.toml; a literal string, so the backslashes stay.
-        "Codex" => format!("[mcp_servers.peekaboo-notes]\ncommand = '{exe}'"),
+        "Codex" => format!("[mcp_servers.peekaboo-notes]\ncommand = \"{}\"", exe.replace('\\', "\\\\").replace('"', "\\\"")),
         "VS Code" => serde_json::to_string_pretty(&json!({ "servers": { "peekaboo-notes": { "type": "stdio", "command": exe } } })).unwrap_or_default(),
         _ => servers(),
     }
@@ -133,20 +133,71 @@ pub enum Connect {
     Missing,
     /// Its settings couldn't be read or written: the setup is on the clipboard.
     Failed,
+    /// Its settings file has comments (or isn't JSON), which we won't rewrite: the setup
+    /// is on the clipboard to paste in.
+    NotJson,
+}
+
+impl Connect {
+    fn from_usize(n: usize) -> Connect {
+        [Connect::Done, Connect::Copied, Connect::Missing, Connect::Failed, Connect::NotJson].get(n).copied().unwrap_or(Connect::Failed)
+    }
 }
 
 /// Set assistant app `i` of `CLIENTS` up to run the bridge, in its own MCP settings
-/// (a backup of the file is kept beside it); the app then has to be restarted. Where
-/// that can't be done, the setup goes on the clipboard, as `setup_for` gives it.
-pub fn connect(i: usize) -> Connect {
+/// (the file as it first was is kept beside it); the app then has to be restarted. Where
+/// that can't be done, the setup goes on the clipboard, as `setup_for` gives it. Claude
+/// Code is set up by its own command, which takes seconds: None, and the outcome is
+/// posted to `notify` as `msg` (wParam: the outcome, lParam: `i`) when it's done.
+pub fn connect(i: usize, notify: HWND, msg: u32) -> Option<Connect> {
+    if CLIENTS.get(i) == Some(&"Claude Code") {
+        let exe = bridge_command();
+        let notify = notify as isize;
+        let setup = setup_for(i);
+        let _ = std::thread::Builder::new().name("connect".into()).spawn(move || {
+            let outcome = claude_code_add(&exe);
+            if outcome != Connect::Done {
+                // The clipboard belongs to the UI thread: it puts the setup there.
+                let _ = setup;
+            }
+            unsafe { PostMessageW(notify as HWND, msg, outcome as usize, i as isize) };
+        });
+        return None;
+    }
+    Some(connect_now(i))
+}
+
+/// The outcome posted by `connect`, on the UI thread: the setup goes on the clipboard
+/// when it wasn't done.
+pub fn connected(outcome: usize, i: usize) -> Connect {
+    let c = Connect::from_usize(outcome);
+    if c != Connect::Done {
+        crate::win::util::set_clipboard_text(&setup_for(i));
+    }
+    c
+}
+
+/// `claude mcp add` for the bridge, in the user's scope. Already added counts as done;
+/// `claude` not found (cmd's 9009) is "not installed".
+fn claude_code_add(exe: &str) -> Connect {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = std::process::Command::new("cmd").args(["/c", "claude", "mcp", "add", "-s", "user", "peekaboo-notes", "--", exe]).creation_flags(CREATE_NO_WINDOW).output();
+    match out {
+        Ok(o) if o.status.success() => Connect::Done,
+        Ok(o) if o.status.code() == Some(9009) => Connect::Missing,
+        Ok(o) if String::from_utf8_lossy(&o.stderr).to_lowercase().contains("already exists") || String::from_utf8_lossy(&o.stdout).to_lowercase().contains("already exists") => Connect::Done,
+        _ => Connect::Failed,
+    }
+}
+
+fn connect_now(i: usize) -> Connect {
     let exe = bridge_command();
     let home = |rel: &str| std::env::var_os("USERPROFILE").map(|h| std::path::PathBuf::from(h).join(rel));
     let roaming = |rel: &str| std::env::var_os("APPDATA").map(|h| std::path::PathBuf::from(h).join(rel));
     let server = json!({ "command": exe });
     let outcome = match CLIENTS.get(i).copied().unwrap_or("") {
         "Claude Desktop" => roaming(r"Claude\claude_desktop_config.json").map(|p| put_json(&p, "mcpServers", server)),
-        // Its own command keeps its settings file in step with a running Claude Code.
-        "Claude Code" => Some(if run_hidden(&["claude", "mcp", "add", "-s", "user", "peekaboo-notes", "--", &exe]) { Connect::Done } else { Connect::Missing }),
         "Gemini CLI" => home(r".gemini\settings.json").map(|p| put_json(&p, "mcpServers", server)),
         "Codex" => home(r".codex\config.toml").map(|p| put_toml(&p, &setup_for(i))),
         "Cursor" => home(r".cursor\mcp.json").map(|p| put_json(&p, "mcpServers", server)),
@@ -172,7 +223,9 @@ fn put_json(path: &std::path::Path, section: &str, entry: Value) -> Connect {
     let mut root = match std::fs::read_to_string(path) {
         Ok(s) if !s.trim().is_empty() => match serde_json::from_str::<Value>(&s) {
             Ok(v) => v,
-            Err(_) => return Connect::Failed,
+            // Comments, trailing commas (VS Code and Cursor allow them): rewriting the
+            // file would lose them, so it's left for the user to paste into.
+            Err(_) => return Connect::NotJson,
         },
         _ => json!({}),
     };
@@ -192,7 +245,9 @@ fn put_toml(path: &std::path::Path, table: &str) -> Connect {
     }
     let head = table.lines().next().unwrap_or_default();
     let cur = std::fs::read_to_string(path).unwrap_or_default();
-    let next = match cur.find(head) {
+    // The table's own header line, not a mention of it in a comment.
+    let at = cur.match_indices(head).map(|(i, _)| i).find(|&i| i == 0 || cur[..i].ends_with('\n'));
+    let next = match at {
         Some(i) => {
             let after = i + head.len();
             let end = cur[after..].find("\n[").map_or(cur.len(), |j| after + j + 1);
@@ -203,24 +258,18 @@ fn put_toml(path: &std::path::Path, table: &str) -> Connect {
     write_back(path, &next)
 }
 
-/// Write `text` to `path`, keeping what was there as `<name>.bak`.
+/// Write `text` to `path`, keeping the file as it was before we first touched it as
+/// `<name>.bak` (a second Connect doesn't replace that with our own earlier writing).
 fn write_back(path: &std::path::Path, text: &str) -> Connect {
-    if path.is_file() {
-        let mut bak = path.as_os_str().to_owned();
-        bak.push(".bak");
-        let _ = std::fs::copy(path, bak);
+    let mut bak = path.as_os_str().to_owned();
+    bak.push(".bak");
+    if path.is_file() && !std::path::Path::new(&bak).exists() {
+        let _ = std::fs::copy(path, &bak);
     }
     match std::fs::write(path, text) {
         Ok(()) => Connect::Done,
         Err(_) => Connect::Failed,
     }
-}
-
-/// Run a command line without a console window; true when it succeeded.
-fn run_hidden(args: &[&str]) -> bool {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("cmd").arg("/c").args(args).creation_flags(CREATE_NO_WINDOW).output().is_ok_and(|o| o.status.success())
 }
 
 /// An assistant's change is only done when it reached the disk: say so when it didn't,
@@ -660,9 +709,15 @@ mod connect_tests {
         assert_eq!(v["mcpServers"]["other"]["command"], "o");
         assert_eq!(v["mcpServers"]["peekaboo-notes"]["command"], "new.exe");
         assert!(std::fs::read_to_string(dir.join("claude_desktop_config.json.bak")).unwrap().contains("old"));
-        // A file that isn't JSON is left alone.
+        // The keys keep their order (the user's file reads as they wrote it).
+        let s = std::fs::read_to_string(&p).unwrap();
+        assert!(s.find("theme").unwrap() < s.find("mcpServers").unwrap() && s.find("\"other\"").unwrap() < s.find("peekaboo-notes").unwrap(), "{s}");
+        // Connected again: the backup is still the user's own file, not our last write.
+        assert_eq!(put_json(&p, "mcpServers", json!({ "command": "newer.exe" })), Connect::Done);
+        assert!(std::fs::read_to_string(dir.join("claude_desktop_config.json.bak")).unwrap().contains("old"));
+        // A file with comments, or not JSON at all, is left alone, and says so.
         std::fs::write(&p, "not json").unwrap();
-        assert_eq!(put_json(&p, "mcpServers", json!({})), Connect::Failed);
+        assert_eq!(put_json(&p, "mcpServers", json!({})), Connect::NotJson);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "not json");
         // No folder: the app isn't installed.
         assert_eq!(put_json(&dir.join("nowhere").join("x.json"), "mcpServers", json!({})), Connect::Missing);

@@ -36,7 +36,7 @@ pub use menus::*;
 pub use files::*;
 pub use share::share;
 pub use prefs::*;
-pub use mcp::{CLIENTS as MCP_CLIENTS, Connect as McpConnect, connect as mcp_connect, set_enabled as set_mcp_enabled};
+pub use mcp::{CLIENTS as MCP_CLIENTS, Connect as McpConnect, connect as mcp_connect, connected as mcp_connected, set_enabled as set_mcp_enabled};
 
 // Note commands (menus, shortcuts).
 pub const NC_OPEN: u32 = 200;

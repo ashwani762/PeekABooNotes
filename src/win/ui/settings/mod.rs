@@ -369,6 +369,22 @@ fn show_result(hwnd: HWND, k: Key, outcome: app::Outcome, plural: &str) {
     show_text(hwnd, k, r.is_ok(), text);
 }
 
+/// Connect's outcome for assistant app `i`, from its own command (Claude Code's).
+const WM_CONNECTED: u32 = WM_APP + 31;
+
+/// What Connect did for assistant app `i`, in its button.
+fn show_connected(hwnd: HWND, i: usize, outcome: app::McpConnect) {
+    let name = app::MCP_CLIENTS[i];
+    let (ok, text) = match outcome {
+        app::McpConnect::Done => (true, t!("result_connected", name)),
+        app::McpConnect::Copied => (true, crate::common::i18n::plural("result_copied", 1, &[&1])),
+        app::McpConnect::Missing => (true, t!("result_not_installed").to_string()),
+        app::McpConnect::NotJson => (true, t!("result_not_json").to_string()),
+        app::McpConnect::Failed => (false, t!("result_failed").to_string()),
+    };
+    show_text(hwnd, Key::McpSetup, ok, text);
+}
+
 /// Answer in row `k`'s button for a moment: a tick (or a cross) and `text`.
 fn show_text(hwnd: HWND, k: Key, ok: bool, text: String) {
     RESULT_WAITS.with(|r| r.set(false));
@@ -428,16 +444,10 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
                 },
             }
             let choice = app::popup(items, p.x, p.y, hwnd);
-            if choice > 0 {
-                let i = choice as usize - 1;
-                let name = app::MCP_CLIENTS[i];
-                let (ok, text) = match app::mcp_connect(i) {
-                    app::McpConnect::Done => (true, t!("result_connected", name)),
-                    app::McpConnect::Copied => (true, crate::common::i18n::plural("result_copied", 1, &[&1])),
-                    app::McpConnect::Missing => (true, t!("result_not_installed").to_string()),
-                    app::McpConnect::Failed => (false, t!("result_failed").to_string()),
-                };
-                show_text(hwnd, k, ok, text);
+            if choice > 0
+                && let Some(outcome) = app::mcp_connect(choice as usize - 1, hwnd, WM_CONNECTED)
+            {
+                show_connected(hwnd, choice as usize - 1, outcome);
             }
         }
     }
@@ -857,6 +867,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_CLOSE => {
                 DestroyWindow(hwnd);
+                return 0;
+            }
+            WM_CONNECTED => {
+                show_connected(hwnd, lp as usize, app::mcp_connected(wp, lp as usize));
                 return 0;
             }
             WM_TIMER if wp == T_RESULT => {
