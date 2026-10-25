@@ -629,8 +629,7 @@ fn in_title(e: HWND) -> bool {
     if !String::from_utf16_lossy(&class[..n]).eq_ignore_ascii_case(rich::CLASS) {
         return false;
     }
-    let (a, b) = rich::sel(e);
-    !rich::range_text(e, 0, a.max(b)).contains(&13)
+    rich::sel_in_title(e)
 }
 
 /// Keys for the search box and list that must be seen before the EDIT consumes them,

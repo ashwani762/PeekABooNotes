@@ -502,6 +502,7 @@ pub fn run() -> i32 {
 
         reopen_at_start();
         share::cleanup();
+        sweep_attachments();
         upgrade_startup();
         // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
         mcp::init(main);

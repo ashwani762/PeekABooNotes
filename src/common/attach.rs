@@ -121,17 +121,69 @@ pub fn linked(text: &str) -> BTreeSet<String> {
 /// Of the attachments `gone` (what notes deleted for good linked to), those nothing in
 /// `kept` (the other notes' RTF and text, the saved versions) still links to: the files
 /// that can go. A name kept anywhere in any form stays, so this errs on keeping a file.
-pub fn orphans<'a>(gone: &BTreeSet<String>, kept: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+/// Names are compared without regard to case, as Windows finds files: a link spelt
+/// "Photo.PNG" opens "photo.png".
+pub fn orphans<'a, K>(gone: &BTreeSet<String>, kept: K) -> Vec<String>
+where
+    K: IntoIterator<Item = &'a str>,
+    K::IntoIter: Clone,
+{
     let mut left: Vec<&String> = gone.iter().collect();
+    let kept = kept.into_iter();
+    // First the names each text links: most files are found there, in one pass.
+    for k in kept.clone() {
+        if left.is_empty() {
+            break;
+        }
+        let named: BTreeSet<String> = linked(k).into_iter().map(|n| n.to_lowercase()).collect();
+        left.retain(|n| !named.contains(&n.to_lowercase()));
+    }
+    // Then, for the few left, their address anywhere at all: a name the link reader
+    // stops short in ("a{b}.png", which RTF writes "a\{b\}.png") is still seen.
+    let forms: Vec<[String; 3]> = left
+        .iter()
+        .map(|n| {
+            let u = url(n).to_lowercase();
+            [u.replace('{', "\\{").replace('}', "\\}"), export_link(n).to_lowercase(), u]
+        })
+        .collect();
+    let mut left: Vec<(&String, [String; 3])> = left.into_iter().zip(forms).collect();
     for k in kept {
         if left.is_empty() {
             break;
         }
-        let joined = k.replace(['\r', '\n'], "");
-        let named = linked(k);
-        left.retain(|n| !named.contains(*n) && !joined.contains(&url(n)) && !joined.contains(&export_link(n)));
+        let joined = k.replace(['\r', '\n'], "").to_lowercase();
+        left.retain(|(_, forms)| !forms.iter().any(|f| joined.contains(f.as_str())));
     }
-    left.into_iter().cloned().collect()
+    left.into_iter().map(|(n, _)| n.clone()).collect()
+}
+
+/// How long a file sits in the folder before the start-up sweep may take it: one younger
+/// may be on its way into a note right now.
+pub const SWEEP_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// Whether a file put in the folder at `created` and last changed at `modified` is old
+/// enough for the sweep at `now`. It must also be older than the notes' last save
+/// (`notes_saved`): a file that came after it may belong to notes this copy hasn't seen
+/// yet, as when the folder syncs from another computer. A time unknown, or ahead of the
+/// clock, keeps the file.
+pub fn sweepable(created: Option<std::time::SystemTime>, modified: Option<std::time::SystemTime>, notes_saved: Option<std::time::SystemTime>, now: std::time::SystemTime) -> bool {
+    let (Some(c), Some(m), Some(saved)) = (created, modified, notes_saved) else { return false };
+    let old = |t: std::time::SystemTime| now.duration_since(t).is_ok_and(|age| age >= SWEEP_AGE) && t <= saved;
+    old(c) && old(m)
+}
+
+/// The start-up sweep: of `old` (the files old enough, by `sweepable`), those nothing in
+/// `kept` links (as `orphans`), out of `in_folder` files in all. None when that would be
+/// every file in the folder: that looks like notes read from somewhere else, not files
+/// left behind, and keeping them costs only disk space.
+pub fn sweep<'a, K>(old: &BTreeSet<String>, in_folder: usize, kept: K) -> Vec<String>
+where
+    K: IntoIterator<Item = &'a str>,
+    K::IntoIter: Clone,
+{
+    let gone = orphans(old, kept);
+    if gone.len() >= in_folder { Vec::new() } else { gone }
 }
 
 /// Where export puts attachments, beside the Markdown files.
@@ -223,6 +275,41 @@ mod tests {
         assert_eq!(orphans(&gone, [other.as_str(), version.as_str(), "unrelated"]), ["Q3 plan (2).pdf"]);
         assert_eq!(orphans(&gone, []).len(), 3, "nothing kept: all go");
         assert!(orphans(&BTreeSet::new(), [other.as_str()]).is_empty());
+    }
+
+    /// A file is kept when a link names it in another case, or when the link reader
+    /// can't read its name whole but its address is there.
+    #[test]
+    fn orphans_err_on_keeping() {
+        let gone: BTreeSet<String> = ["photo.png", "a{b}.png", "c[1].pdf", "lost.txt"].into_iter().map(String::from).collect();
+        let rtf = format!(r#"{{\rtf1 {{\field{{\*\fldinst{{HYPERLINK "{}"}}}}{{\fldrslt x}}}} {{\field{{\*\fldinst{{HYPERLINK "{}"}}}}{{\fldrslt y}}}}}}"#, url("Photo.PNG"), url("a{b}.png").replace('{', "\\{").replace('}', "\\}"));
+        let text = format!("[c[1].pdf]({})", url("c[1].pdf"));
+        assert_eq!(orphans(&gone, [rtf.as_str(), text.as_str()]), ["lost.txt"]);
+    }
+
+    #[test]
+    fn the_sweep_takes_only_old_unlinked_files() {
+        use std::time::{Duration, SystemTime};
+        let now = SystemTime::now();
+        let ago = |h: u64| Some(now - Duration::from_secs(h * 3600));
+        // Old, and older than the notes' last save.
+        assert!(sweepable(ago(48), ago(30), ago(1), now));
+        // Just put there (a copy keeps its source's modified time, not its created time).
+        assert!(!sweepable(ago(1), ago(500), ago(0), now));
+        assert!(!sweepable(ago(48), ago(2), ago(0), now));
+        // Come since the notes were last saved: it may belong to notes not seen yet.
+        assert!(!sweepable(ago(48), ago(48), ago(72), now));
+        // Unknown times, or ahead of the clock.
+        assert!(!sweepable(None, ago(48), ago(0), now));
+        assert!(!sweepable(ago(48), ago(48), None, now));
+        assert!(!sweepable(Some(now + Duration::from_secs(3600)), ago(48), ago(0), now));
+
+        let old: BTreeSet<String> = ["kept.png", "left.pdf"].into_iter().map(String::from).collect();
+        let note = format!("![kept.png]({})", url("kept.png"));
+        assert_eq!(sweep(&old, 3, [note.as_str()]), ["left.pdf"]);
+        // Never every file in the folder at once.
+        assert!(sweep(&old, 2, ["no links here"]).is_empty());
+        assert_eq!(sweep(&old, 3, ["no links here"]).len(), 2);
     }
 
     #[test]

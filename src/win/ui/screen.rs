@@ -6,7 +6,7 @@
 //! window in front, or else the one under the pointer.
 
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromWindow};
+use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromRect, MonitorFromWindow};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible};
@@ -32,6 +32,11 @@ pub fn at(p: POINT) -> (RECT, f32) {
 /// The monitor window `h` is (mostly) on: (work area, DPI scale).
 pub fn of(h: HWND) -> (RECT, f32) {
     info(unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) })
+}
+
+/// The monitor screen rect `r` is (mostly) on: (work area, DPI scale).
+pub fn of_rect(r: &RECT) -> (RECT, f32) {
+    info(unsafe { MonitorFromRect(r, MONITOR_DEFAULTTONEAREST) })
 }
 
 fn ours(h: HWND) -> bool {

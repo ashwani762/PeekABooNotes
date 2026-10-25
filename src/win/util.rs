@@ -44,6 +44,31 @@ pub fn clipboard_can_paste() -> bool {
     unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 || IsClipboardFormatAvailable(CF_HDROP) != 0 }
 }
 
+/// The clipboard's rich text (RTF, as a note copies it), if it holds any.
+pub fn clipboard_rtf() -> Option<String> {
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW};
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    unsafe {
+        let cf = RegisterClipboardFormatW(wide("Rich Text Format").as_ptr());
+        if cf == 0 || IsClipboardFormatAvailable(cf) == 0 || OpenClipboard(std::ptr::null_mut()) == 0 {
+            return None;
+        }
+        let h = GetClipboardData(cf);
+        let mut out = None;
+        if !h.is_null() {
+            let p = GlobalLock(h as _) as *const u8;
+            if !p.is_null() {
+                let bytes = std::slice::from_raw_parts(p, GlobalSize(h as _));
+                let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+                out = Some(String::from_utf8_lossy(&bytes[..len]).into_owned());
+                GlobalUnlock(h as _);
+            }
+        }
+        CloseClipboard();
+        out
+    }
+}
+
 /// The clipboard's text, if it holds any.
 pub fn clipboard_text() -> Option<String> {
     use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};

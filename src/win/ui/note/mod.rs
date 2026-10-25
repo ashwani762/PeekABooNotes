@@ -978,7 +978,11 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     rich::style_title(st.edit);
                     rich::color_named_links(st.edit);
                     rich::fix_caret_indent(st.edit);
-                    if rich::has_selectors(&rich::text(st.edit)) {
+                    let t = rich::text(st.edit);
+                    // Links and tables added or taken away change what the note holds out
+                    // of sight, which doesn't count toward its length.
+                    rich::limit_length_of(st.edit, &t);
+                    if rich::has_selectors(&t) {
                         unselect(h);
                     }
                     st.loading = was;
