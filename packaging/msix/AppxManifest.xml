@@ -10,7 +10,8 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
-  IgnorableNamespaces="uap desktop rescap uap3 desktop4">
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  IgnorableNamespaces="uap desktop rescap uap3 desktop4 desktop6">
 
   <Identity
     Name="PeekABooNotes"
@@ -23,6 +24,9 @@
     <PublisherDisplayName>PeekABoo Notes</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Edge-docked sticky notes for Windows with a tiny memory footprint</Description>
+    <!-- Settings > Connect writes assistants' own config files (Claude Desktop's is in
+         %APPDATA%): they must land in the real folder, not the package's private copy. -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
   </Properties>
 
   <Dependencies>
@@ -70,5 +74,6 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>
