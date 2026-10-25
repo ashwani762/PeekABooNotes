@@ -387,6 +387,11 @@ fn open_at_place(h: HWND) {
             rich::set_sel(edit, caret, caret);
             let y = rich::pos_from_char(edit, top).y + rich::scroll_y(edit) + cut;
             rich::set_scroll_y(edit, y.min(scrollbar::max_scroll(edit)));
+            // Left scrolled away from the caret: the view is what was being read, so the
+            // caret comes to it (RichEdit would otherwise scroll back to the caret).
+            if let Some(first) = scrollbar::caret_out_of_view(edit) {
+                rich::set_sel(edit, first, first);
+            }
             scrollbar::keep_caret_in_view(edit);
         }
         // Never opened here before: from the top, title first.

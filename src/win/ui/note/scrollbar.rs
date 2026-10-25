@@ -42,6 +42,24 @@ fn last_line(edit: HWND) -> (i32, Option<i32>) {
     (last, (n > 1).then(|| (last - top_of(n - 2)).max(1)))
 }
 
+/// When the caret is out of view: the start of the first line wholly in view, to put it
+/// at instead.
+pub(super) fn caret_out_of_view(edit: HWND) -> Option<i32> {
+    const EM_EXLINEFROMCHAR: u32 = 0x0400 + 54;
+    let mut rc: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetClientRect(edit, &mut rc) };
+    let caret = rich::sel(edit).1;
+    let y = rich::pos_from_char(edit, caret).y;
+    if y >= 0 && y < rc.bottom - 4 {
+        return None;
+    }
+    let first = rich::char_from_pos(edit, 1, 1);
+    let line = rich::send(edit, EM_EXLINEFROMCHAR, 0, first as isize) as i32;
+    let start = rich::send(edit, EM_LINEINDEX, line.max(0) as usize, 0) as i32;
+    // That line partly scrolled out at the top: the next one.
+    Some(if rich::pos_from_char(edit, start).y < 0 { rich::send(edit, EM_LINEINDEX, (line + 1) as usize, 0) as i32 } else { start }.max(0))
+}
+
 /// Nudge the scroll so the caret's line is wholly in view. RichEdit insists on that the
 /// moment it next paints or takes focus: a view restored with that line half under the top
 /// (or bottom) would jump by the hidden part right after the note appears.
