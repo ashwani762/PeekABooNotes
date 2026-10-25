@@ -92,10 +92,23 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     if BULK.with(|b| b.get()) > 0 {
         return f();
     }
-    let d = doc(h);
-    let y = scroll_y(h);
     let before = text(h);
     let caret = sel(h);
+    let r = held(h, f);
+    let after = text(h);
+    if after != before {
+        LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after, caret)));
+    }
+    r
+}
+
+/// Run `f` with the view held where it is: nothing drawn until it's done, the scroll
+/// position put back, then one repaint. `still` without recording a group (undo and
+/// redo of one use it: the caret they put back mustn't scroll the view away from what
+/// was being looked at).
+fn held<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    let d = doc(h);
+    let y = scroll_y(h);
     if let Some(d) = &d {
         unsafe {
             let _ = d.Freeze();
@@ -115,10 +128,6 @@ pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
         set_scroll_y(h, y);
         send(h, WM_SETREDRAW, 1, 0);
         unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(h, std::ptr::null(), 0) };
-    }
-    let after = text(h);
-    if after != before {
-        LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after, caret)));
     }
     r
 }
@@ -144,17 +153,19 @@ pub fn undo_group(h: HWND) -> bool {
         return false;
     }
     let mut steps = 0;
-    for _ in 0..32 {
-        if send(h, EM_UNDO, 0, 0) == 0 {
-            break;
+    held(h, || {
+        for _ in 0..32 {
+            if send(h, EM_UNDO, 0, 0) == 0 {
+                break;
+            }
+            steps += 1;
+            if text(h) == before {
+                break;
+            }
         }
-        steps += 1;
-        if text(h) == before {
-            break;
-        }
-    }
-    // Where it was, not wherever RichEdit's last undone step left it.
-    set_sel(h, caret.0, caret.1);
+        // Where it was, not wherever RichEdit's last undone step left it.
+        set_sel(h, caret.0, caret.1);
+    });
     UNDONE_GROUP.with(|g| *g.borrow_mut() = Some(((e, before, after, caret), steps)));
     true
 }
@@ -168,12 +179,14 @@ pub fn redo_group(h: HWND) -> bool {
         return false;
     }
     let (a, b) = sel(h);
-    for _ in 0..steps {
-        if send(h, EM_REDO, 0, 0) == 0 {
-            break;
+    held(h, || {
+        for _ in 0..steps {
+            if send(h, EM_REDO, 0, 0) == 0 {
+                break;
+            }
         }
-    }
-    set_sel(h, a, b);
+        set_sel(h, a, b);
+    });
     // Ctrl+Z takes it back whole again.
     LAST_GROUP.with(|g| *g.borrow_mut() = Some((e, before, after, caret)));
     true
