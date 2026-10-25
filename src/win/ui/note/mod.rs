@@ -606,7 +606,7 @@ pub fn flush(h: HWND) {
         SetWindowTextW(h, wide(&title).as_ptr());
         InvalidateRect(h, std::ptr::null(), 0); // the footer's edited time
     }
-    app::refresh();
+    app::note_edited(id);
 }
 
 /// Put note `id` back as its version `v` (see `versions`); what it was goes into the

@@ -234,13 +234,15 @@ fn rename_patiently(from: &std::path::Path, to: &std::path::Path) -> std::io::Re
     }
 }
 
-/// Write `bytes` to `path` and see them onto the disk before returning: a power cut right
-/// after the rename then can't leave an empty notes.json.
-fn write_synced(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Write `d` to `path` as JSON and see it onto the disk before returning: a power cut
+/// right after the rename then can't leave an empty notes.json. It goes out through a
+/// small buffer, so a save never holds a second copy of all the notes in memory.
+fn write_synced(path: &std::path::Path, d: &Data) -> std::io::Result<()> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(bytes)?;
-    f.sync_all()
+    let mut w = std::io::BufWriter::with_capacity(64 * 1024, std::fs::File::create(path)?);
+    serde_json::to_writer_pretty(&mut w, d).map_err(std::io::Error::other)?;
+    w.flush()?;
+    w.into_inner().map_err(std::io::IntoInnerError::into_error)?.sync_all()
 }
 
 impl Store {
@@ -316,16 +318,15 @@ impl Store {
         if self.frozen {
             return Err(std::io::Error::other("notes.json couldn't be read at start, so it isn't written this session"));
         }
-        let json = serde_json::to_vec_pretty(&self.d).map_err(std::io::Error::other)?;
         let tmp = self.path.with_extension("json.tmp");
-        write_synced(&tmp, &json)?;
+        write_synced(&tmp, &self.d)?;
         rename_patiently(&tmp, &self.path)?;
         self.saved_stamp = Some(self.content_stamp());
         self.saves_since_backup += 1;
         if self.saves_since_backup >= BACKUP_EVERY || self.backup_at.is_none_or(|t| t.elapsed() >= BACKUP_AGE) {
-            // The same bytes, so the backup is always a file that parsed.
-            match std::fs::write(self.path.with_file_name("notes.backup.json"), &json) {
-                Ok(()) => {
+            // A copy of the file just written, so the backup is always one that was whole.
+            match std::fs::copy(&self.path, self.path.with_file_name("notes.backup.json")) {
+                Ok(_) => {
                     self.saves_since_backup = 0;
                     self.backup_at = Some(Instant::now());
                 }
@@ -366,9 +367,15 @@ impl Store {
 
     /// Active (not archived) notes in deck order.
     pub fn active_ids(&self) -> Vec<u64> {
+        self.active_notes().into_iter().map(|n| n.id).collect()
+    }
+
+    /// Active notes in deck order, themselves rather than their ids (looking each id up
+    /// again would go through every note once per note).
+    pub fn active_notes(&self) -> Vec<&Note> {
         let mut v: Vec<&Note> = self.d.notes.iter().filter(|n| !n.archived).collect();
         v.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
-        v.into_iter().map(|n| n.id).collect()
+        v
     }
 
     pub fn create(&mut self, text: &str, rtf: &str) -> u64 {

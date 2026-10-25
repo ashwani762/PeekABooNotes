@@ -416,6 +416,38 @@ pub fn refresh() {
     }
 }
 
+/// Note `id` was typed in. Unless a search or a newest-first order depends on what it
+/// says now, only its row is made again (typing never moves a note in or out of a list),
+/// and the window is drawn again only when the row reads differently.
+pub fn note_edited(id: u64) {
+    let full = with(|l| {
+        if !l.query.trim().is_empty() || (l.mode != 0 && !editor_focused(l)) {
+            return true;
+        }
+        let mode = l.mode;
+        let Some(row) = app::store(|s| {
+            s.note(id).filter(|n| match mode {
+                1 => n.archived,
+                2 => true,
+                _ => !n.archived,
+            })
+            .and_then(|n| row_of(n, &crate::common::search::Query::new(""), false))
+        }) else {
+            return false;
+        };
+        let Some(r) = l.rows.iter_mut().find(|r| r.id == id) else { return true };
+        let same = r.title == row.title && r.body == row.body && r.time == row.time && edited_time(r.updated) == edited_time(row.updated);
+        *r = row;
+        if !same {
+            unsafe { InvalidateRect(l.hwnd, std::ptr::null(), 0) };
+        }
+        false
+    });
+    if full == Some(true) {
+        refresh();
+    }
+}
+
 /// A note made here joins the list where new notes go (the bottom, unless Settings says
 /// the top), selected and ready to type in the detail card. Only the deck's own + opens a
 /// note window.
@@ -1285,5 +1317,103 @@ mod tests {
             assert!(contrast(p.ter, field_color(dark)) >= 4.5, "hint, dark: {dark}");
             assert!(contrast(p.sub, p.list) >= 4.5, "secondary, dark: {dark}");
         }
+    }
+
+    /// 500 notes of about a kilobyte each, with the RTF RichEdit writes for them.
+    fn sample_notes(n: usize) -> Vec<crate::common::store::Note> {
+        use crate::win::editor::rich;
+        let ed = unsafe {
+            windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(ed);
+        let notes = (0..n)
+            .map(|i| {
+                let mut md = format!("Trip plan {i}\n- [ ] passport and tickets\n- [x] book the hotel near the station\n- charger, adapter\n  - the long cable\n");
+                for k in 0..8 {
+                    md.push_str(&format!("Paragraph {k}: we leave early on Friday and come back on Sunday evening, unless the release checklist slips again.\n"));
+                }
+                md.push_str("See [the booking](https://example.com/booking) before Thursday.");
+                rich::load_markdown(ed, &md);
+                let t = crate::common::util::now();
+                crate::common::store::Note { id: i as u64 + 1, rtf: rich::get_rtf(ed), text: rich::to_markdown(ed, false), created: t, updated: t - i as i64 * 3600, order: i as i64, ..Default::default() }
+            })
+            .collect();
+        unsafe { DestroyWindow(ed) };
+        notes
+    }
+
+    /// Timing (run with --ignored --nocapture): what one pause in typing costs with 500
+    /// notes: the note's RTF made text, notes.json written, and the deck's and All Notes'
+    /// texts made again for every note (as each pause once did) or for the edited one.
+    #[test]
+    #[ignore]
+    fn probe_typing_pause() {
+        use crate::win::editor::rich;
+        crate::common::i18n::init("en");
+        let notes = sample_notes(500);
+        let ed = unsafe { CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut()) };
+        rich::setup(ed);
+        let runs = 20;
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            rich::set_rtf(ed, &notes[250].rtf);
+            std::hint::black_box(rich::to_markdown(ed, false));
+        }
+        let to_text = t0.elapsed() / runs;
+        unsafe { DestroyWindow(ed) };
+
+        let dir = std::env::temp_dir().join(format!("peekaboo-probe-typing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = crate::common::store::Store::load(dir.clone());
+        store.d.notes = notes.clone();
+        store.save().unwrap();
+        let t0 = Instant::now();
+        for k in 0..runs {
+            store.d.notes[250].updated += k as i64;
+            store.save().unwrap();
+        }
+        let save = t0.elapsed() / runs;
+        // Of which making the JSON, laid out as the file has it and in one line.
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            serde_json::to_writer_pretty(std::io::sink(), &store.d).unwrap();
+        }
+        let pretty = t0.elapsed() / runs;
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            serde_json::to_writer(std::io::sink(), &store.d).unwrap();
+        }
+        let compact = t0.elapsed() / runs;
+        let size = std::fs::metadata(dir.join("notes.json")).map(|m| m.len()).unwrap_or(0);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let q = crate::common::search::Query::new("");
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            std::hint::black_box(notes.iter().filter_map(|n| row_of(n, &q, false)).collect::<Vec<_>>());
+        }
+        let rows_all = t0.elapsed() / runs;
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            std::hint::black_box(row_of(&notes[250], &q, false));
+        }
+        let rows_one = t0.elapsed() / runs;
+        let deck = |n: &crate::common::store::Note| (without_objects(title_of(&n.text)), without_objects(body_of(&n.text)));
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            std::hint::black_box(notes.iter().map(deck).collect::<Vec<_>>());
+        }
+        let deck_all = t0.elapsed() / runs;
+        let t0 = Instant::now();
+        for _ in 0..runs {
+            std::hint::black_box(notes.iter().take(8).map(deck).collect::<Vec<_>>());
+        }
+        let deck_shown = t0.elapsed() / runs;
+        eprintln!(
+            "PROBE 500 notes, notes.json {} KB: RTF to text {to_text:?}, save {save:?} (JSON {pretty:?}, {compact:?} in one line), All Notes rows: every note {rows_all:?}, the edited one {rows_one:?}; deck texts: every note {deck_all:?}, the 8 shown {deck_shown:?}",
+            size / 1024
+        );
     }
 }

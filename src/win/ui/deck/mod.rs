@@ -309,6 +309,33 @@ pub fn refresh() {
     });
 }
 
+/// Note `id` was typed in. Nothing but its card's title and preview can have changed, so
+/// only that card is brought up to date, and the deck is drawn again only when the card
+/// reads differently (a pause in typing otherwise costs the deck nothing).
+pub fn note_edited(id: u64) {
+    with(|d| {
+        let Some(i) = d.tabs.iter().position(|t| t.id == id) else { return };
+        let (title, body) = tab_texts(id);
+        let t = &mut d.tabs[i];
+        if t.title == title && t.body == body {
+            return;
+        }
+        let label = title.to_uppercase();
+        if label != t.label {
+            t.fitted = None;
+        }
+        t.label = label;
+        t.title = title;
+        t.body = body;
+        t.body_h = None;
+        if t.pull.target > 0.0 || t.pull.value > 0.0 {
+            measure_body(d, i);
+        }
+        render(d);
+        anim::wake(Client::Deck);
+    });
+}
+
 pub fn frame(dt: f32) -> bool {
     with(|d| {
         let moving = step(d, dt);

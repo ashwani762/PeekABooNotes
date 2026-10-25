@@ -62,12 +62,14 @@ A note holds up to 100,000 characters (`MAX_NOTE_CHARS` in `store.rs`): typing a
 
 Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start to the deck in 0.16 s, a working set of about 5 MB at rest (once the app has trimmed it, with no note, All Notes or Settings open; the memory it has committed is more), All Notes open in under a second, a 3.6 MB save in 6 ms.
 
+**A pause in typing** (250 ms) saves the note: its RTF is made text in the hidden worker editor, `notes.json` is written, and the deck and All Notes update only that note's card and row (`app::note_edited`), drawing again only when they read differently. All Notes does nothing while it's closed, and makes all its rows again only while a search or a newest-first order depends on the note's text. With 500 notes (`probe_typing_pause` in `allnotes`, run with `--ignored --nocapture`) a pause costs about 0.4 ms for the text and 3 ms for the save; making every row and card again, as it once did, added 2.3 ms for All Notes, 1.6 ms for the deck and a full repaint.
+
 ## Your data
 
 Notes live in one readable file, `Documents\PeekABoo Notes\notes.json`:
 
 - each note keeps its RTF and a plain-text Markdown copy (for search, previews and assistants);
-- writes are atomic (temp file, then rename);
+- writes are atomic: the JSON is streamed through a 64 KB buffer into a temp file, which is flushed to the disk (`sync_all`) before it's renamed over `notes.json`, so a save never holds a second copy of the notes in memory and a power cut can't leave an empty file. The layout stays pretty-printed: making the JSON takes 0.5 to 0.7 ms of a 3 ms save (500 notes, 1.5 MB) laid out or in one line alike, and most of the rest is the flush;
 - `notes.backup.json` holds the last good copy from the previous launch. If `notes.json` can't be read (locked by another program, or damaged), the app opens the backup instead and never writes over the original;
 - attachments are copied into `attachments\` beside it and linked by name. A note deleted for good (once its Undo has passed, or at quit) takes its files with it, except those another note or a saved version still links.
 
