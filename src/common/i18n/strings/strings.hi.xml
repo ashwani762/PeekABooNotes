@@ -256,6 +256,10 @@
     <string name="shortcut_table">तालिका</string>
     <string name="shortcut_leave_text">नोट के टेक्स्ट से बाहर जाएँ</string>
     <string name="shortcut_undo_toast">संग्रहित करना या हटाना पूर्ववत करें</string>
+    <string name="shortcut_deck_keys">डेक पर जाएँ</string>
+    <string name="shortcut_deck_move">कार्डों के बीच जाएँ</string>
+    <string name="shortcut_deck_menu">कार्ड मेनू</string>
+    <string name="shortcut_deck_leave">पिछली विंडो पर लौटें</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">नोट्स फ़ोल्डर</string>
