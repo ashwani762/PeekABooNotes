@@ -191,14 +191,19 @@ fn draw_box(dc: HDC, e: HWND, cp: i32, p0: POINT, t: &[u16], st: Style, v: f32, 
     // Paper or selection colour, sampled just left of the text.
     let sample = unsafe { GetPixel(dc, text_x - 3, cy as i32) };
     let under = if sample == u32::MAX { st.bg } else { crate::win::util::cref(sample) };
+    // What's there already, with only a disc around the circle cleared to the paper: the
+    // last frame's circle goes, while a table's border or a line just above, which the
+    // canvas's corners reach, stays as RichEdit drew it.
     let mut c = Canvas::new(w, h);
-    c.clear(0xFF00_0000 | under);
+    c.grab(dc, x0, y0);
     let k = clamp01(v);
     // A brief pop while the state changes (either way), springing back to size.
     let pop = 1.0 + 0.10 * (std::f32::consts::PI * k).sin() + (v - 1.0).max(0.0) * 0.6;
     let dd = d * pop;
     let cx = text_x as f32 - gap - d / 2.0 - x0 as f32;
     let ly = cy - y0 as f32;
+    let clear = d * 1.16 + 2.0 * s;
+    c.shape(&Shape::new(cx - clear / 2.0, ly - clear / 2.0, clear, clear, clear / 2.0), under, 1.0, 1.0, 0.0);
     let circle = Shape::new(cx - dd / 2.0, ly - dd / 2.0, dd, dd, dd / 2.0);
     let ring = if hot { mix(st.ink, under, 0.15) } else { mix(st.ink, under, 0.42) };
     c.shape(&circle, ring, 1.0 - k * 0.6, 1.0, 1.5 * s);
