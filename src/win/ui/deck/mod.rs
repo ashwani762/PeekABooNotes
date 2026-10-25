@@ -381,6 +381,13 @@ pub fn plus_rect() -> Option<(RECT, f32)> {
     .flatten()
 }
 
+/// Whether the deck is on screen with a card for note `id`: somewhere for a closing note
+/// to fly back to. Not while the deck is hidden (by the user or for a fullscreen app), nor
+/// for a note kept out of it.
+pub fn holds(id: u64) -> bool {
+    with(|d| d.visible && d.tabs.iter().any(|t| t.id == id)).unwrap_or(false)
+}
+
 /// Where a closing note should fly back to: its slot in the fanned-out stack, else its
 /// capsule in the pill.
 pub fn home_rect(id: u64) -> (RECT, f32) {

@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, MONITOR_DEFAULTTONULL, MonitorFromRect};
+use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect};
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW};
 use windows_sys::Win32::System::Threading::CreateMutexW;
@@ -390,19 +390,47 @@ fn trim_memory() {
     }
 }
 
+/// The `--quiet` launch (the autostart entry, the MCP bridge): nothing comes to the
+/// front, and a second instance leaves the running one alone.
+pub const QUIET_ARG: &str = "--quiet";
+
+/// Whether this launch is a quiet one: asked for on the command line, or (from the MSIX)
+/// started by the package's startup task, which can't pass arguments.
+fn launched_quietly() -> bool {
+    if std::env::args().skip(1).any(|a| a == QUIET_ARG) {
+        return true;
+    }
+    packaged()
+        && windows::ApplicationModel::AppInstance::GetActivatedEventArgs()
+            .and_then(|a| a.Kind())
+            .is_ok_and(|k| k == windows::ApplicationModel::Activation::ActivationKind::StartupTask)
+}
+
 pub fn run() -> i32 {
     unsafe {
-        // One instance only: a second launch just brings up All Notes.
+        let quiet = launched_quietly();
+        // One instance only: a second launch just brings up All Notes (a quiet one, as at
+        // boot or from an assistant's bridge, does nothing at all).
         let mutex = CreateMutexW(std::ptr::null(), 1, wide("Local\\PeekABooNotes.Singleton").as_ptr());
         if windows_sys::Win32::Foundation::GetLastError() == windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS {
             let other = FindWindowW(wide(MAIN_CLASS).as_ptr(), std::ptr::null());
-            if !other.is_null() {
+            if !other.is_null() && !quiet {
+                // Only the process with the user's input may hand the foreground on: let
+                // the running instance really bring All Notes to the front.
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(other, &mut pid);
+                if pid != 0 {
+                    AllowSetForegroundWindow(pid);
+                }
                 PostMessageW(other, WM_ACTIVATE_OTHER, 0, 0);
             }
             return 0;
         }
         let _ = mutex;
         log::startup();
+        if quiet {
+            log::info("quiet start");
+        }
 
         // OLE: RichEdit's drag and drop (text within and between notes, files dropped in)
         // and dragging attachments out.
@@ -471,6 +499,7 @@ pub fn run() -> i32 {
 
         reopen_at_start();
         share::cleanup();
+        upgrade_startup();
         // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
         mcp::init(main);
         // Starting up touches far more than an idle deck needs: give it back once settled.
@@ -513,7 +542,7 @@ pub fn pump_once() -> bool {
 }
 
 fn dispatch(msg: &MSG) {
-    if allnotes::pre_translate(msg) {
+    if allnotes::pre_translate(msg) || note::pre_translate(msg) {
         return;
     }
     unsafe {

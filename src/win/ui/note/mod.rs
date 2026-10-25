@@ -30,7 +30,9 @@ mod commands;
 pub mod versions;
 mod lists;
 mod input;
+mod keymap;
 mod scrollbar;
+pub use keymap::pre_translate;
 use chrome::*;
 use commands::*;
 use lists::*;
@@ -44,6 +46,9 @@ const T_AGE: usize = 4;
 /// Ends the footer's "This note is full".
 const T_FULL: usize = 5;
 const FULL_MS: u32 = 4000;
+/// Keeps the window's place once a move or resize (by any means) has settled.
+const T_RECT: usize = 6;
+const RECT_DELAY_MS: u32 = 400;
 const EN_MAXTEXT: u32 = 0x0501;
 const SAVE_DELAY_MS: u32 = 250;
 pub const WM_NOTE_CMD: u32 = WM_APP + 40;
@@ -110,6 +115,19 @@ struct NoteWin {
     bar_seen: Option<(i32, i32)>,
     /// Wheel scrolling glides to its target instead of jumping.
     glide: Spring,
+    /// The chrome's canvas, kept across paints (made again when the window's size changes).
+    canvas: Option<Canvas>,
+}
+
+/// How a new note window comes up.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Show {
+    /// Hidden until `reveal` (the ghost flies the card into place first).
+    Later,
+    /// Shown and brought to the front.
+    Now,
+    /// Shown behind whatever has the keyboard: notes reopened at start.
+    Quiet,
 }
 
 fn state(h: HWND) -> Option<&'static mut NoteWin> {
@@ -153,9 +171,9 @@ pub fn register() {
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
 }
 
-/// Create a note window. With `show` false it stays hidden until `reveal` (used while the
+/// Create a note window. `Show::Later` keeps it hidden until `reveal` (used while the
 /// ghost transition flies the card into place).
-pub fn create(id: u64, r: RECT, show: bool) -> HWND {
+pub fn create(id: u64, r: RECT, show: Show) -> HWND {
     let pinned = app::store(|s| s.note(id).map(|n| n.pinned)).unwrap_or(false);
     let st = Box::new(NoteWin {
         id,
@@ -173,9 +191,9 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         swallow: false,
         icons: None,
         meta: None,
-        ctl: Spring::unit(1.0, theme::motion::DEFAULT),
+        ctl: Spring::unit(if show == Show::Quiet { 0.0 } else { 1.0 }, theme::motion::DEFAULT),
         hot_a: Spring::unit(0.0, theme::motion::SNAPPY),
-        active: true,
+        active: show != Show::Quiet,
         hover: false,
         embedded: false,
         bar: Spring::unit(0.0, theme::motion::DEFAULT),
@@ -185,10 +203,11 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         bar_drag: None,
         bar_seen: None,
         glide: Spring::px(0.0, theme::motion::SNAPPY),
+        canvas: None,
     });
     // Hidden-until-arrival windows are created layered at alpha 0 so they can take focus
     // now (while we still hold the user's input) and become visible when the ghost lands.
-    let ex = WS_EX_TOOLWINDOW | if pinned { WS_EX_TOPMOST } else { 0 } | if show { 0 } else { WS_EX_LAYERED };
+    let ex = WS_EX_TOOLWINDOW | if pinned { WS_EX_TOPMOST } else { 0 } | if show == Show::Later { WS_EX_LAYERED } else { 0 };
     let style = WS_POPUP | WS_THICKFRAME | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
     let h = unsafe {
         CreateWindowExW(
@@ -218,14 +237,14 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
     // Dropping the system frame just grew the text area to its real size: place the text
     // again for it, before the opening card takes its picture of the window.
     open_at_place(h);
-    if show {
-        reveal(h);
-    } else {
-        unsafe {
+    match show {
+        Show::Later => unsafe {
             SetLayeredWindowAttributes(h, 0, 0, LWA_ALPHA);
             ShowWindow(h, SW_SHOW);
             SetForegroundWindow(h);
-        }
+        },
+        Show::Now => reveal(h),
+        Show::Quiet => reveal_as(h, false),
     }
     h
 }
@@ -261,6 +280,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         bar_drag: None,
         bar_seen: None,
         glide: Spring::px(0.0, theme::motion::SNAPPY),
+        canvas: None,
     });
     let h = unsafe {
         CreateWindowExW(
@@ -288,6 +308,12 @@ pub fn is_embedded(h: HWND) -> bool {
 
 /// Make the window visible (and focused, if it isn't already).
 pub fn reveal(h: HWND) {
+    reveal_as(h, true);
+}
+
+/// `reveal`; without `activate` the window comes up behind whatever has the keyboard
+/// (notes reopened at start mustn't take the foreground from what the user is doing).
+fn reveal_as(h: HWND, activate: bool) {
     unsafe {
         if IsWindow(h) == 0 {
             return;
@@ -304,11 +330,33 @@ pub fn reveal(h: HWND) {
             // black wherever it hasn't painted yet (the footer, if only the text had).
             RedrawWindow(h, std::ptr::null(), null_mut(), RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
         }
+        if !activate {
+            ShowWindow(h, SW_SHOWNOACTIVATE);
+            return;
+        }
         ShowWindow(h, SW_SHOW);
         if GetForegroundWindow() != h {
             SetForegroundWindow(h);
         }
     }
+}
+
+/// The interface language changed: the title bar's "Untitled" and the footer follow.
+pub fn relabel(h: HWND) {
+    let Some(st) = state(h) else { return };
+    // The fonts carry the language too (DirectWrite picks fallback faces by it).
+    st.icons = Some(Font::new(13.0 * st.s, FW_NORMAL, icon_face()));
+    st.meta = Some(Font::new(11.5 * st.s, FW_NORMAL, theme::FACE_SMALL));
+    let text = app::store(|s| s.note(st.id).map(|n| n.text.clone())).unwrap_or_default();
+    unsafe {
+        SetWindowTextW(h, wide(&title_of(&text)).as_ptr());
+        InvalidateRect(h, std::ptr::null(), 0);
+    }
+}
+
+/// Every open note window.
+pub fn windows() -> Vec<HWND> {
+    app::ui(|u| u.notes.values().copied().collect())
 }
 
 /// Where you are in the text: the caret, the first character in view, and how far its
@@ -402,10 +450,15 @@ pub fn flight_content(h: HWND, text: &str) -> crate::win::ui::ghost::Content {
     crate::win::ui::ghost::Content { title: String::new(), body: crate::common::store::body_from(text, para), body_top: Some(body_top), image: None, from_image: None }
 }
 
-/// Ghost the note back to its tab (or the pill) as the window disappears.
+/// Ghost the note back to its tab (or the pill) as the window disappears. With no card
+/// to return to (the deck hidden, the note kept out of it) it fades away where it is.
 fn fly_home(h: HWND) {
     let Some(st) = state(h) else { return };
     let id = st.id;
+    if !crate::win::ui::deck::holds(id) {
+        dissolve(h);
+        return;
+    }
     let Some((r, color, content)) = snapshot(h) else { return };
     if content.title == t!("note_untitled") && content.body.is_empty() {
         return; // an empty note simply vanishes
@@ -481,6 +534,10 @@ pub(super) fn pointer_out(h: HWND) {
     if let Some(st) = state(h) {
         st.hover = false;
         set_controls(h);
+        // An inactive note waits for the pointer to leave before it goes (see `hide_tick`).
+        if !st.active && !st.embedded {
+            hide_later(h, null_mut());
+        }
     }
 }
 
@@ -566,6 +623,28 @@ pub fn restore_version(id: u64, v: &versions::Version) {
     app::save();
     reload(id);
     app::refresh();
+}
+
+/// Keep where the window is, so the note reopens there (not while it's minimised: that
+/// place is off every screen).
+fn save_rect(h: HWND) {
+    let Some(st) = state(h) else { return };
+    if st.embedded || unsafe { IsIconic(h) } != 0 {
+        return;
+    }
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetWindowRect(h, &mut r) };
+    let rect = Some([r.left, r.top, r.right, r.bottom]);
+    let id = st.id;
+    if app::store(|s| s.note(id).map(|n| n.rect)) == Some(rect) {
+        return;
+    }
+    app::store_mut(|s| {
+        if let Some(n) = s.note_mut(id) {
+            n.rect = rect;
+        }
+    });
+    app::save();
 }
 
 /// Close without saving (the note is being deleted or archived by the caller).
@@ -1000,17 +1079,21 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_EXITSIZEMOVE => {
-                if let Some(st) = state(h) {
-                    let mut r: RECT = std::mem::zeroed();
-                    GetWindowRect(h, &mut r);
-                    let id = st.id;
-                    app::store_mut(|s| {
-                        if let Some(n) = s.note_mut(id) {
-                            n.rect = Some([r.left, r.top, r.right, r.bottom]);
-                        }
-                    });
-                    app::save();
+                KillTimer(h, T_RECT);
+                save_rect(h);
+                return 0;
+            }
+            // Moved or sized by other means too (Win+Arrow, a DPI change, another
+            // monitor unplugged): the place is kept once the moving settles.
+            WM_WINDOWPOSCHANGED if !is_embedded(h) => {
+                let wp_ = &*(lp as *const WINDOWPOS);
+                if wp_.flags & (SWP_NOMOVE | SWP_NOSIZE) != SWP_NOMOVE | SWP_NOSIZE && IsWindowVisible(h) != 0 {
+                    SetTimer(h, T_RECT, RECT_DELAY_MS, None);
                 }
+            }
+            WM_TIMER if wp == T_RECT => {
+                KillTimer(h, T_RECT);
+                save_rect(h);
                 return 0;
             }
             WM_DPICHANGED => {
@@ -1021,6 +1104,8 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     let r = &*(lp as *const RECT);
                     SetWindowPos(h, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
                     layout(h);
+                    // The checklist overlay draws at the window's scale: style it again.
+                    apply_theme(h);
                 }
                 return 0;
             }

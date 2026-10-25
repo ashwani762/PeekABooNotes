@@ -247,6 +247,21 @@ pub fn startup_enabled() -> bool {
     found && entry.contains(&exe_path().to_string_lossy().to_lowercase())
 }
 
+/// At start: an autostart entry written by an older version (without `--quiet`) gets
+/// the quiet form, so sign-in brings up only the deck.
+pub fn upgrade_startup() {
+    if packaged() || !startup_enabled() {
+        return;
+    }
+    let (k, v) = (wide(RUN_KEY), wide(RUN_VALUE));
+    let mut buf = [0u16; 1024];
+    let mut size = (buf.len() * 2) as u32;
+    let read = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), RRF_RT_REG_SZ, null_mut(), buf.as_mut_ptr() as _, &mut size) == 0 };
+    if read && !crate::win::util::from_wide(&buf).contains(QUIET_ARG) {
+        set_startup(true);
+    }
+}
+
 pub fn set_startup(on: bool) {
     if packaged() {
         // Turned off in Task Manager (DisabledByUser), enabling is refused and the toggle
@@ -254,17 +269,18 @@ pub fn set_startup(on: bool) {
         if let Some(t) = startup_task() {
             let _ = if on { t.RequestEnableAsync().and_then(|op| op.join()).map(drop) } else { t.Disable() };
         }
-        settings::refresh();
+        settings::startup_changed();
         return;
     }
     let (k, v) = (wide(RUN_KEY), wide(RUN_VALUE));
     unsafe {
         if on {
-            let cmd = wide(&format!("\"{}\"", exe_path().display()));
+            // Quietly: at sign-in only the deck appears, and nothing takes the foreground.
+            let cmd = wide(&format!("\"{}\" {}", exe_path().display(), QUIET_ARG));
             RegSetKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr(), REG_SZ, cmd.as_ptr() as _, (cmd.len() * 2) as u32);
         } else {
             RegDeleteKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), v.as_ptr());
         }
     }
-    settings::refresh();
+    settings::startup_changed();
 }

@@ -37,6 +37,9 @@ pub fn apply_language() {
     crate::common::i18n::init(&store(|s| s.d.settings.language.clone()));
     allnotes::relabel();
     settings::relabel();
+    for h in note::windows() {
+        note::relabel(h);
+    }
     deck::refresh();
     tray_relabel();
 }

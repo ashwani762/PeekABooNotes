@@ -55,12 +55,32 @@ pub fn markdown_to_rtf(md: &str) -> String {
 }
 
 
+/// `r` moved so that at least a third of it lies in the work area `work`, and its top
+/// (the header, where it's picked up) is never above it. A rect that already does is
+/// left alone.
+pub(super) fn clamp_to_work(r: RECT, work: RECT) -> RECT {
+    let (w, h) = (r.right - r.left, r.bottom - r.top);
+    let x = r.left.clamp((work.left - w * 2 / 3).min(work.left), (work.right - w / 3).max(work.left));
+    let y = r.top.clamp(work.top, (work.bottom - h / 3).max(work.top));
+    RECT { left: x, top: y, right: x + w, bottom: y + h }
+}
+
 pub(super) fn placement(id: u64) -> RECT {
     let saved = store(|s| s.note(id).and_then(|n| n.rect));
-    if let Some([l, t, r, b]) = saved {
+    if let Some([l, t, r, b]) = saved
+        && r - l > 50
+        && b - t > 50
+    {
+        // Back where it was; a monitor gone since (or a different arrangement) leaves it
+        // on the nearest one, with enough of it on screen to take hold of.
         let rc = RECT { left: l, top: t, right: r, bottom: b };
-        if unsafe { !MonitorFromRect(&rc, MONITOR_DEFAULTTONULL).is_null() } && r - l > 50 && b - t > 50 {
-            return rc;
+        unsafe {
+            let mon = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
+            let mut mi: MONITORINFO = std::mem::zeroed();
+            mi.cbSize = size_of::<MONITORINFO>() as u32;
+            if !mon.is_null() && GetMonitorInfoW(mon, &mut mi) != 0 {
+                return clamp_to_work(rc, mi.rcWork);
+            }
         }
     }
     let (ex, cy, s, work, left) = deck::anchor(Some(id));
@@ -92,7 +112,7 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
         Some(from) if !crate::win::render::anim::reduced() => {
             // Its picture before the deck tucks it away.
             let from_image = deck::card_image(id);
-            let h = note::create(id, r, false);
+            let h = note::create(id, r, note::Show::Later);
             deck::hand_off(id);
             // Shows what the window will (it's already laid out, scrolled to the end).
             let mut content = note::flight_content(h, &text);
@@ -104,7 +124,7 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, Some(Box::new(move || note::reveal(h))));
         }
         _ => {
-            note::create(id, r, true);
+            note::create(id, r, note::Show::Now);
         }
     }
     deck::refresh(); // shows the "open" dot
@@ -138,7 +158,7 @@ pub fn step_note(id: u64, dir: i32, r: RECT) -> bool {
         unsafe { SetForegroundWindow(h) };
         return false;
     }
-    note::create(next, r, true);
+    note::create(next, r, note::Show::Now);
     true
 }
 
@@ -153,11 +173,12 @@ pub(super) fn remember_open() {
     });
 }
 
-/// At start: the notes open at quit that stay open, where they were.
+/// At start: the notes open at quit that stay open, where they were, behind whatever the
+/// user is doing (at sign-in, that's never them).
 pub(super) fn reopen_at_start() {
     let ids = store(|s| s.d.settings.reopen.iter().copied().filter(|id| s.note(*id).is_some_and(|n| !n.archived)).collect::<Vec<_>>());
     for id in ids {
-        note::create(id, placement(id), true);
+        note::create(id, placement(id), note::Show::Quiet);
     }
     if !ui(|u| u.notes.is_empty()) {
         deck::refresh(); // their "open" dots

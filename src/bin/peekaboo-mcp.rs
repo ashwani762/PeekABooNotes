@@ -62,17 +62,21 @@ fn connect(started: &mut bool) -> Result<Link, String> {
 
 /// Start the app on its own: inheriting no handles (the assistant's stdout among them,
 /// which would keep it waiting for an end that never comes) and outside the assistant's
-/// job, so closing the assistant doesn't close the app.
+/// job, so closing the assistant doesn't close the app. Quietly: only the deck appears,
+/// as at sign-in, and when two assistants start it at once the second copy just leaves.
 fn start_app(app: &std::path::Path) -> io::Result<()> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CreateProcessW, DETACHED_PROCESS, PROCESS_INFORMATION, STARTUPINFOW};
     let exe: Vec<u16> = app.as_os_str().encode_wide_z();
     let dir: Vec<u16> = app.parent().map(|d| d.as_os_str().encode_wide_z()).unwrap_or_else(|| vec![0]);
+    let line: Vec<u16> = std::ffi::OsString::from(format!("\"{}\" --quiet", app.display())).encode_wide_z();
     let try_with = |flags: u32| unsafe {
         let mut si: STARTUPINFOW = std::mem::zeroed();
         si.cb = size_of::<STARTUPINFOW>() as u32;
         let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-        let ok = CreateProcessW(exe.as_ptr(), std::ptr::null_mut(), std::ptr::null(), std::ptr::null(), 0, flags, std::ptr::null(), dir.as_ptr(), &si, &mut pi);
+        // CreateProcessW may write into the command line: its own copy each time.
+        let mut cmd = line.clone();
+        let ok = CreateProcessW(exe.as_ptr(), cmd.as_mut_ptr(), std::ptr::null(), std::ptr::null(), 0, flags, std::ptr::null(), dir.as_ptr(), &si, &mut pi);
         if ok == 0 {
             return Err(io::Error::last_os_error());
         }

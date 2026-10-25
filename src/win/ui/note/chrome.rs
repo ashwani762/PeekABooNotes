@@ -73,7 +73,13 @@ pub(super) fn paint(h: HWND) {
         let hdc = BeginPaint(h, &mut ps);
         let mut rc: RECT = std::mem::zeroed();
         GetClientRect(h, &mut rc);
-        let mut c = Canvas::new(rc.right.max(1), rc.bottom.max(1));
+        // The same canvas every paint (a hover fade paints 60 times a second); a new one
+        // only when the window has changed size.
+        let (cw, ch) = (rc.right.max(1), rc.bottom.max(1));
+        if st.canvas.as_ref().map(|c| (c.w, c.h)) != Some((cw, ch)) {
+            st.canvas = Some(Canvas::new(cw, ch));
+        }
+        let mut c = st.canvas.take().unwrap();
         c.clear(0xFF00_0000 | paper);
         c.begin_batch();
         if let (false, true, Some(icons), Some(meta_f)) = (st.embedded, a > 0.01 || pinned, st.icons.as_ref(), st.meta.as_ref()) {
@@ -133,6 +139,7 @@ pub(super) fn paint(h: HWND) {
         c.flush();
         super::scrollbar::paint(h, st, &mut c, ink);
         c.blit(hdc, 0, 0);
+        st.canvas = Some(c);
         EndPaint(h, &ps);
     }
 }
@@ -186,7 +193,8 @@ pub(super) fn hide_later(h: HWND, to: HWND) {
 }
 
 /// Go once the pointer is off the note with no button held: someone still pointing at it,
-/// or dragging something onto it from another app, isn't done with it.
+/// or dragging something onto it from another app, isn't done with it. While the pointer
+/// rests on the note the timer stops; `pointer_out` starts it again when it leaves.
 pub(super) fn hide_tick(h: HWND) {
     let fg = unsafe { GetForegroundWindow() };
     let ours = fg == h || (!fg.is_null() && unsafe { GetWindow(fg, GW_OWNER) } == h) || crate::win::ui::menu::is_menu(fg);
@@ -195,13 +203,15 @@ pub(super) fn hide_tick(h: HWND) {
         return;
     }
     let mut p = POINT { x: 0, y: 0 };
-    let mut r: RECT = unsafe { std::mem::zeroed() };
-    unsafe {
-        GetCursorPos(&mut p);
-        GetWindowRect(h, &mut r);
-    }
+    unsafe { GetCursorPos(&mut p) };
     let held = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0 || GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000 != 0 };
-    if crate::win::util::pt_in(&r, p.x, p.y) || held {
+    if held {
+        return; // keep looking: a drag may end here or elsewhere
+    }
+    // On the note itself (not on a window lying over it): wait for it to leave.
+    let under = unsafe { WindowFromPoint(p) };
+    if !under.is_null() && (under == h || unsafe { IsChild(h, under) } != 0) {
+        unsafe { KillTimer(h, T_HIDE) };
         return;
     }
     unsafe {

@@ -458,13 +458,20 @@ fn change(hwnd: HWND, k: Key, v: usize) {
 /// Re-read every value (a setting may have changed from the tray or a hotkey).
 pub fn refresh() {
     let h = with(|w| {
-        w.startup = app::startup_enabled();
         sync_knobs(w);
         w.hwnd
     });
     if h.is_some() {
         anim::wake(Client::Settings);
     }
+}
+
+/// Starting with Windows was just turned on or off. Asking Windows whether it is can block
+/// (the Store build asks the package's startup task), so it's asked only then and when
+/// Settings opens, not on every refresh.
+pub fn startup_changed() {
+    with(|w| w.startup = app::startup_enabled());
+    refresh();
 }
 
 fn sync_knobs(w: &mut Win) {
