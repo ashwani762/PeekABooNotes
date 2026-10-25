@@ -31,6 +31,9 @@ struct Box_ {
     brush: HBRUSH,
     icons: Font,
     key: Font,
+    /// Kept between paints (a blink of the caret or a hover repaints the box), made again
+    /// only when the box's size changes.
+    canvas: Option<Canvas>,
     /// Some(text) once Enter was pressed; Some(None) when cancelled.
     result: Option<Option<String>>,
 }
@@ -45,7 +48,7 @@ fn with<R>(f: impl FnOnce(&mut Box_) -> R) -> Option<R> {
 
 /// (surface, text, secondary), the menu's palette.
 fn pal() -> (u32, u32, u32) {
-    if app::dark() { (0x2C2C2E, 0xF2F2F7, 0x98989D) } else { (0xF7F7F9, 0x1D1D1F, 0x86868B) }
+    if app::dark() { (0x2C2C2E, 0xF2F2F7, 0x98989D) } else { (0xF7F7F9, 0x1D1D1F, 0x6E6E73) }
 }
 
 const W: f32 = 380.0;
@@ -102,6 +105,7 @@ pub fn ask(owner: HWND, at: POINT, current: &str) -> Option<String> {
             brush: unsafe { CreateSolidBrush(cref(surface)) },
             icons: Font::new(15.0 * s, FW_NORMAL, crate::win::ui::note::icon_face()),
             key: Font::new(11.0 * s, FW_SEMIBOLD, theme::FACE_SMALL),
+            canvas: None,
             result: None,
         })
     });
@@ -161,7 +165,11 @@ fn paint(h: HWND) {
         let mut rc: RECT = std::mem::zeroed();
         GetClientRect(h, &mut rc);
         let s = b.s;
-        let mut c = Canvas::new(rc.right.max(1), rc.bottom.max(1));
+        let (cw, ch) = (rc.right.max(1), rc.bottom.max(1));
+        if b.canvas.as_ref().map(|c| (c.w, c.h)) != Some((cw, ch)) {
+            b.canvas = Some(Canvas::new(cw, ch));
+        }
+        let c = b.canvas.as_mut().unwrap();
         c.clear(0xFF00_0000 | surface);
         c.begin_batch();
         c.text_ct("\u{E71B}", &b.icons, rect((12.0 * s) as i32, 0, (24.0 * s) as i32, rc.bottom), None, sub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
