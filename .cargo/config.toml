@@ -1,0 +1,5 @@
+# Tests drive real RichEdit windows, and RichEdit is made for one UI thread, as the app
+# uses it: many at once on the test runner's threads crashed about one run in ten. One
+# test at a time takes under a second anyway.
+[env]
+RUST_TEST_THREADS = "1"
