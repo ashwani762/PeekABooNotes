@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-use windows_sys::Win32::Graphics::Gdi::{GetDC, GetPixel, HDC, IntersectClipRect, ReleaseDC};
+use windows_sys::Win32::Graphics::Gdi::{GetDC, IntersectClipRect, ReleaseDC};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, HideCaret, ShowCaret};
 
 use crate::win::render::anim::{self, Client, Spring, clamp01};
@@ -33,6 +33,8 @@ thread_local! {
     /// Boxes mid-animation, by (editor, character position).
     static ANIMS: RefCell<HashMap<(isize, i32), Spring>> = RefCell::new(HashMap::new());
     static HOT: RefCell<Option<(isize, i32)>> = const { RefCell::new(None) };
+    /// What the boxes are drawn on, kept between paints.
+    static CANVAS: RefCell<Option<Canvas>> = const { RefCell::new(None) };
 }
 
 /// Colours and scale for an editor's boxes: the note's ink and its paper.
@@ -101,7 +103,11 @@ pub fn frame(dt: f32) -> bool {
     })
 }
 
-/// Draw every visible box of editor `e` straight onto its window.
+/// Draw every visible box of editor `e` straight onto its window: all of them on one
+/// canvas, taken from the window and put back in a single copy. One box at a time, the
+/// screen could show RichEdit's fresh text with only some of its circles back (while the
+/// wheel glides, rows came into view bare for a frame), and each box cost its own reads
+/// of the window.
 pub fn paint(e: HWND) {
     let Some(st) = STYLES.with(|m| m.borrow().get(&(e as isize)).copied()) else { return };
     let t = rich::text(e);
@@ -121,25 +127,72 @@ pub fn paint(e: HWND) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(e, &mut rc) };
     let hot = HOT.with(|h| *h.borrow());
-    unsafe {
-        let dc = GetDC(e);
-        // RichEdit's class hands out its parent's DC (CS_PARENTDC), which isn't clipped to
-        // the editor: without this, the circle of a line scrolled up under the header
-        // would still be drawn there.
-        IntersectClipRect(dc, rc.left, rc.top, rc.right, rc.bottom);
-        HideCaret(e);
-        for cp in boxes {
-            let p0 = rich::pos_from_char(e, cp);
-            if p0.y > rc.bottom || p0.y < rc.top - (40.0 * st.s) as i32 {
-                continue;
-            }
-            let checked = t[cp as usize] == rich::CHECKED;
-            let v = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 1.0 } else { 0.0 });
-            draw_box(dc, e, cp, p0, &t, st, v, hot == Some((e as isize, cp)));
+    let s = st.s;
+    let mut items = Vec::with_capacity(boxes.len());
+    // The canvas: from the leftmost circle to just short of the rightmost item's text, and
+    // from the top circle to the bottom one.
+    let (mut ux0, mut uy0, mut ux1, mut uy1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for cp in boxes {
+        let p0 = rich::pos_from_char(e, cp);
+        if p0.y > rc.bottom || p0.y < rc.top - (40.0 * s) as i32 {
+            continue;
         }
-        ShowCaret(e);
-        ReleaseDC(e, dc);
+        let (text_x, cy, d, gap) = place(e, cp, p0, &t, s);
+        let h = (d * 1.2 + 4.0 * s).ceil() as i32;
+        let y0 = (cy - h as f32 / 2.0).round() as i32;
+        ux0 = ux0.min((text_x as f32 - gap - d - 3.0 * s).floor() as i32);
+        ux1 = ux1.max(text_x - 2);
+        uy0 = uy0.min(y0);
+        uy1 = uy1.max(y0 + h);
+        let checked = t[cp as usize] == rich::CHECKED;
+        let v = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 1.0 } else { 0.0 });
+        items.push((text_x, cy, d, gap, v, hot == Some((e as isize, cp))));
     }
+    let (ux0, uy0, ux1, uy1) = (ux0.max(rc.left), uy0.max(rc.top), ux1.min(rc.right), uy1.min(rc.bottom));
+    if items.is_empty() || ux1 <= ux0 || uy1 <= uy0 {
+        return;
+    }
+    let (w, h) = (ux1 - ux0, uy1 - uy0);
+    CANVAS.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        // Kept between paints (a glide paints every frame); grown, never shrunk, so a
+        // canvas the size of the column is made once.
+        if slot.as_ref().is_none_or(|c| c.w < w || c.h < h) {
+            let (cw, ch) = slot.as_ref().map_or((w, h), |c| (c.w.max(w), c.h.max(h)));
+            *slot = Some(Canvas::new(cw, ch));
+        }
+        let c = slot.as_mut().unwrap();
+        unsafe {
+            let dc = GetDC(e);
+            // RichEdit's class hands out its parent's DC (CS_PARENTDC), which isn't clipped to
+            // the editor: without this, the circle of a line scrolled up under the header
+            // would still be drawn there. The canvas may be larger than this paint needs:
+            // only its `w` x `h` corner goes back.
+            IntersectClipRect(dc, ux0, uy0, ux1, uy1);
+            HideCaret(e);
+            c.grab(dc, ux0, uy0);
+            // Paper or selection colour, sampled just left of each item's text, before any
+            // circle goes on.
+            let unders: Vec<u32> = items
+                .iter()
+                .map(|&(text_x, cy, ..)| {
+                    let (x, y) = (text_x - 3 - ux0, cy as i32 - uy0);
+                    if x >= 0 && y >= 0 && x < w && y < h {
+                        c.copy_out(RECT { left: x, top: y, right: x + 1, bottom: y + 1 }).first().map_or(st.bg, |p| p & 0xFF_FFFF)
+                    } else {
+                        st.bg
+                    }
+                })
+                .collect();
+            for (&(text_x, cy, d, gap, v, hot), &under) in items.iter().zip(&unders) {
+                draw_box(c, ux0, uy0, text_x, cy, d, gap, under, st, v, hot);
+            }
+            c.make_opaque();
+            c.blit(dc, ux0, uy0);
+            ShowCaret(e);
+            ReleaseDC(e, dc);
+        }
+    });
 }
 
 /// The (invisible) marker glyph's size in points, as set by rich::style_boxes.
@@ -178,30 +231,18 @@ pub fn hits(e: HWND, cp: i32, x: i32, y: i32) -> bool {
     (x as f32 - cx).abs() <= r && (y as f32 - cy).abs() <= r
 }
 
+/// One box onto canvas `c`, whose top-left is at (`ox`, `oy`) in the editor: a disc around
+/// the circle cleared to the paper (the last frame's circle goes, while a table's border
+/// or a line just above stays as RichEdit drew it), then the circle.
 #[allow(clippy::too_many_arguments)]
-fn draw_box(dc: HDC, e: HWND, cp: i32, p0: POINT, t: &[u16], st: Style, v: f32, hot: bool) {
+fn draw_box(c: &mut Canvas, ox: i32, oy: i32, text_x: i32, cy: f32, d: f32, gap: f32, under: u32, st: Style, v: f32, hot: bool) {
     let s = st.s;
-    let (text_x, cy, d, gap) = place(e, cp, p0, t, s);
-    // The circle sits in the hanging indent, ending `gap` before the text; the canvas
-    // stops short of the text so it never covers a letter.
-    let x0 = (text_x as f32 - gap - d - 3.0 * s).floor().max(0.0) as i32;
-    let w = (text_x - 2 - x0).max(1);
-    let h = (d * 1.2 + 4.0 * s).ceil() as i32;
-    let y0 = (cy - h as f32 / 2.0).round() as i32;
-    // Paper or selection colour, sampled just left of the text.
-    let sample = unsafe { GetPixel(dc, text_x - 3, cy as i32) };
-    let under = if sample == u32::MAX { st.bg } else { crate::win::util::cref(sample) };
-    // What's there already, with only a disc around the circle cleared to the paper: the
-    // last frame's circle goes, while a table's border or a line just above, which the
-    // canvas's corners reach, stays as RichEdit drew it.
-    let mut c = Canvas::new(w, h);
-    c.grab(dc, x0, y0);
     let k = clamp01(v);
     // A brief pop while the state changes (either way), springing back to size.
     let pop = 1.0 + 0.10 * (std::f32::consts::PI * k).sin() + (v - 1.0).max(0.0) * 0.6;
     let dd = d * pop;
-    let cx = text_x as f32 - gap - d / 2.0 - x0 as f32;
-    let ly = cy - y0 as f32;
+    let cx = text_x as f32 - gap - d / 2.0 - ox as f32;
+    let ly = cy - oy as f32;
     let clear = d * 1.16 + 2.0 * s;
     c.shape(&Shape::new(cx - clear / 2.0, ly - clear / 2.0, clear, clear, clear / 2.0), under, 1.0, 1.0, 0.0);
     let circle = Shape::new(cx - dd / 2.0, ly - dd / 2.0, dd, dd, dd / 2.0);
@@ -213,11 +254,9 @@ fn draw_box(dc: HDC, e: HWND, cp: i32, p0: POINT, t: &[u16], st: Style, v: f32, 
         c.shape(&Shape::new(cx - fd / 2.0, ly - fd / 2.0, fd, fd, fd / 2.0), st.ink, 1.0, 1.0, 0.0);
         let ca = clamp01((k - 0.35) / 0.65);
         if ca > 0.0 {
-            check(&mut c, cx, ly, dd, 0xFFFFFF, ca, s);
+            check(c, cx, ly, dd, 0xFFFFFF, ca, s);
         }
     }
-    c.make_opaque();
-    c.blit(dc, x0, y0);
 }
 
 /// A rounded checkmark from two strokes.

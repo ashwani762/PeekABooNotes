@@ -321,13 +321,16 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         },
         _ => {}
     }
-    // Whether RichEdit is about to paint over the header's fade band (it has to be faded
-    // again after; otherwise it's left alone).
+    // Which fade bands RichEdit is about to paint over (they have to be faded again after;
+    // the others are left alone).
     let scale = crate::win::editor::checks::paper(e).map_or(1.0, |(_, s)| s);
-    let paint_top = msg == WM_PAINT && {
+    let painted_bands = if msg == WM_PAINT {
         let mut u: RECT = unsafe { std::mem::zeroed() };
-        let any = unsafe { GetUpdateRect(e, &mut u, 0) } != 0;
-        any && crate::win::editor::fade::reaches(u.top, scale)
+        let mut rc: RECT = unsafe { std::mem::zeroed() };
+        unsafe { GetClientRect(e, &mut rc) };
+        if unsafe { GetUpdateRect(e, &mut u, 0) } != 0 { crate::win::editor::fade::reach(u.top, u.bottom, rc.bottom, scale) } else { 0 }
+    } else {
+        0
     };
     let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
     // Moved by a key or a click to in front of a checkbox: after it instead.
@@ -362,15 +365,29 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             | WM_CUT
             | WM_UNDO
             | rich::EM_REDO
+            // Scrolled (the wheel's glide sets the position every frame): RichEdit draws the
+            // rows coming into view right away, so the circles go on them right away too.
+            | rich::EM_SETSCROLLPOS
     ) || (msg == WM_MOUSEMOVE && wp & 0x0001 != 0);
     if drew {
         crate::win::editor::checks::paint(e);
         crate::win::editor::emoji::paint(e);
         if let Some((paper, s)) = crate::win::editor::checks::paper(e) {
-            // Typing, selecting and the like draw around the selection: the band only when
-            // that's up there.
-            let touched = paint_top || (msg != WM_PAINT && crate::win::editor::fade::reaches(rich::pos_from_char(e, rich::sel(e).0).y - (24.0 * s) as i32, s));
-            crate::win::editor::fade::paint(e, paper, s, touched);
+            use crate::win::editor::fade;
+            // Scrolling may have drawn anywhere. Typing, selecting and the like draw around
+            // the selection: a band only when that's at its edge.
+            let touched = match msg {
+                WM_PAINT => painted_bands,
+                WM_VSCROLL | WM_MOUSEWHEEL | rich::EM_SETSCROLLPOS => fade::TOP | fade::BOTTOM,
+                _ => {
+                    let mut rc: RECT = unsafe { std::mem::zeroed() };
+                    unsafe { GetClientRect(e, &mut rc) };
+                    let (a, b) = rich::sel(e);
+                    let (ya, yb) = (rich::pos_from_char(e, a).y, rich::pos_from_char(e, b).y);
+                    fade::reach(ya.min(yb) - (24.0 * s) as i32, ya.max(yb) + (40.0 * s) as i32, rc.bottom, s)
+                }
+            };
+            fade::paint(e, paper, s, touched);
         }
         super::scrollbar::sync(h);
     }

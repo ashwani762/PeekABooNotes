@@ -251,6 +251,16 @@ pub(super) fn mouse_move(h: HWND, x: i32, y: i32) -> bool {
             let to = (from as f32 + (y - grab_y) as f32 * per_px).clamp(0.0, end).round() as i32;
             if to != rich::scroll_y(st.edit) {
                 rich::set_scroll_y(st.edit, to);
+                // Painted now, text and thumb together: the pointer's moves come in ahead of
+                // paints, so on a quick drag the thumb was left behind and then jumped.
+                unsafe {
+                    windows_sys::Win32::Graphics::Gdi::RedrawWindow(
+                        h,
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                        windows_sys::Win32::Graphics::Gdi::RDW_UPDATENOW | windows_sys::Win32::Graphics::Gdi::RDW_ALLCHILDREN,
+                    )
+                };
             }
         }
         return true;

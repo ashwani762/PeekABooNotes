@@ -736,6 +736,46 @@ mod tests {
         }
     }
 
+    /// Probe (run with --ignored --nocapture): asking for each scroll position in turn, where
+    /// RichEdit really puts the view, and whether the measured content end holds still.
+    #[test]
+    #[ignore]
+    fn probe_scroll_steps() {
+        let h = editor();
+        setup(h);
+        let mut md = String::from("Tick test
+");
+        for i in 1..=40 {
+            md.push_str(&format!("- [ ] task number {i} to do
+"));
+            if i == 20 {
+                md.push_str("Some prose here that runs long enough to wrap over more than one line in a narrow note.
+");
+                md.push_str("| a | b |
+| - | - |
+| 1 | 2 |
+| 3 | 4 |
+");
+                md.push_str("> a quote line
+");
+            }
+        }
+        load_markdown(h, &md);
+        let content0 = scroll_y(h) + content_bottom(h).unwrap_or(0);
+        let mut last = -1;
+        for want in 0..(content0 - 200).max(0) {
+            set_scroll_y(h, want);
+            let got = scroll_y(h);
+            let content = got + content_bottom(h).unwrap_or(0);
+            if got != want || content != content0 || got < last {
+                println!("want {want} got {got} content {content} (first {content0})");
+            }
+            last = got;
+        }
+        println!("content {content0}");
+        unsafe { DestroyWindow(h) };
+    }
+
     /// Timing (run with --ignored --nocapture): what a burst of typing costs in a note
     /// with 500 named links, for the restyle after it and for a word ended with a space.
     #[test]
