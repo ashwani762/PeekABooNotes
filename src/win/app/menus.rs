@@ -99,13 +99,19 @@ pub fn note_menu(id: u64, in_note: bool) -> Vec<menu::Item> {
 pub fn popup(items: Vec<menu::Item>, x: i32, y: i32, owner: HWND) -> u32 {
     let prev = unsafe { GetForegroundWindow() };
     let cmd = menu::show(items, POINT { x, y });
+    give_back(prev, owner);
+    cmd
+}
+
+/// After a menu: the keys go back to `owner` when it's showing, or else to `prev`, the
+/// window in front before the menu took them (unless that's our hidden main window).
+fn give_back(prev: HWND, owner: HWND) {
     unsafe {
         let back = if !owner.is_null() && IsWindowVisible(owner) != 0 { owner } else { prev };
         if !back.is_null() && IsWindow(back) != 0 && back != ui(|u| u.main) {
             SetForegroundWindow(back);
         }
     }
-    cmd
 }
 
 pub(super) fn cursor() -> POINT {
@@ -156,7 +162,10 @@ fn capitalized(s: &str) -> String {
 
 /// A note's menu opened from the deck: right-aligned or not, dismissed by `leave`.
 pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Box<dyn Fn(POINT) -> bool>) {
+    // The deck never takes the keys, so they go back to whatever app had them.
+    let prev = unsafe { GetForegroundWindow() };
     let cmd = menu::show_with(note_menu(id, false), p, align_right, Some(leave));
+    give_back(prev, null_mut());
     if cmd != 0 {
         note_command(id, cmd);
     }
