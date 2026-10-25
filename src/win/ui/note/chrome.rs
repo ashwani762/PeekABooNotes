@@ -54,8 +54,14 @@ pub(super) fn layout(h: HWND) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(h, &mut rc) };
     let s = st.s;
-    // The right margin is also where the scroll bar runs.
-    let (l, r, b) = if st.embedded { (0, (12.0 * s) as i32, 0) } else { ((16.0 * s) as i32, (10.0 * s) as i32, (30.0 * s) as i32) };
+    // The right margin is also where the scroll bar runs. In a note window it is the left
+    // margin plus the selection bar RichEdit insets the text by on the left, so
+    // right-aligned text sits as far from the right edge as left-aligned text from the left.
+    let (l, r, b) = if st.embedded {
+        (0, (12.0 * s) as i32, 0)
+    } else {
+        ((16.0 * s) as i32, ((16.0 + rich::SELECTION_BAR) * s) as i32, (30.0 * s) as i32)
+    };
     let top = if st.embedded { 0 } else { header_h(s) + (2.0 * s) as i32 };
     unsafe { MoveWindow(st.edit, l, top, (rc.right - l - r).max(1), (rc.bottom - top - b).max(1), 1) };
 }

@@ -126,7 +126,8 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             if text.trim().is_empty() {
                 content.title.clear();
             }
-            let (_, s) = deck::monitor_geo();
+            // The window's corners, at the scale of the monitor it opens on (not the deck's).
+            let s = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) }.max(96) as f32 / 96.0;
             crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, Some(Box::new(move || note::reveal(h))));
         }
         _ => {
@@ -397,6 +398,91 @@ fn delete_attachments(gone: &[Note]) {
     match failed {
         Some(kind) => log::warn(&format!("deleted {removed} attachments of deleted notes; some couldn't be ({kind:?})")),
         None if removed > 0 => log::info(&format!("deleted {removed} attachments of deleted notes")),
+        None => {}
+    }
+}
+
+/// At start: take out of the attachments folder the files no note links any more (left
+/// by a picture or file taken out of a note, or by notes deleted before files went with
+/// them). It errs on keeping a file: a note in the archive, one deleted with its Undo
+/// still showing, a saved version and what's on the clipboard all count as linking it;
+/// a file younger than a day, or than the notes' last save, stays; and nothing goes
+/// unless notes.json was read whole and versions.json can be read, or when it would take
+/// every file there. The notes' text is copied here, as it stands now; the folder is
+/// read and the files removed on a thread of its own, which ends when it's done.
+pub(super) fn sweep_attachments() {
+    use crate::common::attach;
+    let dir = attach::dir();
+    // Most starts: nothing to look at.
+    if !std::fs::read_dir(&dir).is_ok_and(|mut d| d.next().is_some()) {
+        return;
+    }
+    let Some((mut kept, path)) = store(|s| {
+        (s.read_whole && !s.d.notes.is_empty()).then(|| (s.d.notes.iter().flat_map(|n| [n.rtf.clone(), n.text.clone()]).collect::<Vec<String>>(), s.path.clone()))
+    }) else {
+        return;
+    };
+    kept.extend(ui(|u| u.pending.iter().flat_map(|(_, n)| [n.rtf.clone(), n.text.clone()]).collect::<Vec<_>>()));
+    // Cut out of a note in an earlier session, and not pasted back yet.
+    kept.extend(crate::win::util::clipboard_rtf());
+    kept.extend(crate::win::util::clipboard_text());
+    let spawned = std::thread::Builder::new().name("attachment sweep".into()).spawn(move || sweep_in(&dir, &path, kept));
+    if spawned.is_err() {
+        log::warn("attachments not swept: no thread for it");
+    }
+}
+
+/// `sweep_attachments`, off the UI thread: `kept` is every note's RTF and text; `notes`
+/// is notes.json.
+fn sweep_in(dir: &std::path::Path, notes: &std::path::Path, mut kept: Vec<String>) {
+    use crate::common::attach;
+    use std::os::windows::fs::MetadataExt;
+    // Notes set aside unread at some start may come back, with the files they link.
+    let data = notes.parent().unwrap_or(dir);
+    let unread = std::fs::read_dir(data).map(|d| d.flatten().any(|e| e.file_name().to_string_lossy().starts_with("notes.unreadable-"))).unwrap_or(true);
+    if unread {
+        log::info("attachments not swept: an unreadable notes file is kept beside the notes");
+        return;
+    }
+    let Some(versions) = crate::win::ui::note::versions::markdown() else {
+        log::warn("attachments not swept: versions.json couldn't be read");
+        return;
+    };
+    kept.extend(versions);
+    let saved = std::fs::metadata(notes).and_then(|m| m.modified()).ok();
+    let now = std::time::SystemTime::now();
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+    let (mut in_folder, mut old) = (0, std::collections::BTreeSet::new());
+    for e in entries.flatten() {
+        // Plain files only, by a name a note could link: never a folder, a link to
+        // elsewhere, or what Windows or a sync client keeps there (desktop.ini).
+        let (Ok(kind), Ok(meta)) = (e.file_type(), e.metadata()) else { continue };
+        let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+        if !kind.is_file() || meta.file_attributes() & HIDDEN_OR_SYSTEM != 0 || attach::name_of(&attach::url(&name)).as_deref() != Some(name.as_str()) {
+            continue;
+        }
+        in_folder += 1;
+        if attach::sweepable(meta.created().ok(), meta.modified().ok(), saved, now) {
+            old.insert(name);
+        }
+    }
+    if old.is_empty() {
+        return;
+    }
+    let gone = attach::sweep(&old, in_folder, kept.iter().map(String::as_str));
+    drop(kept);
+    let (mut removed, mut failed) = (0, None);
+    for name in &gone {
+        match std::fs::remove_file(dir.join(name)) {
+            Ok(()) => removed += 1,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => failed = Some(e.kind()),
+        }
+    }
+    match failed {
+        Some(kind) => log::warn(&format!("swept {removed} attachments no note links; some couldn't be ({kind:?})")),
+        None if removed > 0 => log::info(&format!("swept {removed} attachments no note links")),
         None => {}
     }
 }

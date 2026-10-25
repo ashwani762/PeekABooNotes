@@ -92,7 +92,10 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
         }
         return;
     }
-    let (_, s) = crate::win::ui::deck::monitor_geo();
+    // The card shows what the note window draws, so it takes the scale of the monitor the
+    // window is on (it may not be the deck's): where it opens, or where it closes from.
+    let window = if kind == Kind::Open { &to.0 } else { &from.0 };
+    let (_, s) = crate::win::ui::screen::of_rect(window);
     let pad = (48.0 * s) as i32;
     let b = union(&from.0, &to.0, pad);
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);

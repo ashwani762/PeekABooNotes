@@ -205,6 +205,9 @@ pub struct Store {
     /// notes.json was there but couldn't be read (or put aside): this session never
     /// writes it, so whatever is in it survives for the next start to try again.
     frozen: bool,
+    /// notes.json was read and understood at start: these are all the notes there are,
+    /// not the backup's or none. Only then may anything be judged unused by every note.
+    pub read_whole: bool,
     /// The notes' content (see `content_stamp`) as the file last got it.
     saved_stamp: Option<u64>,
     /// Saves since the backup was last refreshed, and when that was.
@@ -248,9 +251,11 @@ impl Store {
         let path = dir.join("notes.json");
         let backup = dir.join("notes.backup.json");
         let mut frozen = false;
+        let mut read_whole = false;
         let d = match read_patiently(&path) {
             Ok(bytes) => match serde_json::from_slice::<Data>(&bytes) {
                 Ok(d) => {
+                    read_whole = true;
                     log::info(&format!("loaded {} notes ({} KB)", d.notes.len(), bytes.len().div_ceil(1024)));
                     // A copy of the last good file from the previous session.
                     if let Err(e) = std::fs::write(dir.join("notes.backup.json"), &bytes) {
@@ -287,7 +292,7 @@ impl Store {
                 from_backup(&backup)
             }
         };
-        let mut s = Store { path, d, frozen, saved_stamp: None, saves_since_backup: 0, backup_at: Some(Instant::now()) };
+        let mut s = Store { path, d, frozen, read_whole, saved_stamp: None, saves_since_backup: 0, backup_at: Some(Instant::now()) };
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
         s.d.next_id = s.d.next_id.max(max);
         // Early builds stored the deck at 42% height; the deck is now centred by default.
