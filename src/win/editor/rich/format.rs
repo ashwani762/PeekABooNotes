@@ -243,6 +243,17 @@ pub fn set_box_colors(h: HWND, ink: u32, done: u32, text: u32) {
     BOX_COLORS.with(|m| m.borrow_mut().insert(h as isize, (ink, done, text)));
 }
 
+/// Text typed at the caret (or the selection) takes a completed item's look: struck
+/// through, in the secondary colour.
+pub fn set_done_format(h: HWND) {
+    let done = BOX_COLORS.with(|m| m.borrow().get(&(h as isize)).copied()).map_or(0x888888, |c| c.1);
+    let mut cf = CharFormat2::new();
+    cf.mask = CFM_COLOR | CFM_STRIKEOUT;
+    cf.effects = CFM_STRIKEOUT;
+    cf.color = crate::win::util::cref(done);
+    send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+}
+
 /// Checklists. The box glyph is a placeholder painted in the
 /// paper colour (`checks` draws the visible circle over it); completed items fade to the
 /// secondary colour and are struck through, starting at the text, not the gap.

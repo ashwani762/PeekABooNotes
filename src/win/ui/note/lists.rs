@@ -187,6 +187,8 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
         "-" | "*" => (AutoKind::List, PFN_BULLET),
         "1." => (AutoKind::List, PFN_ARABIC),
         "[]" | "[ ]" => (AutoKind::Task, 0),
+        // Ticked.
+        "[x]" | "[X]" => (AutoKind::Task, 1),
         _ => return false,
     };
     if kind.0 == AutoKind::List && rich::numbering(e) != 0 {
@@ -200,10 +202,14 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
                 rich::set_numbering(e, n);
                 ps
             }
-            (AutoKind::Task, _) => {
+            (AutoKind::Task, ticked) => {
                 rich::numbering_to_task(e);
-                rich::replace_sel(e, "\u{2610} ");
+                rich::replace_sel(e, if ticked == 1 { "\u{2611} " } else { "\u{2610} " });
                 rich::style_boxes(e);
+                if ticked == 1 {
+                    // What's typed next is done text: struck and faded.
+                    rich::set_done_format(e);
+                }
                 ps + 2
             }
         }
@@ -238,8 +244,9 @@ pub(super) fn revert_auto(h: HWND, e: HWND) -> bool {
 
 /// Enter in a quote or code block makes a new line in it; on an empty last line it leaves
 /// the block instead (an empty block goes altogether), as an empty list item ends a
-/// list. A code line starts indented like the one before. "```" alone on a line opens a
-/// code block. None when Enter is RichEdit's to handle.
+/// list; so it does in a table's last cell. A code line starts indented like the one
+/// before. "```" alone on a line opens a code block. None when Enter is RichEdit's to
+/// handle.
 pub(super) fn block_enter(e: HWND) -> Option<bool> {
     use rich::Block;
     let (a, b) = rich::sel(e);
@@ -249,11 +256,26 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
     let t = rich::text(e);
     let (ps, pe) = (rich::para_start(&t, a), rich::para_end(&t, a));
     if let Some((kind, rows, ca, cb)) = rich::cell_at(e, &t, a) {
-        if kind == Block::Table {
-            return None;
-        }
         // Empty, or holding just the indent the last Enter gave it.
         let blank = t[ps as usize..pe as usize].iter().all(|&c| c == b' ' as u16);
+        if kind == Block::Table {
+            // Only the table's last cell is a way out (Enter elsewhere is a line in a cell):
+            // empty, or on an empty line after its text, Enter goes on below the table.
+            let last = rows.last().and_then(|r| rich::cells(&t, *r).last().copied());
+            if !blank || pe as usize != cb || last != Some((ca, cb)) {
+                return None;
+            }
+            rich::still(e, || {
+                let mut end = rows.last().map_or(0, |r| r.end) as i32;
+                if ps as usize > ca {
+                    rich::set_sel(e, ps - 1, pe);
+                    rich::replace_sel(e, "");
+                    end -= pe - ps + 1;
+                }
+                rich::set_sel(e, end, end);
+            });
+            return Some(true);
+        }
         if blank && pe as usize == cb {
             rich::still(e, || {
                 if ps as usize == ca {
@@ -725,6 +747,52 @@ mod tests {
         rich::set_rtf(h2, &rich::get_rtf(h));
         rich::style_boxes(h2);
         assert_eq!(rich::to_markdown(h2, true), "# T\n- a\n  - [ ] b\n    - [ ] c");
+    }
+
+    /// Enter in a table's last cell, empty or on an empty line after its text, goes on
+    /// below the table (anywhere else it's a line in the cell); and "[x] " typed makes a
+    /// ticked item, whose text is done text.
+    #[test]
+    fn leaving_a_table_and_ticked_items() {
+        let h = editor("");
+        rich::load_markdown(h, "T\n| a | b |\n| --- | --- |\n| 1 | |\nafter");
+        // The empty last cell: out, to the line below.
+        let t = rich::text(h);
+        let rows = rich::rows(&t);
+        let (_, last) = *rich::cells(&t, *rows.last().unwrap()).last().unwrap();
+        rich::set_sel(h, last as i32, last as i32);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "T/[/a|b|]/[/1||]/^after");
+        // Any other cell: a line in it.
+        caret(h, "1|");
+        assert_eq!(block_enter(h), None);
+        // The last cell with text: Enter makes a line in it, Enter again on that empty
+        // line goes out and takes the line away.
+        rich::set_sel(h, last as i32, last as i32);
+        rich::replace_sel(h, "2");
+        assert_eq!(block_enter(h), None);
+        rich::replace_sel(h, "\r");
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "T/[/a|b|]/[/1|2|]/^after");
+        assert_eq!(rich::to_markdown(h, true), "# T\n| a | b |\n| --- | --- |\n| 1 | 2 |\nafter");
+        // A table at the very end: out to the line after it.
+        let h = editor("");
+        rich::load_markdown(h, "T\n| a |\n| --- |\n| |");
+        let t = rich::text(h);
+        let (_, last) = *rich::cells(&t, *rich::rows(&t).last().unwrap()).last().unwrap();
+        rich::set_sel(h, last as i32, last as i32);
+        assert_eq!(block_enter(h), Some(true));
+        assert!(plain(h).ends_with("]/^"), "{}", plain(h));
+        // "[x] " typed.
+        let h = editor("T\r[x]");
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        assert!(try_auto_list(null_mut(), h));
+        rich::replace_sel(h, "done");
+        assert_eq!(plain(h), "T/\u{2611} done^");
+        assert_eq!(rich::to_markdown(h, true), "# T\n- [x] done");
+        rich::set_sel(h, end + 1, end + 3);
+        assert_ne!(rich::char_format(h, rich::SCF_SELECTION).effects & CFM_STRIKEOUT, 0, "done text is struck");
     }
 
     /// Ticking a box up the note while the caret is far below keeps the view where it is.
