@@ -93,6 +93,9 @@ pub fn chrome(dark: bool) -> Material {
     }
 }
 
+/// The keyboard focus ring's blue, as All Notes and menus draw it.
+pub const FOCUS: u32 = 0x0A84FF;
+
 /// Type faces (Windows' optically sized system font).
 pub const FACE_DISPLAY: &str = "Segoe UI Variable Display";
 /// RichEdit doesn't resolve variable-font weights, so it gets the named instance.

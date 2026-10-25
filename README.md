@@ -17,7 +17,7 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
 ## Always one move away
 
 - **The deck.** A pill of colour capsules on the screen edge that fans out into tabs as you point at it. Peek at any note without opening it.
-- **Hotkeys from anywhere.** Ctrl+Alt+N writes a new note; Ctrl+Alt+A finds an old one.
+- **Hotkeys from anywhere.** Ctrl+Alt+N writes a new note; Ctrl+Alt+A finds an old one; Ctrl+Alt+K hands the deck to your keyboard, so the arrows walk the cards and Enter opens one.
 - **Pin what matters.** A pinned note stays open and on top; everything else tucks itself away when you're done with it.
 - **Exactly where you left it.** Each note reopens in the same spot, scrolled to the same line, caret where you stopped.
 

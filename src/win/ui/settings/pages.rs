@@ -67,6 +67,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                     keys(t!("shortcut_reopen"), &["ctrl", "alt", "O"]),
                     keys(t!("shortcut_toggle_deck"), &["ctrl", "alt", "H"]),
                     keys(t!("shortcut_move_deck"), &["ctrl", "alt", "E"]),
+                    keys(t!("shortcut_deck_keys"), &["ctrl", "alt", "K"]),
                 ],
                 footer: None,
             },
@@ -102,6 +103,17 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                     keys(t!("menu_delete"), &["del", "/", "ctrl", "shift", "del"]),
                     keys(t!("shortcut_undo_toast"), &["ctrl", "Z"]),
                     keys(t!("shortcut_leave_text"), &["ctrl", "tab"]),
+                ],
+                footer: None,
+            },
+            // Once Ctrl+Alt+K has given the deck the keys.
+            Group {
+                header: Some(t!("settings_page_deck")),
+                rows: vec![
+                    keys(t!("shortcut_deck_move"), &["\u{2191}", "/", "\u{2193}"]),
+                    keys(t!("menu_open"), &["enter"]),
+                    keys(t!("shortcut_deck_menu"), &["shift", "F10"]),
+                    keys(t!("shortcut_deck_leave"), &["esc"]),
                 ],
                 footer: None,
             },

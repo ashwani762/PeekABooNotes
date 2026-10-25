@@ -244,6 +244,10 @@
     <string name="shortcut_table">表</string>
     <string name="shortcut_leave_text">メモの本文から移動</string>
     <string name="shortcut_undo_toast">アーカイブや削除を取り消す</string>
+    <string name="shortcut_deck_keys">デッキに移動</string>
+    <string name="shortcut_deck_move">カード間を移動</string>
+    <string name="shortcut_deck_menu">カードのメニュー</string>
+    <string name="shortcut_deck_leave">前のウィンドウに戻る</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">メモのフォルダ</string>

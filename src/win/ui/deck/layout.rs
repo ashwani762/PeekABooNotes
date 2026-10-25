@@ -48,6 +48,7 @@ pub(super) fn sync(d: &mut Deck) {
     });
     let open: Vec<u64> = app::ui(|u| u.notes.keys().copied().collect());
     let in_deck = rows.iter().filter(|r| !open.contains(&r.0)).count();
+    let before = stops(d);
     let mut g = compute_geo(in_deck);
     let mut old: HashMap<u64, Tab> = d.tabs.drain(..).map(|t| (t.id, t)).collect();
     let mut slot = 0usize;
@@ -98,6 +99,19 @@ pub(super) fn sync(d: &mut Deck) {
     g.ch = (g.pill_h() + 36.0 * g.s).round() as i32;
     g.cy = (g.centre - g.ch / 2).clamp(g.work.top, (g.work.bottom - g.ch).max(g.work.top));
     d.geo = g;
+    // The deck has the keys: a card that left takes the ring with it to its neighbour,
+    // and places may have moved under the one that stayed.
+    if let Some(at) = d.kbd.as_ref().map(|k| k.at) {
+        let to = super::keys::refocus(&before, &stops(d), at);
+        if let Some(k) = d.kbd.as_mut() {
+            k.at = to;
+        }
+        if to == at {
+            d.hover = ring_hit(d).unwrap_or(Hit::None);
+        } else {
+            show_ring(d);
+        }
+    }
     if d.font_scale != g.s {
         d.fonts.clear();
         d.font_scale = g.s;
@@ -144,10 +158,13 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         d.previewing = false;
     }
     let reopening = open && d.tabs.iter().any(|t| t.reveal.value > 0.05);
+    // With Reduce Motion the springs land at once, and so does the whole cascade: no card
+    // waits its turn.
+    let together = instant || reopening || anim::reduced();
     for t in d.tabs.iter_mut() {
         let i = t.slot;
         t.reveal_goal = if open && !t.open { 1.0 } else { 0.0 };
-        t.delay = if instant || reopening {
+        t.delay = if together {
             0.0
         } else if open {
             i as f32 * motion::STAGGER_S
@@ -164,7 +181,7 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         }
     }
     d.extras_goal = if open { 1.0 } else { 0.0 };
-    d.extras_delay = if open && !instant && !reopening { n as f32 * motion::STAGGER_S } else { 0.0 };
+    d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S } else { 0.0 };
     d.pill.to(if open { 0.0 } else { 1.0 });
     if instant {
         d.extras.snap(d.extras_goal);

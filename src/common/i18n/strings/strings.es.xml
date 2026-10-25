@@ -256,6 +256,10 @@
     <string name="shortcut_table">Tabla</string>
     <string name="shortcut_leave_text">Salir del texto de la nota</string>
     <string name="shortcut_undo_toast">Deshacer un archivado o una eliminación</string>
+    <string name="shortcut_deck_keys">Ir al mazo</string>
+    <string name="shortcut_deck_move">Moverse entre tarjetas</string>
+    <string name="shortcut_deck_menu">Menú de la tarjeta</string>
+    <string name="shortcut_deck_leave">Volver a la ventana anterior</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Carpeta de notas</string>

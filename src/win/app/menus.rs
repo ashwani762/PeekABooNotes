@@ -156,17 +156,19 @@ fn capitalized(s: &str) -> String {
 }
 
 /// A note's menu opened from the deck: right-aligned or not, dismissed by `leave`.
-pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Box<dyn Fn(POINT) -> bool>) {
+pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Option<Box<dyn Fn(POINT) -> bool>>) {
     // The deck never takes the keys, so they go back to whatever app had them.
     let prev = unsafe { GetForegroundWindow() };
-    let cmd = menu::show_with(note_menu(id, false), p, align_right, Some(leave));
+    let cmd = menu::show_with(note_menu(id, false), p, align_right, leave);
     give_back(prev, null_mut());
     if cmd != 0 {
         note_command(id, cmd);
     }
 }
 
-pub fn tray_menu() {
+/// The tray icon's menu, also the deck's own: at the pointer, or at `at` (from the
+/// keyboard, beside the deck's button with the focus ring).
+pub fn tray_menu(at: Option<POINT>) {
     use menu::{Item, action, check};
     let hidden = store(|s| s.d.settings.deck_hidden);
     // What the Undo toast would take back, while it can: notes deleted or archived.
@@ -197,7 +199,7 @@ pub fn tray_menu() {
         Item::Separator,
         action(CMD_QUIT, &t!("menu_quit", t!("app_name")), "", IC_POWER),
     ]);
-    let p = cursor();
+    let p = at.unwrap_or_else(cursor);
     let cmd = popup(v, p.x, p.y, null_mut());
     command(cmd);
 }
@@ -210,6 +212,7 @@ pub(super) fn command(cmd: u32) {
         CMD_REOPEN => reopen_last(),
         CMD_TOGGLE_DECK => update_settings(|s| s.deck_hidden = !s.deck_hidden),
         CMD_SWAP_EDGE => update_settings(|s| s.edge_left = !s.edge_left),
+        CMD_DECK_KEYS => deck::take_keys(),
         CMD_UNDO => undo_delete(),
         CMD_QUIT => quit(),
         CMD_SETTINGS => settings::show(),

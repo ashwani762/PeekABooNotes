@@ -23,7 +23,10 @@ use windows_sys::Win32::Graphics::Gdi::{
     FW_NORMAL, FW_SEMIBOLD, GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
 };
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_APPS, VK_CONTROL, VK_DOWN, VK_END, VK_ESCAPE, VK_F10, VK_HOME, VK_MENU,
+    VK_RETURN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+};
 use windows_sys::Win32::UI::Shell::{ABM_NEW, ABM_REMOVE, ABN_FULLSCREENAPP, APPBARDATA, SHAppBarMessage};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -33,12 +36,14 @@ use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::common::store::{body_of, title_of};
 use crate::win::ui::without_objects;
 use crate::win::theme::{self, motion};
-use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
+use crate::win::util::{WM_MOUSELEAVE, key_down, rect, wide, x_of, y_of};
 
 mod layout;
 mod draw;
+mod keys;
 use layout::*;
 use draw::*;
+use keys::{Move, Stop};
 
 const CLASS: &str = "PeekABooDeck";
 const T_PREVIEW: usize = 2;
@@ -205,6 +210,15 @@ struct Deck {
     marquee: Option<(u64, std::time::Instant)>,
     /// A label scrolled in the last frame, so the frame clock keeps running.
     marquee_live: bool,
+    /// The deck has the keys (Ctrl+Alt+K) until Esc, or until they go elsewhere.
+    kbd: Option<Kbd>,
+}
+
+struct Kbd {
+    /// What wears the focus ring.
+    at: Option<Stop>,
+    /// The window that had the keys before the deck took them, to give them back to.
+    prev: HWND,
 }
 
 thread_local! {
@@ -274,6 +288,7 @@ pub fn create() {
             canvas: None,
             marquee: None,
             marquee_live: false,
+            kbd: None,
         })
     });
     // As an app bar (without reserving space) we get ABN_FULLSCREENAPP for free.
@@ -328,6 +343,8 @@ fn update_visibility(d: &mut Deck) {
     if show != d.visible {
         d.visible = show;
         if !show {
+            // Hiding the window hands its keys to whatever Windows picks next.
+            drop_keys(d);
             unsafe { ShowWindow(d.hwnd, SW_HIDE) };
         }
         set_open(d, false, true);
@@ -474,9 +491,203 @@ enum Action {
     Open(u64),
     New,
     More,
-    TabMenu(u64),
-    DeckMenu,
+    /// A card's menu; from the keyboard, beside the card at this screen height rather
+    /// than at the pointer.
+    TabMenu(u64, Option<POINT>),
+    /// The deck's own menu; from the keyboard, beside the button the ring is on.
+    DeckMenu(Option<POINT>),
     Reorder(Vec<u64>),
+    /// Esc: the keys go back to the window that had them.
+    GiveBack,
+}
+
+/// Everything the focus ring can reach, top to bottom: the cards in the deck (not those
+/// out as open notes, which have no spine), the "+N" tile, the plus button.
+fn stops(d: &Deck) -> Vec<Stop> {
+    let mut v: Vec<Stop> = d.tabs.iter().filter(|t| !t.open).map(|t| Stop::Card(t.id)).collect();
+    if d.geo.more > 0 {
+        v.push(Stop::More);
+    }
+    v.push(Stop::Plus);
+    v
+}
+
+/// What the focus ring is on, as the pointer would hit it.
+fn ring_hit(d: &Deck) -> Option<Hit> {
+    Some(match d.kbd.as_ref()?.at? {
+        Stop::Card(id) => Hit::Tab(d.tabs.iter().position(|t| t.id == id && !t.open)?),
+        Stop::More => Hit::More,
+        Stop::Plus => Hit::Plus,
+    })
+}
+
+/// The ring moved: what it's on lights up as it does under the pointer, and a card comes
+/// out to be read after the same rest (at once while another is out, as when the pointer
+/// scrubs along the deck).
+fn show_ring(d: &mut Deck) {
+    let hit = ring_hit(d).unwrap_or(Hit::None);
+    d.hover = hit;
+    unsafe { KillTimer(d.hwnd, T_PREVIEW) };
+    match hit {
+        Hit::Tab(i) if d.previewing => begin_preview(d, i),
+        Hit::Tab(_) => unsafe {
+            SetTimer(d.hwnd, T_PREVIEW, motion::PREVIEW_DWELL_MS, None);
+        },
+        _ if d.previewing => end_preview(d),
+        _ => {}
+    }
+    tip(d, hit, true);
+    anim::wake(Client::Deck);
+}
+
+/// Ctrl+Alt+K: the deck takes the keys, fanned out with the focus ring on its top card.
+/// Pressed again while the deck has them, it gives them back. A hidden deck (by the user,
+/// or for a full-screen app) has nothing to show, so the keys stay where they are.
+pub fn take_keys() {
+    let Some((hwnd, has, visible)) = with(|d| (d.hwnd, d.kbd.is_some(), d.visible)) else { return };
+    if has {
+        give_keys_back(hwnd);
+        return;
+    }
+    if !visible {
+        return;
+    }
+    let prev = unsafe { GetForegroundWindow() };
+    with(|d| {
+        unsafe { KillTimer(hwnd, T_COLLAPSE) };
+        set_open(d, true, false);
+        d.kbd = Some(Kbd { at: stops(d).first().copied(), prev });
+        show_ring(d);
+        render(d);
+    });
+    // Outside the deck's borrow: its activation comes straight back to it. The deck never
+    // activates on a click, but a hotkey lets it take the foreground; should Windows
+    // refuse anyway, there's no ring without the keys.
+    if unsafe { SetForegroundWindow(hwnd) } == 0 {
+        with(drop_keys);
+    }
+}
+
+/// The deck lets the keys go: the ring goes, and the deck folds after the usual grace
+/// unless the pointer is on it. Returns the window that had the keys before.
+fn drop_keys(d: &mut Deck) -> Option<HWND> {
+    let k = d.kbd.take()?;
+    d.hover = Hit::None;
+    unsafe {
+        KillTimer(d.hwnd, T_PREVIEW);
+        SetTimer(d.hwnd, T_COLLAPSE, motion::COLLAPSE_GRACE_MS, None);
+    }
+    if d.previewing {
+        end_preview(d);
+    }
+    crate::win::ui::tooltip::leave(d.hwnd);
+    render(d);
+    anim::wake(Client::Deck);
+    Some(k.prev)
+}
+
+/// Esc (or Ctrl+Alt+K again): the keys go back to the window that had them, or to the
+/// desktop if it has gone since.
+fn give_keys_back(hwnd: HWND) {
+    let Some(prev) = with(drop_keys).flatten() else { return };
+    unsafe {
+        let back = if !prev.is_null() && prev != hwnd && IsWindow(prev) != 0 && IsWindowVisible(prev) != 0 { prev } else { GetShellWindow() };
+        if !back.is_null() {
+            SetForegroundWindow(back);
+        }
+    }
+}
+
+/// A key while the deck has the keys: the arrows, Home and End, Tab and Shift+Tab move
+/// the ring, Enter or Space presses what it's on, Shift+F10 or the Menu key opens its
+/// menu, Esc hands the keys back. None: not one of ours (Alt+F4 and the like go on to
+/// Windows).
+fn on_key(d: &mut Deck, vk: u16) -> Option<Action> {
+    let at = d.kbd.as_ref()?.at;
+    let (shift, ctrl, alt) = (key_down(VK_SHIFT), key_down(VK_CONTROL), key_down(VK_MENU));
+    if vk == VK_APPS || (shift && !ctrl && vk == VK_F10) {
+        let hit = ring_hit(d).unwrap_or(Hit::None);
+        return Some(menu_for(d, hit, true));
+    }
+    if ctrl || alt {
+        return None;
+    }
+    let key = match vk {
+        VK_UP => Move::Up,
+        VK_DOWN => Move::Down,
+        VK_HOME => Move::Home,
+        VK_END => Move::End,
+        VK_TAB if shift => Move::Prev,
+        VK_TAB => Move::Next,
+        VK_RETURN | VK_SPACE => {
+            return Some(match ring_hit(d) {
+                Some(Hit::Tab(i)) => Action::Open(d.tabs[i].id),
+                Some(Hit::More) => Action::More,
+                Some(Hit::Plus) => Action::New,
+                _ => Action::None,
+            });
+        }
+        VK_ESCAPE => return Some(Action::GiveBack),
+        _ => return None,
+    };
+    let to = keys::step(&stops(d), at, key);
+    ring_to(d, to);
+    Some(Action::None)
+}
+
+/// A typed letter: the ring goes to the next card whose title starts with it.
+fn on_char(d: &mut Deck, ch: char) {
+    let Some(at) = d.kbd.as_ref().map(|k| k.at) else { return };
+    let to = {
+        let cards: Vec<(Stop, &str)> = d.tabs.iter().filter(|t| !t.open).map(|t| (Stop::Card(t.id), t.title.as_str())).collect();
+        keys::by_letter(&cards, at, ch)
+    };
+    if to.is_some() {
+        ring_to(d, to);
+    }
+}
+
+fn ring_to(d: &mut Deck, to: Option<Stop>) {
+    let Some(k) = d.kbd.as_mut() else { return };
+    if k.at != to {
+        k.at = to;
+        show_ring(d);
+        render(d);
+    }
+}
+
+/// A menu for what the pointer (or, `by_key`, the focus ring) is on: a card's own, or
+/// the deck's. The menu takes the stage: any pulled-out card tucks away at once, but the
+/// deck stays open and the card the menu is for comes (or stays) out, so it's clear what
+/// the menu acts on.
+fn menu_for(d: &mut Deck, hit: Hit, by_key: bool) -> Action {
+    crate::win::ui::tooltip::mute();
+    unsafe {
+        KillTimer(d.hwnd, T_PREVIEW);
+        KillTimer(d.hwnd, T_COLLAPSE);
+    }
+    if let Hit::Tab(i) = hit {
+        begin_preview(d, i);
+    } else {
+        for t in d.tabs.iter_mut() {
+            t.pull.snap(0.0);
+        }
+        d.previewing = false;
+    }
+    d.menu = true;
+    d.hover = if let Hit::Tab(_) = hit { hit } else { Hit::None };
+    anim::wake(Client::Deck);
+    render(d);
+    // From the keyboard there's no pointer to open at: beside the card near its top, or
+    // beside the button the ring is on.
+    let g = d.geo;
+    match hit {
+        Hit::Tab(i) => Action::TabMenu(d.tabs[i].id, by_key.then(|| POINT { x: 0, y: g.ey + (d.tabs[i].y.value + 14.0 * g.s) as i32 })),
+        _ => {
+            let beside = footer_rect(d, hit).map(|r| POINT { x: g.ex + if g.left { r.right } else { r.left }, y: g.ey + (r.top + r.bottom) / 2 });
+            Action::DeckMenu(if by_key { beside } else { None })
+        }
+    }
 }
 
 fn begin_preview(d: &mut Deck, i: usize) {
@@ -522,7 +733,7 @@ fn leave_menu(hwnd: HWND, id: u64, pt: POINT) -> bool {
 }
 
 /// The plus button and the "+N" tile say what they do; anything else lets the tooltip go.
-fn tip(d: &Deck, hit: Hit) {
+fn tip(d: &Deck, hit: Hit, by_key: bool) {
     use crate::common::i18n::keys;
     use crate::win::ui::tooltip;
     let (label, k) = match hit {
@@ -535,6 +746,7 @@ fn tip(d: &Deck, hit: Hit) {
         }
     };
     match footer_rect(d, hit) {
+        Some(r) if by_key => tooltip::focus(d.hwnd, r, &label, &k),
         Some(r) => tooltip::hover(d.hwnd, r, &label, &k),
         None => tooltip::leave(d.hwnd),
     }
@@ -542,13 +754,22 @@ fn tip(d: &Deck, hit: Hit) {
 
 /// The context menu is gone. If it closed in place (a choice, Esc, a click elsewhere),
 /// tuck the card back and let the real pointer position decide: still over the deck,
-/// stay open; elsewhere, fold after the usual grace.
+/// stay open; elsewhere, fold after the usual grace. While the deck has the keys, the
+/// menu hands them back to it and the ring carries on from its card, unless what was
+/// chosen took them elsewhere (a note opening).
 fn menu_closed(hwnd: HWND) {
+    let front = unsafe { GetForegroundWindow() };
     let frozen = with(|d| {
         let was = d.menu;
         if was {
             d.menu = false;
             d.hover = Hit::None;
+            if d.kbd.is_some() && front == hwnd {
+                show_ring(d);
+                render(d);
+                return false;
+            }
+            drop_keys(d);
             end_preview(d);
         }
         was
@@ -638,14 +859,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 anim::wake(Client::Deck);
             }
             // On every move: the buttons slide as a pulled-out card tucks back.
-            tip(d, hit);
+            tip(d, hit, false);
             Action::None
         }),
         WM_MOUSELEAVE => with(|d| {
             d.tracking = false;
             crate::win::ui::tooltip::leave(hwnd);
             // The pointer "leaves" for our own context menu: hold still until it closes.
-            if d.drag.is_none() && !d.menu {
+            // While the deck has the keys it stays open, lit where the ring is.
+            if d.kbd.is_some() && !d.menu {
+                show_ring(d);
+            } else if d.drag.is_none() && !d.menu {
                 d.hover = Hit::None;
                 unsafe {
                     KillTimer(hwnd, T_PREVIEW);
@@ -717,32 +941,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
         }),
         WM_RBUTTONUP => with(|d| {
-            // The menu takes the stage: tuck any pulled-out card away at once, but keep
-            // the deck open and the clicked card lit, so it's clear what the menu acts on.
-            crate::win::ui::tooltip::mute();
-            unsafe {
-                KillTimer(hwnd, T_PREVIEW);
-                KillTimer(hwnd, T_COLLAPSE);
-            }
             let hit = hit_test(d, x, y);
-            if let Hit::Tab(i) = hit {
-                // The card comes (or stays) out, so you can see the note you're acting on.
-                begin_preview(d, i);
-            } else {
-                for t in d.tabs.iter_mut() {
-                    t.pull.snap(0.0);
-                }
-                d.previewing = false;
-            }
-            d.menu = true;
-            d.hover = if let Hit::Tab(_) = hit { hit } else { Hit::None };
-            anim::wake(Client::Deck);
-            render(d);
-            match hit {
-                Hit::Tab(i) => Action::TabMenu(d.tabs[i].id),
-                _ => Action::DeckMenu,
-            }
+            menu_for(d, hit, false)
         }),
+        WM_KEYDOWN | WM_SYSKEYDOWN => with(|d| on_key(d, wp as u16)).flatten(),
+        WM_CHAR => with(|d| {
+            let ch = char::from_u32(wp as u32).filter(|c| !c.is_control())?;
+            on_char(d, ch);
+            Some(Action::None)
+        })
+        .flatten(),
+        WM_ACTIVATE => {
+            // The keys went elsewhere: a click in another window, a note opening. Not for
+            // the card's own menu, which hands them back when it closes.
+            if (wp & 0xFFFF) as u32 == WA_INACTIVE {
+                with(|d| {
+                    if !d.menu {
+                        drop_keys(d);
+                    }
+                });
+            }
+            None
+        }
+        // Alt+F4 while the deck has the keys is Esc: the deck itself never closes. Nor is
+        // there a menu bar for F10 or Alt to go to.
+        WM_CLOSE if with(|d| d.kbd.is_some()) == Some(true) => Some(Action::GiveBack),
+        WM_SYSCOMMAND if (wp & 0xFFF0) as u32 == SC_KEYMENU => Some(Action::None),
         WM_CAPTURECHANGED => with(|d| {
             if let Some(dr) = d.drag.take()
                 && dr.active {
@@ -766,6 +990,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         }
                     }
                 }
+                // The deck has the keys: it stays open until it gives them back.
+                T_COLLAPSE if d.kbd.is_some() => {}
                 T_COLLAPSE => {
                     let mut pt = POINT { x: 0, y: 0 };
                     let mut r: RECT = unsafe { std::mem::zeroed() };
@@ -812,23 +1038,31 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         Some(Action::Open(id)) => app::toggle_note(id),
         Some(Action::New) => app::new_note(),
         Some(Action::More) => app::show_all_notes(false),
-        Some(Action::TabMenu(id)) => {
-            // Beside the pulled-out card, never over it, at the height you clicked.
-            let mut p = POINT { x: 0, y: 0 };
-            unsafe { GetCursorPos(&mut p) };
+        Some(Action::TabMenu(id, at)) => {
+            // Beside the pulled-out card, never over it, at the height you clicked (from
+            // the keyboard, near the card's top).
+            let mut p = at.unwrap_or_else(|| {
+                let mut p = POINT { x: 0, y: 0 };
+                unsafe { GetCursorPos(&mut p) };
+                p
+            });
             let left = with(|d| {
                 let reach = ((CARD_W + PULL_GAP + 10.0) * d.geo.s) as i32;
                 p.x = if d.geo.left { d.geo.work.left + reach } else { d.geo.work.right - reach };
                 d.geo.left
             })
             .unwrap_or(false);
-            app::note_menu_beside(id, p, !left, Box::new(move |pt| leave_menu(hwnd, id, pt)));
+            // Opened from the keyboard, the menu stays put wherever the pointer happens to
+            // rest: it wasn't the pointer that brought it.
+            let leave: Option<Box<dyn Fn(POINT) -> bool>> = if at.is_some() { None } else { Some(Box::new(move |pt| leave_menu(hwnd, id, pt))) };
+            app::note_menu_beside(id, p, !left, leave);
             menu_closed(hwnd);
         }
-        Some(Action::DeckMenu) => {
-            app::tray_menu();
+        Some(Action::DeckMenu(at)) => {
+            app::tray_menu(at);
             menu_closed(hwnd);
         }
+        Some(Action::GiveBack) => give_keys_back(hwnd),
         Some(Action::Reorder(ids)) => {
             app::store_mut(|s| s.reorder(&ids));
             app::save();

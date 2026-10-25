@@ -120,6 +120,7 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 | Ctrl+Alt+O | Reopen last note |
 | Ctrl+Alt+H | Show or hide the deck |
 | Ctrl+Alt+E | Move the deck to the other edge |
+| Ctrl+Alt+K | Give the deck the keys (again, or Esc, to give them back) |
 
 **In a note**
 
@@ -145,6 +146,8 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 | Ctrl+[ / Ctrl+] | Previous / next note |
 
 **In All Notes:** Ctrl+F searches; Ctrl+Shift+A archives or restores and Ctrl+Shift+Del deletes the selected notes (plain Del too, when the list has the keys); while the Undo toast shows, Ctrl+Z (outside the note being edited) takes the archive or delete back, as does the tray menu's Undo; Ctrl+Tab leaves the note being edited. Tab and Shift+Tab move through All Notes and Settings with a focus ring; Space or Enter presses, the arrow keys move along segments and swatches. In menus, the arrow keys reach every row, colour and format button; Right or Enter opens a submenu (a row with a chevron, such as Previous Versions) and Left or Esc goes back out of it. Paste is always plain text, so notes keep a consistent look.
+
+**In the deck** (once Ctrl+Alt+K has given it the keys): Up and Down move a focus ring along the cards and on to the "+N" tile and the plus button, stopping at the ends; Home and End go to the ends, Tab and Shift+Tab come round; a letter jumps to the next card whose title starts with it. Enter or Space opens what the ring is on, Shift+F10 or the Menu key opens its menu (beside the card, and the keys come back to the deck when it closes), and Esc or Ctrl+Alt+K again hands the keys back to the window that had them (the desktop, if it has gone). The deck never activates on a click (`WS_EX_NOACTIVATE`): only the hotkey brings it to the foreground, and it lets the keys go the moment they go elsewhere (a click in another app, a note opening), folding as it does when the pointer leaves. While it has them it stays open, with no timer running; the ring lights its card as the pointer would and pulls it out after the same rest. Where focus goes (`deck/keys.rs`) is pure logic with its own tests. Ctrl+Alt+D would have been the obvious key, but it is Magnifier's docked view. With Reduce Motion (or Windows' animation effects off) the deck fans out and folds in one step, with no cascade.
 
 ## Languages
 

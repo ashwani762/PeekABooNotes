@@ -256,6 +256,10 @@
     <string name="shortcut_table">Tabelle</string>
     <string name="shortcut_leave_text">Notiztext verlassen</string>
     <string name="shortcut_undo_toast">Archivieren oder Löschen widerrufen</string>
+    <string name="shortcut_deck_keys">Zum Stapel wechseln</string>
+    <string name="shortcut_deck_move">Zwischen Karten wechseln</string>
+    <string name="shortcut_deck_menu">Kartenmenü</string>
+    <string name="shortcut_deck_leave">Zurück zum vorigen Fenster</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notizordner</string>

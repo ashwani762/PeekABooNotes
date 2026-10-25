@@ -256,6 +256,10 @@
     <string name="shortcut_table">Tableau</string>
     <string name="shortcut_leave_text">Quitter le texte de la note</string>
     <string name="shortcut_undo_toast">Annuler un archivage ou une suppression</string>
+    <string name="shortcut_deck_keys">Aller à la pile</string>
+    <string name="shortcut_deck_move">Passer d’une carte à l’autre</string>
+    <string name="shortcut_deck_menu">Menu de la carte</string>
+    <string name="shortcut_deck_leave">Revenir à la fenêtre précédente</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Dossier des notes</string>

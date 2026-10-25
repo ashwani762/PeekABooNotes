@@ -266,6 +266,10 @@
     <string name="shortcut_table">Table</string>
     <string name="shortcut_leave_text">Leave the note's text</string>
     <string name="shortcut_undo_toast">Undo an archive or delete</string>
+    <string name="shortcut_deck_keys">Go to the deck</string>
+    <string name="shortcut_deck_move">Move between cards</string>
+    <string name="shortcut_deck_menu">Card menu</string>
+    <string name="shortcut_deck_leave">Back to the previous window</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notes folder</string>
