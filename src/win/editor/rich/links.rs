@@ -345,6 +345,10 @@ pub fn link_addresses(h: HWND, a: usize, b: usize) {
 pub fn link_word_before(h: HWND) {
     let t = text(h);
     let (j, _) = sel(h);
+    // In code an address is code.
+    if matches!(cell_at(h, &t, j), Some((Block::Code, ..))) {
+        return;
+    }
     let mut j = (j.max(0) as usize).min(t.len());
     let blank = |c: u16| matches!(c, 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
     while j > 0 && blank(t[j - 1]) {

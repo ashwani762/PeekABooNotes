@@ -18,6 +18,8 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
         NC_ITALIC => fmt(&|| rich::toggle_effect(e, CFM_ITALIC)),
         NC_UNDERLINE => fmt(&|| rich::toggle_effect(e, CFM_UNDERLINE)),
         NC_STRIKE => fmt(&|| rich::toggle_effect(e, CFM_STRIKEOUT)),
+        // Not in code or a table (see `lists_refused`).
+        NC_BULLETS | NC_NUMBERS | NC_TASK if lists_refused(e, &rich::text(e), rich::sel(e).0) => {}
         NC_BULLETS => fmt(&|| rich::toggle_numbering(e, PFN_BULLET)),
         NC_NUMBERS => fmt(&|| rich::toggle_numbering(e, PFN_ARABIC)),
         NC_TASK => fmt(&|| rich::still(e, || toggle_task_lines(e))),

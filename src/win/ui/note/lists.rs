@@ -98,6 +98,11 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
     if a - ps > 3 {
         return false;
     }
+    // In code a "- " is just code, and a table's cells hold plain lines (their lists
+    // wouldn't survive export): only quotes take lists.
+    if lists_refused(e, &t, a) {
+        return false;
+    }
     let prefix = String::from_utf16_lossy(&t[ps as usize..a as usize]);
     if prefix == ">" && ps > 0 && rich::cell_at(e, &t, a).is_none() {
         // On a list item the quote takes the item's place, under the item above it, as
@@ -239,18 +244,40 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
     let (a, b) = rich::sel(e);
     let t = rich::text(e);
     match rich::cell_at(e, &t, a) {
-        Some((rich::Block::Code, ..)) => {
-            let ps = rich::para_start(&t, a);
-            if shift {
-                let n = t[ps as usize..].iter().take(4).take_while(|&&c| c == b' ' as u16).count() as i32;
-                if n > 0 {
-                    rich::set_sel(e, ps, ps + n);
-                    rich::replace_sel(e, "");
-                    rich::set_sel(e, (a - n).max(ps), (b - n).max(ps));
-                }
-            } else {
+        Some((rich::Block::Code, _, ca, cb)) => {
+            if a == b && !shift {
                 rich::replace_sel(e, "    ");
+                return true;
             }
+            // Each line the selection touches (within the block), last first so the
+            // positions of those before don't move.
+            let mut starts = vec![rich::para_start(&t, a)];
+            for i in a.max(ca as i32)..b.min(cb as i32) {
+                if t[i as usize] == rich::CR {
+                    starts.push(i + 1);
+                }
+            }
+            let (mut na, mut nb) = (a, b);
+            rich::still(e, || {
+                for &ps in starts.iter().rev() {
+                    let n = if shift { t[ps as usize..].iter().take(4).take_while(|&&c| c == b' ' as u16).count() as i32 } else { -4 };
+                    if n == 0 {
+                        continue;
+                    }
+                    if n > 0 {
+                        rich::set_sel(e, ps, ps + n);
+                        rich::replace_sel(e, "");
+                    } else {
+                        rich::set_sel(e, ps, ps);
+                        rich::replace_sel(e, "    ");
+                    }
+                    // What was after this line's start moves with it.
+                    let moved = |p: i32| if p > ps { (p - n).max(ps) } else { p };
+                    na = moved(na);
+                    nb = moved(nb);
+                }
+                rich::set_sel(e, na, nb);
+            });
             true
         }
         Some((rich::Block::Quote, rows, ..)) => {
@@ -348,6 +375,11 @@ pub(super) fn checkbox_at(e: HWND, x: i32, y: i32) -> Option<i32> {
     [ps, cp, cp - 1]
         .into_iter()
         .find(|&c| c >= 0 && t.get(c as usize).copied().is_some_and(is_task) && (c == 0 || t[c as usize - 1] == rich::CR) && crate::win::editor::checks::hits(e, c, x, y))
+}
+
+/// Whether position `cp` is in a code block or a table, where lists aren't made.
+pub(super) fn lists_refused(e: HWND, t: &[u16], cp: i32) -> bool {
+    matches!(rich::cell_at(e, t, cp), Some((rich::Block::Code | rich::Block::Table, ..)))
 }
 
 /// The caret never rests in front of a checkbox or between it and its text (typed there,
@@ -719,6 +751,29 @@ mod tests {
         rich::set_sel(h, end_one, end_one);
         assert!(delete_into_item(h));
         assert_eq!(plain(h), "T/\u{2610} one^two");
+    }
+
+    /// In code: Tab and Shift+Tab move every selected line, a "- " stays code, and so
+    /// does an address.
+    #[test]
+    fn code_keeps_code() {
+        let h = editor("");
+        rich::load_markdown(h, "T\n```\none\n  two\nthree\n```");
+        let t = rich::text(h);
+        let one = t.windows(3).position(|w| w == [b'o' as u16, b'n' as u16, b'e' as u16]).unwrap() as i32;
+        let three = t.windows(5).position(|w| *w == "three".encode_utf16().collect::<Vec<_>>()[..]).unwrap() as i32;
+        rich::set_sel(h, one, three + 2);
+        assert!(block_tab(h, false));
+        assert_eq!(rich::to_markdown(h, false), "T\n```\n    one\n      two\n    three\n```");
+        // (Reading the note out moves the selection: select the lines again.)
+        rich::set_sel(h, one, three + 10);
+        assert!(block_tab(h, true));
+        assert!(block_tab(h, true));
+        assert_eq!(rich::to_markdown(h, false), "T\n```\none\ntwo\nthree\n```");
+        // "- " at a line's start in code stays as typed.
+        rich::set_sel(h, one, one);
+        rich::replace_sel(h, "-");
+        assert!(!try_auto_list(null_mut(), h));
     }
 
     #[test]
