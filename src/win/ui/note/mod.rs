@@ -982,9 +982,8 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         unselect(h);
                     }
                     st.loading = was;
-                    if rich::text(st.edit).iter().any(|&c| is_task(c)) {
-                        InvalidateRect(st.edit, std::ptr::null(), 0);
-                    }
+                    // No repaint of the whole text here: what changed repaints itself, and a
+                    // full repaint after every burst of typing showed the checkboxes blink out.
                 }
                 return 0;
             }

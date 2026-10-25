@@ -7,7 +7,9 @@
 //! RichEdit draws itself, outside WM_PAINT too, so the fade goes on afterwards, over its
 //! pixels. Fading twice would fade more, so the band is always drawn fresh by RichEdit
 //! first; and when the view has scrolled since, RichEdit's own scroll has moved faded
-//! rows down into the text, so then the whole editor is drawn fresh.
+//! rows down into the text, so then the whole editor is drawn fresh. When neither
+//! happened (typing further down) the band is left as it is: redrawing it on every key
+//! showed it unfaded for a moment, a flicker at the top of the note.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -33,14 +35,15 @@ thread_local! {
 }
 
 /// After RichEdit has drawn editor `e` (on `paper`, at scale `s`): fade its top edge.
-pub fn paint(e: HWND, paper: u32, s: f32) {
+/// `touched`: what it drew may have reached the band.
+pub fn paint(e: HWND, paper: u32, s: f32, touched: bool) {
     if FRESH.get() {
         draw(e, paper, s);
         return;
     }
     let y = rich::scroll_y(e);
     let moved = SEEN.with(|m| m.borrow_mut().insert(e as isize, y)) != Some(y);
-    if y <= 0 && !moved {
+    if (y <= 0 && !moved) || (!moved && !touched) {
         return;
     }
     let mut rc: RECT = unsafe { std::mem::zeroed() };
@@ -57,6 +60,12 @@ pub fn forget(e: HWND) {
 
 fn band(s: f32) -> i32 {
     (BAND * s).ceil() as i32
+}
+
+/// Whether drawing between client rows `top` and `bottom` of an editor at scale `s`
+/// reaches the band.
+pub fn reaches(top: i32, s: f32) -> bool {
+    top < band(s)
 }
 
 fn draw(e: HWND, paper: u32, s: f32) {

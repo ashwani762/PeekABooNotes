@@ -312,6 +312,14 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         },
         _ => {}
     }
+    // Whether RichEdit is about to paint over the header's fade band (it has to be faded
+    // again after; otherwise it's left alone).
+    let scale = crate::win::editor::checks::paper(e).map_or(1.0, |(_, s)| s);
+    let paint_top = msg == WM_PAINT && {
+        let mut u: RECT = unsafe { std::mem::zeroed() };
+        let any = unsafe { GetUpdateRect(e, &mut u, 0) } != 0;
+        any && crate::win::editor::fade::reaches(u.top, scale)
+    };
     let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
     // Moved by a key or a click to in front of a checkbox: after it instead.
     let moved = matches!(wp as u16, VK_HOME | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_PRIOR | VK_NEXT | VK_END);
@@ -349,7 +357,10 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         crate::win::editor::checks::paint(e);
         crate::win::editor::emoji::paint(e);
         if let Some((paper, s)) = crate::win::editor::checks::paper(e) {
-            crate::win::editor::fade::paint(e, paper, s);
+            // Typing, selecting and the like draw around the selection: the band only when
+            // that's up there.
+            let touched = paint_top || (msg != WM_PAINT && crate::win::editor::fade::reaches(rich::pos_from_char(e, rich::sel(e).0).y - (24.0 * s) as i32, s));
+            crate::win::editor::fade::paint(e, paper, s, touched);
         }
         super::scrollbar::sync(h);
     }
