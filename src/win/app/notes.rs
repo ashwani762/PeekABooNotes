@@ -13,6 +13,7 @@ pub(super) fn note_hwnd(id: u64) -> Option<HWND> {
 pub fn refresh() {
     deck::refresh();
     allnotes::refresh();
+    settings::notes_changed();
 }
 
 /// Plain text + list markers for an RTF blob, via the hidden worker editor.

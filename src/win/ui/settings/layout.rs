@@ -48,7 +48,7 @@ pub(super) fn header_band(w: &Win) -> f32 {
 
 /// How far the current page can scroll: its height past the window's.
 pub(super) fn max_scroll(w: &Win) -> f32 {
-    let groups = page(w.page);
+    let groups = groups(w);
     let end = place_to(w, &groups).1 + w.scroll.value;
     let (_, ch) = client_size(w.hwnd);
     (end + PAD * w.s - ch as f32).max(0.0)
@@ -144,7 +144,7 @@ pub(super) fn hit_test(w: &Win, x: i32, y: i32) -> Hit {
     if (y as f32) < header_band(w) {
         return Hit::None;
     }
-    let groups = page(w.page);
+    let groups = groups(w);
     for it in place(w, &groups) {
         let Item::Row(p) = it else { continue };
         let Some(k) = p.row.key else { continue };

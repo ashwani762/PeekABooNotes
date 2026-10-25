@@ -51,7 +51,7 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     let rise = (1.0 - a) * 8.0 * s;
     c.begin_batch();
     let (x0, _) = content_x(w);
-    let groups = page(w.page);
+    let groups = groups(w);
     for it in place(w, &groups) {
         match it {
             Item::Header(t, base) => {
