@@ -277,7 +277,8 @@ fn style_boxes_now(h: HWND) {
     // small glyph (a trailing space, or a quote's end mark, doesn't count), and its circle
     // is body-sized. The rest of the reading rhythm goes after the line, where prose has
     // it, so the text sits in its line as prose text does (spacing that adds room above
-    // the text pushed it a few px lower) and lines keep prose's pitch.
+    // the text pushed it a few px lower) and lines keep prose's pitch. At least, not
+    // exactly (rule 4): a line holding a picture grows to it.
     let (single, rhythm) = body_line_h(unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) } as i32);
     indent.line_spacing_rule = 3;
     indent.line_spacing = single;

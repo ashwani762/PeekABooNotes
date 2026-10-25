@@ -501,3 +501,41 @@ fn is_task(c: u16) -> bool {
     c == BOX || c == CHECKED
 }
 
+/// For tests: an RTF picture group shown `w` x `h` twips (a one-pixel PNG, stretched).
+#[cfg(test)]
+pub fn test_picture(w: i32, h: i32) -> String {
+    fn crc(data: &[u8]) -> u32 {
+        let mut c = 0xFFFF_FFFFu32;
+        for &b in data {
+            c ^= b as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+        }
+        !c
+    }
+    fn chunk(out: &mut Vec<u8>, kind: &[u8], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&crc(&body).to_be_bytes());
+    }
+    let mut png = vec![0x89, b'P', b'N', b'G', 13, 10, 26, 10];
+    chunk(&mut png, b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
+    // One stored deflate block: the row's filter byte, then one RGBA pixel.
+    let raw = [0u8, 0x33, 0x66, 0x99, 0xFF];
+    let (mut a, mut b) = (1u32, 0u32);
+    for &x in &raw {
+        a = (a + x as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    let mut z = vec![0x78, 0x01, 0x01, 5, 0, 0xFA, 0xFF];
+    z.extend_from_slice(&raw);
+    z.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    chunk(&mut png, b"IDAT", &z);
+    chunk(&mut png, b"IEND", &[]);
+    let hex: String = png.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{{\\pict\\pngblip\\picw1\\pich1\\picwgoal{w}\\pichgoal{h} {hex}}}")
+}
+

@@ -825,6 +825,37 @@ mod tests {
         set_typography(0, 1);
     }
 
+    /// A checklist line holding something taller than text (a picture, large type) grows
+    /// to hold it, rather than being clipped to a body line.
+    #[test]
+    fn tall_task_lines_grow() {
+        let h = editor();
+        apply_base_format(h, 0x1D1D1F, 0xFFFFFF);
+        load_markdown(h, "T\none\ntwo\n- [ ] pic\n- [ ] after");
+        style_boxes(h);
+        let y = |h: HWND, w: &str| {
+            let t = text(h);
+            let w: Vec<u16> = w.encode_utf16().collect();
+            let i = t.windows(w.len()).position(|v| v == &w[..]).unwrap();
+            pos_from_char(h, i as i32).y
+        };
+        let pitch = y(h, "two") - y(h, "one");
+        assert_eq!(y(h, "after") - y(h, "pic"), pitch, "a body line to start with");
+        // A picture 120 DIP tall after the item's text.
+        let t = text(h);
+        let at = t.windows(3).position(|v| v == [b'p' as u16, b'i' as u16, b'c' as u16]).unwrap() as i32 + 3;
+        set_sel(h, at, at);
+        insert_rtf(h, &format!("{{\\rtf1 {}}}", test_picture(3600, 1800)));
+        style_boxes(h);
+        let tall = y(h, "after") - y(h, "pic");
+        assert!(tall > pitch * 3, "the line is {tall} px, a body line {pitch}");
+        // And so it stays once stored and opened again.
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        apply_base_format(h2, 0x1D1D1F, 0xFFFFFF);
+        assert_eq!(y(h2, "after") - y(h2, "pic"), tall, "stored");
+    }
+
     /// An empty item is still a task, and `- > text` (a quote as a list item, as other
     /// editors write one) goes under the item before it.
     #[test]
