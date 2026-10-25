@@ -24,7 +24,7 @@ Both take the version from `Cargo.toml`.
 
 - `PEEKABOO_THEME=light|dark` forces an appearance.
 - `PEEKABOO_PERF=1` logs frame times, and which parts asked for the frames, to `%TEMP%\peekaboo-perf.txt`.
-- `PEEKABOO_TRACE=1` adds DEBUG lines (menu events and the like) to `logs\peekaboo.log`, and symbolized stacks to panic reports.
+- `PEEKABOO_TRACE=1` adds DEBUG lines (menu events and the like) to `logs\peekaboo.log`. Panic reports have raw `module+offset` stacks either way (see below).
 - `PEEKABOO_CRASH=panic|fault|overflow` crashes on purpose right after startup, to test crash reporting.
 
 A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three are kept), and its report, with raw `module+offset` stack addresses, to the log and to `crash.log` in the notes folder. Open the dump in Visual Studio or WinDbg next to the matching build's `.pdb`.
@@ -58,7 +58,7 @@ Notes are Windows' RichEdit (Msftedit), with a few things layered on:
 
 A note holds up to 100,000 characters (`MAX_NOTE_CHARS` in `store.rs`): typing and pasting stop there and the footer says the note is full; import skips longer files and assistants are told the text is too long. A note saved longer (from an older version) opens whole and just can't grow.
 
-Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start to the deck in 0.16 s, about 5 MB of memory at rest, All Notes open in under a second, a 3.6 MB save in 6 ms.
+Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start to the deck in 0.16 s, a working set of about 5 MB at rest (once the app has trimmed it, with no note, All Notes or Settings open; the memory it has committed is more), All Notes open in under a second, a 3.6 MB save in 6 ms.
 
 ## Your data
 
