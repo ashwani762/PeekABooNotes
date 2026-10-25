@@ -687,6 +687,8 @@ fn unselect(h: HWND) {
     st.edit = edit;
     rich::set_rtf(edit, &rtf);
     apply_theme(h);
+    // The fresh editor takes no more than a note holds, as the old one did.
+    rich::limit_length(edit);
     connect_editor(h, edit);
     layout(h);
     rich::set_sel(edit, a, b);
