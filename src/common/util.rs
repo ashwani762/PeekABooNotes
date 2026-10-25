@@ -88,5 +88,41 @@ pub fn file_safe(s: &str) -> String {
         .take(60)
         .collect();
     out = out.trim().trim_end_matches('.').to_string();
-    if out.is_empty() { crate::t!("file_untitled").into() } else { out }
+    if out.is_empty() {
+        return crate::t!("file_untitled").into();
+    }
+    if reserved_device(&out) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// Windows opens a device, not a file, for a name whose part before the first dot is CON,
+/// PRN, AUX, NUL, COM0-9 or LPT0-9 (any case, trailing spaces ignored), so "Con.md" or
+/// "nul" as a note's title would export into nothing.
+fn reserved_device(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        s => {
+            let port = s.strip_prefix("COM").or_else(|| s.strip_prefix("LPT"));
+            port.is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_names_are_kept_off() {
+        for name in ["CON", "con", "Prn", "aux", "NUL", "COM1", "com9", "LPT1", "lpt9", "con.md", "Nul.txt", "CON .md", "COM¹"] {
+            assert_eq!(file_safe(name), format!("_{name}"), "{name}");
+        }
+        for name in ["Console", "CON notes", "COM10", "LPT", "Auxiliary.md", "Standup - Tue", "nul-hypothesis"] {
+            assert_eq!(file_safe(name), name, "{name}");
+        }
+        assert_eq!(file_safe("nul.: x"), "_nul. - x");
+    }
 }
