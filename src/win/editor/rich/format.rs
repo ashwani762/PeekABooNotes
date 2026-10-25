@@ -60,7 +60,7 @@ thread_local! {
     /// Width of a checklist marker (box glyph + space) in twips, for the current type.
     static MARK_W: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
     /// A body line's height in twips, for a DPI: (dpi, twips).
-    static LINE_H: std::cell::Cell<Option<(i32, i32)>> = const { std::cell::Cell::new(None) };
+    static LINE_H: std::cell::Cell<Option<(i32, (i32, i32))>> = const { std::cell::Cell::new(None) };
 }
 
 /// Choose the notes' typeface (0 system, 1 serif, 2 mono, 3 handwriting) and size
@@ -128,35 +128,47 @@ pub(super) fn mark_w() -> i32 {
     w
 }
 
-/// A body line in twips at `dpi`: the GDI height RichEdit lays lines out with, times
-/// the reading rhythm `apply_base_format` gives every paragraph.
-pub(super) fn body_line_h(dpi: i32) -> i32 {
-    use windows_sys::Win32::Graphics::Gdi::{CreateFontIndirectW, DeleteObject, GetDC, GetTextMetricsW, LOGFONTW, ReleaseDC, SelectObject, TEXTMETRICW};
+/// A body line in twips, as note editors lay it out: (single, at the reading rhythm).
+/// Measured in a hidden editor set up like them (font metrics alone don't say). `dpi`
+/// keys the cache; twips hardly depend on it.
+pub(super) fn body_line_h(dpi: i32) -> (i32, i32) {
     if let Some((d, h)) = LINE_H.with(|m| m.get())
         && d == dpi
     {
         return h;
     }
-    let h = unsafe {
-        let dc = GetDC(std::ptr::null_mut());
-        let mut lf: LOGFONTW = std::mem::zeroed();
-        lf.lfHeight = -(body_size() * dpi / 1440);
-        lf.lfWeight = 400;
-        lf.lfCharSet = 1; // DEFAULT_CHARSET
-        for (i, c) in body_face().encode_utf16().take(31).enumerate() {
-            lf.lfFaceName[i] = c;
-        }
-        let font = CreateFontIndirectW(&lf);
-        let old = SelectObject(dc, font);
-        let mut tm: TEXTMETRICW = std::mem::zeroed();
-        GetTextMetricsW(dc, &mut tm);
-        SelectObject(dc, old);
-        DeleteObject(font);
-        ReleaseDC(std::ptr::null_mut(), dc);
-        (tm.tmHeight + tm.tmExternalLeading) * 1440 / dpi * LINE_MULT / 20
-    };
-    LINE_H.with(|m| m.set(Some((dpi, h))));
-    h
+    let single = measure_body_line(0, 0).unwrap_or(body_size() * 6 / 5);
+    let rhythm = measure_body_line(5, LINE_MULT).unwrap_or(single * LINE_MULT / 20);
+    LINE_H.with(|m| m.set(Some((dpi, (single, rhythm)))));
+    (single, rhythm)
+}
+
+/// Two body lines in a scratch editor with line spacing `rule`/`value` and no space
+/// after: how far apart they are, in twips.
+fn measure_body_line(rule: u8, value: i32) -> Option<i32> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, ES_MULTILINE, WS_POPUP};
+    let h = unsafe { CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 200, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null()) };
+    if h.is_null() {
+        return None;
+    }
+    setup(h);
+    let mut cf = CharFormat2::new();
+    cf.mask = CFM_FACE | CFM_SIZE | CFM_CHARSET;
+    cf.height = body_size();
+    cf.charset = 1; // DEFAULT_CHARSET
+    set_face(&mut cf, body_face());
+    send(h, EM_SETCHARFORMAT, SCF_ALL, &cf as *const _ as isize);
+    insert_text(h, "a\rb");
+    set_sel(h, 0, -1);
+    let mut pf = ParaFormat2::new();
+    pf.mask = PFM_LINESPACING | PFM_SPACEAFTER;
+    pf.line_spacing_rule = rule;
+    pf.line_spacing = value;
+    send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+    let px = pos_from_char(h, 2).y - pos_from_char(h, 0).y;
+    let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) }.max(96) as i32;
+    unsafe { DestroyWindow(h) };
+    (px > 0).then(|| px * 1440 / dpi)
 }
 
 pub(super) fn set_face(cf: &mut CharFormat2, face: &str) {
@@ -258,14 +270,18 @@ fn style_boxes_now(h: HWND) {
     // A hanging indent puts the text in the same column as bullets and numbers (and
     // wrapped lines under it), leaving room on the left for the circle.
     let mut indent = ParaFormat2::new();
-    indent.mask = PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING;
+    indent.mask = PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING | PFM_SPACEAFTER;
     indent.offset = mark_w();
     indent.start_indent = (LIST_TEXT - indent.offset).max(0);
-    // A body line tall: an item that is only its box would be sized from the small glyph
-    // (a trailing space, or a quote's end mark, doesn't count), and its circle is
-    // body-sized.
+    // At least a single body line: an item that is only its box would be sized from the
+    // small glyph (a trailing space, or a quote's end mark, doesn't count), and its circle
+    // is body-sized. The rest of the reading rhythm goes after the line, where prose has
+    // it, so the text sits in its line as prose text does (spacing that adds room above
+    // the text pushed it a few px lower) and lines keep prose's pitch.
+    let (single, rhythm) = body_line_h(unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) } as i32);
     indent.line_spacing_rule = 3;
-    indent.line_spacing = body_line_h(unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) } as i32);
+    indent.line_spacing = single;
+    indent.space_after = PARA_AFTER + (rhythm - single).max(0);
     set_face(&mut boxf, "Segoe UI Symbol");
     for (i, &c) in t.iter().enumerate() {
         if !is_task(c) || (i > 0 && t[i - 1] != CR) {

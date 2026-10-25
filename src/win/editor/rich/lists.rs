@@ -219,7 +219,10 @@ pub fn fix_caret_indent(h: HWND) {
         // Follows from the box having gone: Ctrl+Z brings the box back, not this first.
         unrecorded(h, || {
             pf = ParaFormat2::new();
-            pf.mask = PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING;
+            pf.mask = PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING | PFM_SPACEAFTER;
+            pf.line_spacing_rule = 5;
+            pf.line_spacing = LINE_MULT;
+            pf.space_after = PARA_AFTER;
             send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
         });
     }

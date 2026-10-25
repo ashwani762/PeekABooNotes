@@ -429,7 +429,11 @@ pub fn wrap(h: HWND, a: i32, b: i32, kind: Block) {
     if kind == Block::Code {
         set_sel(h, cell, cell + len);
         let mut pf = ParaFormat2::new();
-        pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING;
+        // A checklist item's spacing goes too: code lines keep the note's rhythm.
+        pf.mask = PFM_NUMBERING | PFM_STARTINDENT | PFM_OFFSET | PFM_LINESPACING | PFM_SPACEAFTER;
+        pf.line_spacing_rule = 5;
+        pf.line_spacing = LINE_MULT;
+        pf.space_after = PARA_AFTER;
         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     }
     style_blocks(h);
