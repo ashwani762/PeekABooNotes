@@ -61,6 +61,7 @@
     <string name="note_untitled">新規メモ</string>
     <string name="note_edited">%1$sに編集</string>
     <string name="note_full">このメモはいっぱいです</string>
+    <string name="note_save_failed">メモを保存できません</string>
     <string name="file_untitled">無題</string>
 
     <!-- Times -->
@@ -305,6 +306,7 @@
     <string name="button_connect">接続</string>
     <string name="result_connected">%1$s を再起動</string>
     <string name="result_not_installed">未インストール、設定をコピー</string>
+    <string name="result_not_json">コメントがあるか JSON ではありません、設定をコピー</string>
     <string name="settings_mcp_footer">アシスタントはメモをアーカイブできますが、削除はできません。</string>
     <plurals name="result_copied">
         <item quantity="other">コピーしました</item>

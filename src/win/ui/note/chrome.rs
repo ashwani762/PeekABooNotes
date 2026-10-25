@@ -115,10 +115,18 @@ pub(super) fn paint(h: HWND) {
                     }
                 }
             }
-            // A blank note hasn't been edited yet.
-            if !blank || st.full_at.is_some() {
+            // A blank note hasn't been edited yet. A save that failed is said in place
+            // of the edited time, for as long as it goes on failing.
+            let unsaved = app::save_failed();
+            if !blank || st.full_at.is_some() || unsaved {
                 let fr = rect((25.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (43.0 * s) as i32, (18.0 * s) as i32);
-                let meta = if st.full_at.is_some() { t!("note_full").to_string() } else { t!("note_edited", crate::common::i18n::time::edited_time(updated)) };
+                let meta = if unsaved {
+                    t!("note_save_failed").to_string()
+                } else if st.full_at.is_some() {
+                    t!("note_full").to_string()
+                } else {
+                    t!("note_edited", crate::common::i18n::time::edited_time(updated))
+                };
                 c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a * 0.85, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
             }
         }

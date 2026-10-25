@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromRect};
+use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, MONITOR_DEFAULTTONULL, MonitorFromRect};
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW};
 use windows_sys::Win32::System::Threading::CreateMutexW;
@@ -123,9 +123,50 @@ pub fn store_mut<R>(f: impl FnOnce(&mut Store) -> R) -> R {
     STORE.with(|s| f(s.borrow_mut().as_mut().expect("store not loaded")))
 }
 
+/// Write the notes. When only places changed since the file was last written (a caret, a
+/// scroll position, a window moved: see `Store::only_view_changed`), the write waits a
+/// few seconds and goes with whatever else comes, or at quit; closing and scrolling notes
+/// then doesn't rewrite the whole file each time. Content goes at once.
 pub fn save() {
-    store(|s| s.save());
+    if store(|s| s.only_view_changed()) {
+        let h = ui(|u| u.main);
+        if !h.is_null() && !VIEW_SAVE_PENDING.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            unsafe { SetTimer(h, T_VIEW_SAVE, VIEW_SAVE_MS, None) };
+        }
+        return;
+    }
+    save_now();
 }
+
+/// Write the notes now, places included.
+pub fn save_now() {
+    let h = ui(|u| u.main);
+    if VIEW_SAVE_PENDING.swap(false, std::sync::atomic::Ordering::Relaxed) && !h.is_null() {
+        unsafe { KillTimer(h, T_VIEW_SAVE) };
+    }
+    let failed = store_mut(|s| s.save()).is_err();
+    if SAVE_FAILED.swap(failed, std::sync::atomic::Ordering::Relaxed) != failed {
+        // Saving just broke, or works again: say so once, and let every open note's
+        // footer follow.
+        if failed {
+            toast::notice(t!("note_save_failed").to_string());
+        }
+        for w in ui(|u| u.notes.values().copied().collect::<Vec<_>>()) {
+            unsafe { InvalidateRect(w, std::ptr::null(), 0) };
+        }
+    }
+}
+
+/// Whether the last save failed (notes.json is locked, unwritable, or wasn't readable
+/// at start): the notes are only in memory until a save works. Shown in note footers;
+/// assistants are told.
+pub fn save_failed() -> bool {
+    SAVE_FAILED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static SAVE_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static VIEW_SAVE_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const VIEW_SAVE_MS: u32 = 5000;
 
 pub fn ui<R>(f: impl FnOnce(&mut Ui) -> R) -> R {
     UI.with(|u| f(u.borrow_mut().as_mut().expect("ui not initialised")))
@@ -244,11 +285,13 @@ pub fn quit() {
             unsafe { DestroyWindow(w) };
         }
     }
+    // Notes still in the Undo toast are gone for good now (their files with them).
+    finalize_delete();
     toast::close();
     crate::win::ui::ghost::clear();
     deck::shutdown();
     tray(false);
-    save();
+    save_now();
     // Release Direct2D/DirectWrite while the process is fully alive: left to the exit-time
     // thread-local teardown, Direct2D faults inside the loader's shutdown and the exit stalls.
     crate::win::render::dw::trim();
@@ -280,13 +323,16 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
             unsafe { KillTimer(h, T_TRIM) };
             trim_memory();
         }
+        WM_TIMER if wp == T_VIEW_SAVE => save_now(),
         WM_QUERYENDSESSION => return 1,
         WM_ENDSESSION if wp != 0 => {
+            // The notes open now are the ones to open again at the next sign-in.
+            remember_open();
             let wins: Vec<HWND> = ui(|u| u.notes.values().copied().collect());
             for w in wins {
                 note::flush(w);
             }
-            save();
+            save_now();
             log::shutdown("Windows is signing out or shutting down");
         }
         _ if msg == tb && tb != 0 => tray(true),
@@ -296,6 +342,8 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
 }
 
 const T_TRIM: usize = 1;
+/// A save of places only, waiting to go (see `save`).
+const T_VIEW_SAVE: usize = 2;
 
 /// A window closed: once only the deck is left (and has been for a moment), hand memory
 /// back to Windows.
@@ -422,6 +470,7 @@ pub fn run() -> i32 {
         }
 
         reopen_at_start();
+        share::cleanup();
         // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
         mcp::init(main);
         // Starting up touches far more than an idle deck needs: give it back once settled.

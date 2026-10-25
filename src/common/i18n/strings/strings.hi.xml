@@ -62,6 +62,7 @@
     <string name="note_untitled">नया नोट</string>
     <string name="note_edited">संपादित %1$s</string>
     <string name="note_full">यह नोट भर गया है</string>
+    <string name="note_save_failed">नोट्स सहेजे नहीं जा सकते</string>
     <string name="file_untitled">बिना शीर्षक</string>
 
     <!-- Times -->
@@ -320,6 +321,7 @@
     <string name="button_connect">कनेक्ट करें</string>
     <string name="result_connected">%1$s फिर से शुरू करें</string>
     <string name="result_not_installed">इंस्टॉल नहीं है, सेटअप कॉपी किया</string>
+    <string name="result_not_json">टिप्पणियाँ हैं या JSON नहीं है, सेटअप कॉपी किया</string>
     <string name="settings_mcp_footer">सहायक नोट्स को संग्रह में रख सकते हैं, पर कभी हटा नहीं सकते।</string>
     <plurals name="result_copied">
         <item quantity="one">कॉपी हो गया</item>

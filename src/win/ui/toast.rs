@@ -26,6 +26,9 @@ struct Toast {
     count: usize,
     /// Archived rather than deleted.
     archived: bool,
+    /// A plain message instead (notes can't be saved): nothing to undo, so no button and
+    /// no ring; it simply goes after its time.
+    notice: Option<String>,
     /// Seconds of countdown left.
     left: f32,
     rise: Spring,
@@ -46,6 +49,15 @@ thread_local! {
 }
 
 pub fn show(count: usize, archived: bool) {
+    raise(count, archived, None);
+}
+
+/// Tell the user something that can't be undone or acted on here, for a few seconds.
+pub fn notice(text: String) {
+    raise(0, false, Some(text));
+}
+
+fn raise(count: usize, archived: bool, notice: Option<String>) {
     TOAST.with(|t| {
         let mut t = t.borrow_mut();
         if t.is_none() {
@@ -71,6 +83,7 @@ pub fn show(count: usize, archived: bool) {
                 hwnd,
                 count,
                 archived,
+                notice: None,
                 left: SECONDS,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
                 hot: Spring::unit(0.0, (1.0, 0.12)),
@@ -86,6 +99,7 @@ pub fn show(count: usize, archived: bool) {
         let t = t.as_mut().unwrap();
         t.count = count;
         t.archived = archived;
+        t.notice = notice;
         t.left = SECONDS;
         t.alive = true;
         t.rise.to(1.0);
@@ -118,13 +132,19 @@ pub fn frame(dt: f32) -> bool {
         let moving = t.rise.step(dt);
         let over = hovered(t.hwnd);
         t.pressed &= over;
-        t.hot.to(if over && t.alive { 1.0 } else { 0.0 });
+        t.hot.to(if over && t.alive && t.notice.is_none() { 1.0 } else { 0.0 });
         t.hot.step(dt);
         if t.alive && !over {
             t.left -= dt;
         }
         if t.alive && t.left <= 0.0 {
-            expire = true;
+            if t.notice.is_some() {
+                // Nothing pending behind a notice: it just goes.
+                t.alive = false;
+                t.rise.to(0.0);
+            } else {
+                expire = true;
+            }
         }
         if !t.alive && !moving && t.rise.value <= 0.01 {
             unsafe { DestroyWindow(t.hwnd) };
@@ -151,7 +171,6 @@ fn hovered(h: HWND) -> bool {
 }
 
 fn render(t: &mut Toast) {
-    let (work, _) = crate::win::ui::deck::monitor_geo();
     let s = t.s;
     let (w, h, m) = ((320.0 * s) as i32, (52.0 * s) as i32, (24.0 * s) as i32);
     let (cw, ch) = (w + 2 * m, h + 2 * m);
@@ -168,6 +187,12 @@ fn render(t: &mut Toast) {
     c.shape(&card, 0x1C1C1E, 0.94 * a, 1.0, 0.0);
     c.shape(&card, 0xFFFFFF, 0.10 * a, 1.0, 1.0);
     c.begin_batch();
+    if let Some(msg) = &t.notice {
+        c.text(msg, &t.body, rect((x + 20.0 * s) as i32, y as i32, w - (40.0 * s) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        c.flush();
+        present(t, cw, ch);
+        return;
+    }
     // Countdown ring.
     let left = t.left.clamp(0.0, SECONDS);
     let (rcx, rcy, rr) = (x + 26.0 * s, y + h as f32 / 2.0, 10.0 * s);
@@ -187,9 +212,17 @@ fn render(t: &mut Toast) {
     let br = rect(button.x as i32, button.y as i32, bw as i32, bh as i32);
     c.text(t!("toast_undo"), &t.bold, br, theme::COLORS[0].accent, a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     c.flush();
+    present(t, cw, ch);
+}
+
+/// Put the drawn toast at the bottom of the work area.
+fn present(t: &mut Toast, cw: i32, ch: i32) {
+    let (work, _) = crate::win::ui::deck::monitor_geo();
     let px = (work.left + work.right) / 2 - cw / 2;
-    let py = work.bottom - ch - (12.0 * s) as i32;
-    c.present(t.hwnd, px, py);
+    let py = work.bottom - ch - (12.0 * t.s) as i32;
+    if let Some(c) = t.canvas.as_mut() {
+        c.present(t.hwnd, px, py);
+    }
     unsafe {
         if IsWindowVisible(t.hwnd) == 0 {
             ShowWindow(t.hwnd, SW_SHOWNOACTIVATE);
@@ -212,12 +245,14 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_LBUTTONUP => {
-                TOAST.with(|t| {
-                    if let Some(t) = t.borrow_mut().as_mut() {
+                let notice = TOAST.with(|t| {
+                    t.borrow_mut().as_mut().map(|t| {
                         t.pressed = false;
-                    }
+                        t.notice.is_some()
+                    })
                 });
-                app::undo_delete();
+                // A notice has nothing to undo: a click just dismisses it.
+                if notice == Some(true) { hide() } else { app::undo_delete() }
                 return 0;
             }
             _ => {}

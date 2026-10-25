@@ -72,6 +72,7 @@
     <string name="note_untitled">New note</string>
     <string name="note_edited">Edited %1$s</string>
     <string name="note_full">This note is full</string>
+    <string name="note_save_failed">Can't save your notes</string>
     <string name="file_untitled">Untitled</string>
 
     <!-- Times -->
@@ -330,6 +331,7 @@
     <string name="button_connect">Connect</string>
     <string name="result_connected">Restart %1$s</string>
     <string name="result_not_installed">Not installed, setup copied</string>
+    <string name="result_not_json">Has comments or isn't JSON, setup copied</string>
     <string name="settings_mcp_footer">Assistants can archive notes but never delete them.</string>
     <plurals name="result_copied">
         <item quantity="one">Copied</item>

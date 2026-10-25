@@ -44,9 +44,20 @@ pub fn share(owner: HWND, ids: &[u64]) {
     }
 }
 
+/// Where the files for the share sheet are staged.
+fn base() -> PathBuf {
+    std::env::temp_dir().join("PeekABoo Share")
+}
+
+/// At start: the last session's share, if it left one. Whatever it went to has its copy
+/// by now.
+pub fn cleanup() {
+    let _ = std::fs::remove_dir_all(base());
+}
+
 /// The notes written out and zipped, in a folder of their own under the temp folder.
 fn pack(name: &str, ids: &[u64]) -> std::io::Result<PathBuf> {
-    let base = std::env::temp_dir().join("PeekABoo Share");
+    let base = base();
     // The last share's zip: whatever it went to has its copy by now.
     let _ = std::fs::remove_dir_all(&base);
     let stage = base.join("notes");

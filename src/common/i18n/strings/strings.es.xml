@@ -62,6 +62,7 @@
     <string name="note_untitled">Nueva nota</string>
     <string name="note_edited">Editada %1$s</string>
     <string name="note_full">Esta nota está llena</string>
+    <string name="note_save_failed">No se pueden guardar las notas</string>
     <string name="file_untitled">Sin título</string>
 
     <!-- Times -->
@@ -320,6 +321,7 @@
     <string name="button_connect">Conectar</string>
     <string name="result_connected">Reinicia %1$s</string>
     <string name="result_not_installed">No instalada, configuración copiada</string>
+    <string name="result_not_json">Tiene comentarios o no es JSON, configuración copiada</string>
     <string name="settings_mcp_footer">Los asistentes pueden archivar notas, pero nunca eliminarlas.</string>
     <plurals name="result_copied">
         <item quantity="one">Copiado</item>

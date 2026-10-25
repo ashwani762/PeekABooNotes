@@ -3,8 +3,10 @@
 
 //! The note database: one ordinary JSON file, written atomically.
 
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -182,6 +184,42 @@ pub struct Store {
     /// notes.json was there but couldn't be read (or put aside): this session never
     /// writes it, so whatever is in it survives for the next start to try again.
     frozen: bool,
+    /// The notes' content (see `content_stamp`) as the file last got it.
+    saved_stamp: Option<u64>,
+    /// Saves since the backup was last refreshed, and when that was.
+    saves_since_backup: u32,
+    backup_at: Option<Instant>,
+}
+
+/// The backup is refreshed every so many saves, or after an hour of them, whichever comes
+/// first: a power cut then costs minutes of notes, not the whole session.
+const BACKUP_EVERY: u32 = 50;
+const BACKUP_AGE: Duration = Duration::from_secs(3600);
+
+/// A sync client or a virus scanner can hold notes.json open for a moment: the rename
+/// waits it out, briefly, rather than failing the save.
+fn rename_patiently(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            // 32 and 33 are sharing and lock violations; a scanner's hold can also show
+            // up as access denied.
+            Err(e) if tries < 5 && (e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(32 | 33))) => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            r => return r,
+        }
+    }
+}
+
+/// Write `bytes` to `path` and see them onto the disk before returning: a power cut right
+/// after the rename then can't leave an empty notes.json.
+fn write_synced(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
 }
 
 impl Store {
@@ -228,7 +266,7 @@ impl Store {
                 from_backup(&backup)
             }
         };
-        let mut s = Store { path, d, frozen };
+        let mut s = Store { path, d, frozen, saved_stamp: None, saves_since_backup: 0, backup_at: Some(Instant::now()) };
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
         s.d.next_id = s.d.next_id.max(max);
         // Early builds stored the deck at 42% height; the deck is now centred by default.
@@ -238,22 +276,63 @@ impl Store {
         s
     }
 
-    pub fn save(&self) {
-        if self.frozen {
-            return; // see `frozen`; logged once, at load
-        }
-        let saved = serde_json::to_vec_pretty(&self.d).map_err(std::io::Error::other).and_then(|json| {
-            let tmp = self.path.with_extension("json.tmp");
-            std::fs::write(&tmp, json)?;
-            std::fs::rename(&tmp, &self.path)
-        });
+    /// Write the notes (atomically: a synced temp file, then a rename). Err when they
+    /// couldn't be, for the caller to show; the next save tries again.
+    pub fn save(&mut self) -> std::io::Result<()> {
+        let saved = self.write();
         // Saves follow every edit: log when they start and stop failing, not each one.
+        // The error's kind and code only: its text can name the user's folder.
         static FAILING: AtomicBool = AtomicBool::new(false);
-        match saved {
-            Err(e) if !FAILING.swap(true, Ordering::Relaxed) => log::error(&format!("saving notes.json failed: {e}")),
+        match &saved {
+            Err(e) if !FAILING.swap(true, Ordering::Relaxed) => log::error(&format!("saving notes.json failed ({:?}, code {:?})", e.kind(), e.raw_os_error())),
             Ok(()) if FAILING.swap(false, Ordering::Relaxed) => log::info("saving notes.json works again"),
             _ => {}
         }
+        saved
+    }
+
+    fn write(&mut self) -> std::io::Result<()> {
+        if self.frozen {
+            return Err(std::io::Error::other("notes.json couldn't be read at start, so it isn't written this session"));
+        }
+        let json = serde_json::to_vec_pretty(&self.d).map_err(std::io::Error::other)?;
+        let tmp = self.path.with_extension("json.tmp");
+        write_synced(&tmp, &json)?;
+        rename_patiently(&tmp, &self.path)?;
+        self.saved_stamp = Some(self.content_stamp());
+        self.saves_since_backup += 1;
+        if self.saves_since_backup >= BACKUP_EVERY || self.backup_at.is_none_or(|t| t.elapsed() >= BACKUP_AGE) {
+            // The same bytes, so the backup is always a file that parsed.
+            match std::fs::write(self.path.with_file_name("notes.backup.json"), &json) {
+                Ok(()) => {
+                    self.saves_since_backup = 0;
+                    self.backup_at = Some(Instant::now());
+                }
+                Err(e) => log::warn(&format!("couldn't refresh notes.backup.json ({:?})", e.kind())),
+            }
+        }
+        Ok(())
+    }
+
+    /// A fingerprint of everything in the notes but where the user is in them (window
+    /// rectangles, carets, scroll positions, the last note): what has to reach the disk
+    /// at once. Cheap: a few fields a note, never the text.
+    fn content_stamp(&self) -> u64 {
+        let mut h = std::hash::DefaultHasher::new();
+        self.d.next_id.hash(&mut h);
+        for n in &self.d.notes {
+            (n.id, n.color, n.archived, n.pinned, n.off_deck, n.created, n.updated, n.order, n.text.len(), n.rtf.len()).hash(&mut h);
+        }
+        let mut settings = self.d.settings.clone();
+        settings.last_note = None;
+        serde_json::to_string(&settings).unwrap_or_default().hash(&mut h);
+        h.finish()
+    }
+
+    /// Whether nothing but places (see `content_stamp`) changed since the last save that
+    /// worked: such a save can wait a few seconds and go with the next.
+    pub fn only_view_changed(&self) -> bool {
+        self.saved_stamp == Some(self.content_stamp())
     }
 
     pub fn note(&self, id: u64) -> Option<&Note> {
@@ -763,6 +842,41 @@ mod tests {
         assert_eq!(table_align("| a | --- |"), None);
         assert_eq!(table_cells("| a \\| b | c"), Some(vec![" a \\| b ", " c"]));
         assert!(looks_like_marker("> a") && looks_like_marker("```js") && !looks_like_marker(">a"));
+    }
+
+    #[test]
+    fn saves_atomically_and_tells_places_from_content() {
+        let dir = std::env::temp_dir().join(format!("peekaboo-store-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Store::load(dir.clone());
+        let id = s.create("Trip\n- passport", "{\\rtf1 Trip}");
+        assert!(!s.only_view_changed(), "a new note has to be written");
+        s.save().unwrap();
+        assert!(s.only_view_changed() && !dir.join("notes.json.tmp").exists());
+        // Where the note is on screen can wait; what it says can't.
+        s.note_mut(id).unwrap().rect = Some([1, 2, 3, 4]);
+        s.note_mut(id).unwrap().view = Some([5, 0, 0]);
+        s.d.settings.last_note = Some(id);
+        assert!(s.only_view_changed());
+        s.note_mut(id).unwrap().text.push_str("\n- charger");
+        s.note_mut(id).unwrap().updated += 1;
+        assert!(!s.only_view_changed());
+        s.d.settings.theme = 2;
+        s.save().unwrap();
+        // The backup goes with a save once it's due, from the same bytes.
+        assert!(!dir.join("notes.backup.json").exists());
+        s.backup_at = None;
+        s.save().unwrap();
+        assert_eq!(std::fs::read(dir.join("notes.backup.json")).unwrap(), std::fs::read(dir.join("notes.json")).unwrap());
+        let again = Store::load(dir.clone());
+        assert_eq!(again.note(id).unwrap().text, "Trip\n- passport\n- charger");
+        assert_eq!(again.d.settings.theme, 2);
+        // A frozen store says so instead of writing.
+        let mut frozen = Store::load(dir.clone());
+        frozen.frozen = true;
+        assert!(frozen.save().is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

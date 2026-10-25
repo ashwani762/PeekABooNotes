@@ -62,6 +62,7 @@
     <string name="note_untitled">Neue Notiz</string>
     <string name="note_edited">Bearbeitet %1$s</string>
     <string name="note_full">Diese Notiz ist voll</string>
+    <string name="note_save_failed">Notizen können nicht gespeichert werden</string>
     <string name="file_untitled">Ohne Titel</string>
 
     <!-- Times -->
@@ -320,6 +321,7 @@
     <string name="button_connect">Verbinden</string>
     <string name="result_connected">%1$s neu starten</string>
     <string name="result_not_installed">Nicht installiert, Einrichtung kopiert</string>
+    <string name="result_not_json">Enthält Kommentare oder ist kein JSON, Einrichtung kopiert</string>
     <string name="settings_mcp_footer">Assistenten können Notizen archivieren, aber nie löschen.</string>
     <plurals name="result_copied">
         <item quantity="one">Kopiert</item>

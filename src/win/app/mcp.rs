@@ -190,6 +190,16 @@ fn run_hidden(args: &[&str]) -> bool {
     std::process::Command::new("cmd").arg("/c").args(args).creation_flags(CREATE_NO_WINDOW).output().is_ok_and(|o| o.status.success())
 }
 
+/// An assistant's change is only done when it reached the disk: say so when it didn't,
+/// rather than report success for notes that a restart would lose.
+fn saved_or_err() -> Result<(), String> {
+    if save_failed() {
+        Err("The change is in the app but couldn't be saved to disk (the notes file is locked or can't be written). It will be saved when that's fixed; tell the user.".into())
+    } else {
+        Ok(())
+    }
+}
+
 fn serve(main: isize) {
     let name = wide(&pipe_name());
     loop {
@@ -396,6 +406,7 @@ impl mcp::Notes for WinNotes {
         save();
         refresh();
         log::info("mcp: created a note");
+        saved_or_err()?;
         Ok(store(|s| s.note(id).map(summary)).unwrap_or(Value::Null))
     }
 
@@ -442,6 +453,7 @@ impl mcp::Notes for WinNotes {
         note::reload(id);
         refresh();
         log::info(if append { "mcp: added to a note" } else { "mcp: replaced a note's content" });
+        saved_or_err()?;
         Ok(store(|s| s.note(id).map(summary)).unwrap_or(Value::Null))
     }
 
@@ -466,6 +478,7 @@ impl mcp::Notes for WinNotes {
             note_command(id, NC_DECK);
         }
         log::info("mcp: changed a note's state");
+        saved_or_err()?;
         Ok(store(|s| s.note(id).map(summary)).unwrap_or(Value::Null))
     }
 }
