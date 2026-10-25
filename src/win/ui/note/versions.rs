@@ -3,8 +3,9 @@
 
 //! A note's earlier versions, for what Ctrl+Z can't reach: the editor's undo covers what
 //! was done since the note was opened, and these go back further. One is kept when a note
-//! is first changed after it was opened (unless the last one is only minutes old), and
-//! before an assistant changes it. Kept as Markdown in `versions.json` beside the notes,
+//! is first changed after it was opened or after `IDLE` without changes (unless the last
+//! one is only minutes old), and before an assistant changes it. Saving as you type
+//! doesn't keep one. Kept as Markdown in `versions.json` beside the notes,
 //! written only when a version is taken or dropped and read only then and when they're
 //! listed, so nothing of them stays in memory.
 
@@ -22,6 +23,9 @@ const MAX_BYTES: usize = 5 << 20;
 /// Editing a note again this soon (seconds) after its last version was taken doesn't
 /// take another: a note closed and reopened to fix a typo isn't a new version.
 const QUIET: i64 = 600;
+/// A note left open this long without a change starts a new stretch of work when it's
+/// next changed.
+pub const IDLE: std::time::Duration = std::time::Duration::from_secs(QUIET as u64);
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct Version {

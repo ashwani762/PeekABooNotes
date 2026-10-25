@@ -85,9 +85,9 @@ struct NoteWin {
     dirty: bool,
     loading: bool,
     discard: bool,
-    /// A version of the note was kept (or found recent enough) since this window opened:
-    /// it's the first change of a visit that takes one.
-    kept: bool,
+    /// When the note was last changed in this window: the first change of a visit (the
+    /// window just opened, or the note left alone a while) keeps a version of it first.
+    edited_at: Option<std::time::Instant>,
     /// When typing last ran into the note limit (the footer says so for a moment).
     full_at: Option<std::time::Instant>,
     swallow: bool,
@@ -168,7 +168,7 @@ pub fn create(id: u64, r: RECT, show: bool) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
-        kept: false,
+        edited_at: None,
         full_at: None,
         swallow: false,
         icons: None,
@@ -244,7 +244,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
-        kept: false,
+        edited_at: None,
         full_at: None,
         swallow: false,
         icons: None,
@@ -522,11 +522,13 @@ pub fn flush(h: HWND) {
         }
         return;
     }
-    // The first change since the window opened: keep the note as it was (see `versions`).
-    if !st.kept {
-        st.kept = true;
+    // The first change since the window opened, or since the note was left alone for a
+    // while (a note kept open for days gets a version for each stretch of work): keep it
+    // as it was (see `versions`).
+    if st.edited_at.is_none_or(|t| t.elapsed() >= versions::IDLE) {
         versions::keep_for_edit(id);
     }
+    st.edited_at = Some(std::time::Instant::now());
     let text = app::rtf_to_text(&rtf);
     let title = title_of(&text);
     app::store_mut(|s| {
