@@ -159,8 +159,9 @@ fn item_h(it: &Item) -> f32 {
 }
 
 fn pal(dark: bool) -> (u32, u32, u32, u32, u32) {
-    // (surface, edge, text, secondary, highlight)
-    if dark { (0x2C2C2E, 0xFFFFFF, 0xF2F2F7, 0x98989D, 0x0A84FF) } else { (0xF7F7F9, 0x000000, 0x1D1D1F, 0x86868B, 0x0A84FF) }
+    // (surface, edge, text, secondary, highlight); the secondary (shortcuts, icons) reads
+    // at 4.5:1 on the surface.
+    if dark { (0x2C2C2E, 0xFFFFFF, 0xF2F2F7, 0x98989D, 0x0A84FF) } else { (0xF7F7F9, 0x000000, 0x1D1D1F, 0x6E6E73, 0x0A84FF) }
 }
 
 /// Show a menu at `at` (screen coordinates). Returns the chosen command id, 0 if dismissed.
@@ -800,6 +801,15 @@ mod tests {
 
     // The edit menu's shape: two tool rows, a separator, actions.
     const EDIT: [Reach; 7] = [Along(7), Along(6), Nothing, Row, Row, Nothing, Row];
+
+    #[test]
+    fn shortcut_text_reads_on_the_menu() {
+        for dark in [false, true] {
+            let (surface, _, text, sub, _) = pal(dark);
+            assert!(crate::common::theme::contrast(sub, surface) >= 4.5, "dark: {dark}");
+            assert!(crate::common::theme::contrast(text, surface) >= 7.0);
+        }
+    }
 
     #[test]
     fn up_and_down_reach_every_row() {

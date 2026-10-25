@@ -64,9 +64,11 @@ pub fn paper(i: u8, dark: bool) -> u32 {
 
 /// Body text on paper (both themes: paper is always light).
 pub const PAPER_TEXT: u32 = 0x1D1D1F;
-/// Secondary text on paper, as a blend factor toward the paper colour.
+/// Secondary text on paper, as a blend factor toward the paper colour: as light as it
+/// goes while still reading at 4.5:1 on every paper in both themes (dimmed coral is the
+/// darkest paper, and sets it).
 pub fn paper_subtext(i: u8, dark: bool) -> u32 {
-    mix(PAPER_TEXT, paper(i, dark), 0.36)
+    mix(PAPER_TEXT, paper(i, dark), 0.28)
 }
 /// Labels and quiet icons on paper.
 pub fn paper_ink(i: u8, dark: bool) -> u32 {
@@ -107,4 +109,41 @@ pub mod motion {
     pub const STAGGER_S: f32 = 0.04;
     pub const PREVIEW_DWELL_MS: u32 = 380;
     pub const COLLAPSE_GRACE_MS: u32 = 220;
+}
+
+/// WCAG 2 contrast ratio between two 0xRRGGBB colours (1 to 21).
+#[cfg(test)]
+pub fn contrast(a: u32, b: u32) -> f32 {
+    let lum = |c: u32| {
+        let f = |v: u32| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * f((c >> 16) & 0xFF) + 0.7152 * f((c >> 8) & 0xFF) + 0.0722 * f(c & 0xFF)
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contrast_matches_wcag() {
+        assert!((contrast(0x000000, 0xFFFFFF) - 21.0).abs() < 0.01);
+        assert!((contrast(0x777777, 0xFFFFFF) - 4.48).abs() < 0.01);
+    }
+
+    #[test]
+    fn preview_text_reads_on_every_paper() {
+        for i in 0..COLORS.len() as u8 {
+            for dark in [false, true] {
+                let p = paper(i, dark);
+                let c = contrast(paper_subtext(i, dark), p);
+                assert!(c >= 4.5, "{} paper (dark: {dark}): secondary text at {c:.2}:1", COLORS[i as usize].name);
+                assert!(contrast(PAPER_TEXT, p) >= 7.0);
+            }
+        }
+    }
 }

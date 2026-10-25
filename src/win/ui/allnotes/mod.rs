@@ -141,6 +141,7 @@ struct Pal {
     line: u32,
     text: u32,
     sub: u32,
+    /// The search field's shortcut hint, quieter than `sub` but still 4.5:1 on the field.
     ter: u32,
     hover: (u32, f32),
     field: (u32, f32),
@@ -157,7 +158,7 @@ fn pal(dark: bool) -> Pal {
             line: 0x38383A,
             text: 0xF5F5F7,
             sub: 0x98989D,
-            ter: 0x6C6C70,
+            ter: 0xA1A1A6,
             hover: (0xFFFFFF, 0.06),
             field: (0x767680, 0.24),
             pill: 0x636366,
@@ -171,7 +172,7 @@ fn pal(dark: bool) -> Pal {
             line: 0xE5E5EA,
             text: 0x1D1D1F,
             sub: 0x6E6E73,
-            ter: 0xA1A1A6,
+            ter: 0x6A6A6F,
             hover: (0x000000, 0.045),
             field: (0x767680, 0.12),
             pill: 0xFFFFFF,
@@ -1256,5 +1257,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             _ => {}
         }
         DefWindowProcW(hwnd, msg, wp, lp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::theme::contrast;
+
+    #[test]
+    fn quiet_text_still_reads() {
+        for dark in [false, true] {
+            let p = pal(dark);
+            // The search field's hint on the field, secondary text on the list.
+            assert!(contrast(p.ter, field_color(dark)) >= 4.5, "hint, dark: {dark}");
+            assert!(contrast(p.sub, p.list) >= 4.5, "secondary, dark: {dark}");
+        }
     }
 }
