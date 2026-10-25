@@ -219,7 +219,7 @@ pub fn mono_face() -> &'static str {
 }
 
 /// Width of the editor's text column, in twips.
-fn column_twips(h: HWND) -> i32 {
+pub(super) fn column_twips(h: HWND) -> i32 {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(h, &mut rc) };
     let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) }.max(96) as i32;
@@ -398,6 +398,16 @@ pub fn cell_at(h: HWND, t: &[u16], cp: i32) -> Option<(Block, Vec<Row>, usize, u
     let row = *rows.iter().find(|r| r.start <= cp && cp < r.end)?;
     let (a, b) = cells(t, row).into_iter().find(|&(a, b)| a <= cp && cp <= b)?;
     Some((kind, rows, a, b))
+}
+
+/// The width text has in the cell holding `cp`, in twips (inside its margins), or None
+/// outside a block.
+pub(super) fn cell_text_width(h: HWND, t: &[u16], cp: i32) -> Option<i32> {
+    let (_, rows, a, _) = cell_at(h, t, cp)?;
+    let row = *rows.iter().find(|r| r.start <= a && a < r.end)?;
+    let n = cells(t, row).iter().position(|&(x, _)| x == a)?;
+    let (r, cs) = get(h, row)?;
+    cs.get(n).map(|c| c.width - 2 * r.margin)
 }
 
 /// Put the paragraphs from `a` to `b` (paragraph starts and ends) into a new quote or code
@@ -845,7 +855,7 @@ mod tests {
         let t = text(h);
         let at = t.windows(3).position(|v| v == [b'p' as u16, b'i' as u16, b'c' as u16]).unwrap() as i32 + 3;
         set_sel(h, at, at);
-        insert_rtf(h, &format!("{{\\rtf1 {}}}", test_picture(3600, 1800)));
+        insert_rtf(h, &format!("{{\\rtf1 {}}}", test_picture(1, 1, 3600, 1800)));
         style_boxes(h);
         let tall = y(h, "after") - y(h, "pic");
         assert!(tall > pitch * 3, "the line is {tall} px, a body line {pitch}");

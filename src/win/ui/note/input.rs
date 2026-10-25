@@ -326,9 +326,10 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     if (msg == WM_KEYDOWN && moved && !key_down(VK_SHIFT)) || msg == WM_LBUTTONUP {
         caret_off_box(e, msg == WM_KEYDOWN && wp as u16 == VK_LEFT);
     }
-    // Quotes, code and tables stay as wide as the text column.
+    // Quotes, code and tables stay as wide as the text column, and pictures within it.
     if msg == WM_SIZE {
         rich::style_blocks(e);
+        rich::fit_picture_widths(e);
     }
     // RichEdit draws outside WM_PAINT too (typing, selecting, scrolling): put the
     // checkboxes back over their placeholder glyphs after anything that may have drawn.

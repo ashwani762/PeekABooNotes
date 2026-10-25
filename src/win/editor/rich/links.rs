@@ -599,8 +599,14 @@ pub fn item_shown(t: &[u16], cp: usize) -> (usize, usize) {
 }
 
 /// Lines holding just a picture: single spacing, since the text's 1.2x would add a fifth
-/// of the picture's height under it. Moves the selection.
+/// of the picture's height under it; and pictures as wide as the note has room for. Moves
+/// the selection.
 pub fn fit_pictures(h: HWND) {
+    picture_lines(h);
+    fit_picture_widths(h);
+}
+
+fn picture_lines(h: HWND) {
     let t = text(h);
     let mut start = 0usize;
     while start < t.len() {

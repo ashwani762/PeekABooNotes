@@ -16,12 +16,14 @@ mod format;
 mod lists;
 mod links;
 mod markdown;
+mod pictures;
 mod selectors;
 pub use blocks::*;
 pub use format::*;
 pub use links::*;
 pub use lists::*;
 pub use markdown::*;
+pub use pictures::fit_picture_widths;
 pub use selectors::{has_selectors, hide_marks, marker_for, unmark, unmark_str};
 
 pub const CLASS: &str = "RICHEDIT50W";
@@ -501,9 +503,9 @@ fn is_task(c: u16) -> bool {
     c == BOX || c == CHECKED
 }
 
-/// For tests: an RTF picture group shown `w` x `h` twips (a one-pixel PNG, stretched).
+/// For tests: an RTF picture group of a grey `px_w` x `px_h` PNG, shown `w` x `h` twips.
 #[cfg(test)]
-pub fn test_picture(w: i32, h: i32) -> String {
+pub fn test_picture(px_w: u32, px_h: u32, w: i32, h: i32) -> String {
     fn crc(data: &[u8]) -> u32 {
         let mut c = 0xFFFF_FFFFu32;
         for &b in data {
@@ -522,20 +524,34 @@ pub fn test_picture(w: i32, h: i32) -> String {
         out.extend_from_slice(&crc(&body).to_be_bytes());
     }
     let mut png = vec![0x89, b'P', b'N', b'G', 13, 10, 26, 10];
-    chunk(&mut png, b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
-    // One stored deflate block: the row's filter byte, then one RGBA pixel.
-    let raw = [0u8, 0x33, 0x66, 0x99, 0xFF];
+    let mut ihdr = px_w.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&px_h.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]); // 8-bit grey
+    chunk(&mut png, b"IHDR", &ihdr);
+    // Each row: its filter byte, then its pixels; in stored (uncompressed) deflate blocks.
+    let mut raw = Vec::new();
+    for _ in 0..px_h {
+        raw.push(0u8);
+        raw.extend(std::iter::repeat_n(0x80u8, px_w as usize));
+    }
     let (mut a, mut b) = (1u32, 0u32);
     for &x in &raw {
         a = (a + x as u32) % 65521;
         b = (b + a) % 65521;
     }
-    let mut z = vec![0x78, 0x01, 0x01, 5, 0, 0xFA, 0xFF];
-    z.extend_from_slice(&raw);
+    let mut z = vec![0x78, 0x01];
+    let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+    for (i, part) in blocks.iter().enumerate() {
+        z.push((i + 1 == blocks.len()) as u8);
+        let n = part.len() as u16;
+        z.extend_from_slice(&n.to_le_bytes());
+        z.extend_from_slice(&(!n).to_le_bytes());
+        z.extend_from_slice(part);
+    }
     z.extend_from_slice(&((b << 16) | a).to_be_bytes());
     chunk(&mut png, b"IDAT", &z);
     chunk(&mut png, b"IEND", &[]);
     let hex: String = png.iter().map(|b| format!("{b:02x}")).collect();
-    format!("{{\\pict\\pngblip\\picw1\\pich1\\picwgoal{w}\\pichgoal{h} {hex}}}")
+    format!("{{\\pict\\pngblip\\picw{px_w}\\pich{px_h}\\picwgoal{w}\\pichgoal{h} {hex}}}")
 }
 
