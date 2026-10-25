@@ -11,7 +11,42 @@ use super::*;
 
 const EM_GETOLEINTERFACE: u32 = WM_USER + 60;
 
+thread_local! {
+    /// Each editor's text object model, asked for once: links, marks and restyling go
+    /// through it many times a keystroke.
+    static DOCS: std::cell::RefCell<std::collections::HashMap<isize, ITextDocument2>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Marks a window whose document is in `DOCS`, so a new window that comes to have a
+/// destroyed one's handle is never taken for it.
+const DOC_PROP: windows::core::PCWSTR = windows::core::w!("PeekabooTom");
+
 fn doc(h: HWND) -> Option<ITextDocument2> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetPropW, SetPropW};
+    if !unsafe { GetPropW(h, DOC_PROP.as_ptr()) }.is_null()
+        && let Some(d) = DOCS.with(|m| m.borrow().get(&(h as isize)).cloned())
+    {
+        return Some(d);
+    }
+    let d = new_doc(h)?;
+    DOCS.with(|m| {
+        let mut m = m.borrow_mut();
+        // Editors destroyed without `forget_doc` (scratch ones) go here.
+        m.retain(|&w, _| unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(w as HWND) } != 0);
+        m.insert(h as isize, d.clone());
+    });
+    unsafe { SetPropW(h, DOC_PROP.as_ptr(), 1 as _) };
+    Some(d)
+}
+
+/// Editor `h` is going: let its document go (call before RichEdit's own WM_NCDESTROY).
+pub fn forget_doc(h: HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::RemovePropW;
+    DOCS.with(|m| m.borrow_mut().remove(&(h as isize)));
+    unsafe { RemovePropW(h, DOC_PROP.as_ptr()) };
+}
+
+fn new_doc(h: HWND) -> Option<ITextDocument2> {
     let mut p: *mut core::ffi::c_void = null_mut();
     send(h, EM_GETOLEINTERFACE, 0, &mut p as *mut _ as isize);
     if p.is_null() {
@@ -279,13 +314,21 @@ const LINK_BLUE: u32 = 0x0645AD;
 /// Links in their blue (they take their colour from the text otherwise). Kept out of the
 /// undo history (a colour moves no text), so Ctrl+Z steps over it.
 pub fn color_named_links(h: HWND) {
-    use windows::Win32::UI::Controls::RichEdit::{tomResume, tomSuspend};
     let t = text(h);
-    let links = instructions(&t, 0, t.len());
+    color_links_in(h, &t, 0, t.len());
+}
+
+/// `color_named_links` for the links in `t[a..b]`. Runs after every burst of typing: one
+/// range goes from link to link, a handful of questions each (a link already blue, as
+/// nearly all are, costs no more).
+fn color_links_in(h: HWND, t: &[u16], a: usize, b: usize) {
+    use windows::Win32::UI::Controls::RichEdit::{tomLink, tomResume, tomSuspend};
+    let links = instructions(t, a, b);
     if links.is_empty() {
         return;
     }
     let Some(d) = doc(h) else { return };
+    let Some(r) = range(h, 0, 0) else { return };
     let want = crate::win::util::cref(LINK_BLUE) as i32;
     let mut suspended = false;
     for (_, name, _) in links {
@@ -293,8 +336,14 @@ pub fn color_named_links(h: HWND) {
         if t.get(name) == Some(&(ITEM_LINK_NAME as u16)) {
             continue;
         }
-        let Some((_, end, _)) = link_at(h, name as i32) else { continue };
-        let Some(f) = range(h, name as i32, end).and_then(|r| unsafe { r.GetFont().ok() }) else { continue };
+        let name = name as i32;
+        // The whole link, its hidden instruction included (text that only reads like
+        // one isn't a link: nothing to take in before it), then just its name.
+        let linked = unsafe { r.SetRange(name, name + 1).is_ok() && r.Expand(tomLink.0).is_ok() && r.GetStart().is_ok_and(|s| s < name) && r.GetEnd().is_ok_and(|e| e > name) };
+        if !linked || unsafe { r.SetStart(name) }.is_err() {
+            continue;
+        }
+        let Ok(f) = (unsafe { r.GetFont() }) else { continue };
         if unsafe { f.GetForeColor() }.is_ok_and(|c| c != want) {
             if !suspended {
                 let _ = unsafe { d.Undo(tomSuspend.0) };
@@ -318,12 +367,15 @@ pub fn link_addresses(h: HWND, a: usize, b: usize) {
     if a >= b {
         return;
     }
-    // Hidden link instructions count as gaps between words.
-    let mut gap = vec![false; t.len()];
-    for (start, name, _) in instructions(&t, 0, t.len()) {
-        gap[start..name].iter_mut().for_each(|g| *g = true);
+    // Only the paragraphs of `a..b` are looked through (a space typed in a long note with
+    // many links was a walk through all of it). Hidden link instructions count as gaps
+    // between words.
+    let (pa, pb) = (para_start(&t, a as i32) as usize, para_end(&t, b as i32) as usize);
+    let mut gap = vec![false; pb - pa];
+    for (start, name, _) in instructions(&t, pa, pb) {
+        gap[start - pa..name - pa].iter_mut().for_each(|g| *g = true);
     }
-    let space = |i: usize| gap[i] || matches!(t[i], 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
+    let space = |i: usize| gap[i - pa] || matches!(t[i], 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
     let lead = "([<\"'".encode_utf16().collect::<Vec<u16>>();
     let trail = ".,;:!?)]}>\"'".encode_utf16().collect::<Vec<u16>>();
     let mut words = Vec::new();
@@ -380,19 +432,18 @@ pub fn link_addresses(h: HWND, a: usize, b: usize) {
         }
         set_link(h, s, e, &url);
     }
-    color_named_links(h);
+    // The same paragraphs, longer now by the links' hidden instructions.
+    let now = text(h);
+    let end = (pb + now.len()).saturating_sub(t.len()).min(now.len());
+    color_links_in(h, &now, pa, end);
 }
 
 /// The word just before the caret (the one a space, Tab or Enter ends) as a link, when
 /// it's an address.
 pub fn link_word_before(h: HWND) {
     let t = text(h);
-    let (j, _) = sel(h);
-    // In code an address is code.
-    if matches!(cell_at(h, &t, j), Some((Block::Code, ..))) {
-        return;
-    }
-    let mut j = (j.max(0) as usize).min(t.len());
+    let (caret, _) = sel(h);
+    let mut j = (caret.max(0) as usize).min(t.len());
     let blank = |c: u16| matches!(c, 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
     while j > 0 && blank(t[j - 1]) {
         j -= 1;
@@ -401,7 +452,8 @@ pub fn link_word_before(h: HWND) {
     while i > 0 && !blank(t[i - 1]) {
         i -= 1;
     }
-    if t[i..j].iter().any(|&c| c == b'.' as u16 || c == b':' as u16) {
+    // In code an address is code.
+    if t[i..j].iter().any(|&c| c == b'.' as u16 || c == b':' as u16) && !matches!(cell_at(h, &t, caret), Some((Block::Code, ..))) {
         link_addresses(h, i, j);
     }
 }
@@ -682,6 +734,37 @@ mod tests {
             LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
             CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut())
         }
+    }
+
+    /// Timing (run with --ignored --nocapture): what a burst of typing costs in a note
+    /// with 500 named links, for the restyle after it and for a word ended with a space.
+    #[test]
+    #[ignore]
+    fn probe_link_costs() {
+        let h = editor();
+        setup(h);
+        let mut md = String::from("T\n");
+        for i in 0..500 {
+            md.push_str(&format!("line {i} with [link {i}](https://example.com/{i}) in it\n"));
+        }
+        md.push_str("end");
+        load_markdown(h, &md);
+        color_named_links(h);
+        let n = 20;
+        let t0 = std::time::Instant::now();
+        for _ in 0..n {
+            color_named_links(h);
+        }
+        let restyle = t0.elapsed() / n;
+        let end = text(h).len() as i32;
+        set_sel(h, end, end);
+        replace_sel(h, " e.g. ");
+        let t0 = std::time::Instant::now();
+        for _ in 0..n {
+            link_word_before(h);
+        }
+        let word = t0.elapsed() / n;
+        eprintln!("PROBE 500 links: restyle {restyle:?}, word ended {word:?}");
     }
 
     #[test]
