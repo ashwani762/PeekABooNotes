@@ -441,9 +441,21 @@ fn new_here() {
     }
 }
 
-/// Note typography changed: restyle the inline editor, if there is one.
+/// Note typography changed: the card's preview fonts (the only ones in the note's face
+/// and size) and the inline editor follow. The rest stay, among them the search field's
+/// GDI font, which the field holds on to.
 pub fn retheme_editor() {
-    with(|l| l.fonts = Fonts::new(l.s));
+    with(|l| {
+        let (title, body) = crate::win::editor::rich::preview_fonts(l.s);
+        l.fonts.card_title = title;
+        l.fonts.card_body = body;
+    });
+    restyle_editor();
+}
+
+/// The note's paper changed (its colour, or the theme): restyle the inline editor, if
+/// there is one, and redraw the card. No fonts are made for it.
+fn restyle_editor() {
     if let Some(e) = with(|l| l.editor)
         && !e.is_null() {
             crate::win::ui::note::retheme(e);
@@ -470,7 +482,7 @@ pub fn retheme() {
     theme::set_dark_titlebar(h, app::dark());
     // The inline editor's paper, the card's cached pixels and the search field (its own
     // control, which only repaints when told) all follow the new theme.
-    retheme_editor();
+    restyle_editor();
     unsafe {
         InvalidateRect(search, std::ptr::null(), 1);
         InvalidateRect(h, std::ptr::null(), 0);
@@ -481,7 +493,7 @@ pub fn retheme() {
 /// Note `id` changed colour: if the inline editor shows it, its paper follows.
 pub fn recolor(id: u64) {
     if editor_for(id).is_some() {
-        retheme_editor();
+        restyle_editor();
     }
 }
 
