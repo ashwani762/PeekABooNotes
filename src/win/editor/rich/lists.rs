@@ -21,6 +21,23 @@ pub fn set_numbering(h: HWND, kind: u16) {
     send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
 }
 
+/// The caret's paragraph, a bullet or number, about to become a checklist item: no
+/// longer numbered, and indented as an item of its nesting level, which `style_boxes`
+/// then keeps (dropping the numbering alone would take it back to the margin).
+pub fn numbering_to_task(h: HWND) {
+    let mut cur = ParaFormat2::new();
+    send(h, EM_GETPARAFORMAT, 0, &mut cur as *mut _ as isize);
+    if cur.numbering == 0 {
+        return;
+    }
+    let level = level_of(cur.start_indent, BULLET_START);
+    set_numbering(h, 0);
+    let mut pf = ParaFormat2::new();
+    pf.mask = PFM_STARTINDENT | PFM_OFFSET;
+    pf.start_indent = list_base(true) + level * LEVEL;
+    send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+}
+
 pub(super) fn list_indent(pf: &mut ParaFormat2, on: bool) {
     pf.offset = if on { BULLET_TEXT - BULLET_START } else { 0 };
     pf.start_indent = if on { BULLET_START } else { 0 };

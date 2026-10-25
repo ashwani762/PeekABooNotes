@@ -61,9 +61,8 @@ pub(super) fn toggle_task_lines(e: HWND) {
         let has = t.get(ps as usize).copied().is_some_and(is_task);
         if add && !has {
             rich::set_sel(e, ps, ps);
-            if rich::numbering(e) != 0 {
-                rich::set_numbering(e, 0); // a checklist line is never also numbered
-            }
+            // A checklist line is never also numbered; a nested one stays as deep.
+            rich::numbering_to_task(e);
             rich::replace_sel(e, "\u{2610} ");
             nb += 2;
             if ps <= a {
@@ -202,9 +201,7 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
                 ps
             }
             (AutoKind::Task, _) => {
-                if rich::numbering(e) != 0 {
-                    rich::set_numbering(e, 0);
-                }
+                rich::numbering_to_task(e);
                 rich::replace_sel(e, "\u{2610} ");
                 rich::style_boxes(e);
                 ps + 2
@@ -705,6 +702,29 @@ mod tests {
         rich::replace_sel(h, "\u{2610} pasted");
         rich::style_boxes(h);
         assert_ne!(indent(h, 2).1, 0);
+    }
+
+    /// A nested bullet made a checklist item ("[] " typed on it, or Ctrl+Shift+L) stays
+    /// as deep as it was.
+    #[test]
+    fn nested_bullets_become_nested_items() {
+        let h = editor("");
+        rich::load_markdown(h, "T\n- a\n  - b\n    - c");
+        let at = |h: HWND, s: &str| String::from_utf16_lossy(&rich::text(h)).find(s).unwrap() as i32;
+        let b = at(h, "b");
+        rich::set_sel(h, b, b);
+        rich::replace_sel(h, "[]");
+        assert!(try_auto_list(null_mut(), h));
+        assert_eq!(rich::to_markdown(h, true), "# T\n- a\n  - [ ] b\n    - c");
+        let c = at(h, "c");
+        rich::set_sel(h, c, c);
+        toggle_task_lines(h);
+        assert_eq!(rich::to_markdown(h, true), "# T\n- a\n  - [ ] b\n    - [ ] c");
+        // Stored and opened again: the same.
+        let h2 = editor("");
+        rich::set_rtf(h2, &rich::get_rtf(h));
+        rich::style_boxes(h2);
+        assert_eq!(rich::to_markdown(h2, true), "# T\n- a\n  - [ ] b\n    - [ ] c");
     }
 
     /// Ticking a box up the note while the caret is far below keeps the view where it is.
