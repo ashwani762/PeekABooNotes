@@ -120,11 +120,21 @@ fn place_to<'a>(w: &Win, groups: &'a [Group]) -> (Vec<Item<'a>>, f32) {
 pub(super) fn seg_metrics(w: &Win, labels: &[&str], r: &RECT) -> (Shape, f32) {
     let s = w.s;
     let widest = labels.iter().map(|l| w.fonts.seg_on.measure(l).0).max().unwrap_or(0) as f32;
-    let item = (widest + 28.0 * s).max(46.0 * s);
+    let item = seg_item(widest, labels.len(), (r.right - r.left) as f32, s);
     let (sw, sh) = (item * labels.len() as f32 + 4.0 * s, 28.0 * s);
     let x = r.right as f32 - INSET * s - sw;
     let y = (r.top + r.bottom) as f32 / 2.0 - sh / 2.0;
     (Shape::new(x, y, sw, sh, 8.0 * s), item)
+}
+
+/// Each segment's width for `n` labels the widest of which is `widest` px, in a row `row_w`
+/// px wide at scale `s`: the label with room on either side, but closer in where long names
+/// (German, French) would leave the row's own label no room, the control taking at most
+/// seven tenths of the row.
+pub(super) fn seg_item(widest: f32, n: usize, row_w: f32, s: f32) -> f32 {
+    let roomy = (widest + 28.0 * s).max(46.0 * s);
+    let most = (row_w * 0.7 - 4.0 * s) / n.max(1) as f32;
+    roomy.min(most.max(widest + 12.0 * s))
 }
 
 pub(super) fn toggle_shape(w: &Win, r: &RECT) -> Shape {
@@ -222,4 +232,46 @@ pub(super) fn hit_test(w: &Win, x: i32, y: i32) -> Hit {
         };
     }
     Hit::None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segments_close_in_for_long_names() {
+        // Short names keep the roomy segments.
+        assert_eq!(seg_item(46.0, 4, 452.0, 1.0), 74.0);
+        assert_eq!(seg_item(14.0, 3, 452.0, 1.0), 46.0, "5, 8, 12: the smallest segment");
+        // Long ones close in, to seven tenths of the row, but never past their label.
+        let item = seg_item(60.0, 4, 452.0, 1.0);
+        assert!(item < 88.0 && item * 4.0 + 4.0 <= 452.0 * 0.7 + 0.01);
+        assert_eq!(seg_item(75.0, 4, 452.0, 1.0), 87.0, "no closer than 6 px either side of the label");
+        assert_eq!(seg_item(100.0, 4, 452.0, 1.0), 112.0);
+        // The same at twice the scale.
+        assert_eq!(seg_item(150.0, 4, 904.0, 2.0), seg_item(75.0, 4, 452.0, 1.0) * 2.0);
+    }
+
+    /// The Notes page's font row, in every language and at 100% to 200%: the font names fit
+    /// their segments and the row's own label fits beside them.
+    #[test]
+    fn the_font_row_fits_in_every_language() {
+        use crate::common::i18n;
+        for lang in i18n::languages() {
+            i18n::init(&lang.tag);
+            for s in [1.0f32, 1.25, 1.5, 2.0] {
+                let seg = Font::new(12.5 * s, FW_SEMIBOLD, theme::FACE_TEXT);
+                let label = Font::new(13.5 * s, FW_NORMAL, theme::FACE_TEXT);
+                let names = [t!("font_system"), t!("font_serif"), t!("font_mono"), t!("font_hand")];
+                let widest = names.iter().map(|n| seg.measure(n).0).max().unwrap() as f32;
+                let row_w = (W - SIDE_W - 2.0 * PAD) * s;
+                let item = seg_item(widest, names.len(), row_w, s);
+                assert!(item >= widest, "{} at {s}: a font name is cut", lang.tag);
+                let control = item * names.len() as f32 + 4.0 * s;
+                let room = row_w - 2.0 * INSET * s - control - 12.0 * s;
+                assert!(label.measure(t!("settings_font")).0 as f32 <= room, "{} at {s}: \"{}\" has {room} px", lang.tag, t!("settings_font"));
+            }
+        }
+        i18n::init("en");
+    }
 }
