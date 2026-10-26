@@ -151,11 +151,14 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
     if a != b {
         return false;
     }
-    let t = rich::text(e);
-    let ps = rich::para_start(&t, a);
-    if a - ps > 3 {
+    // A space typed far into a line, as most are: its paragraph says so (each copied the
+    // whole note).
+    let p = rich::paras_around(e, a.max(0) as usize, a.max(0) as usize);
+    if a - (p.from as i32 + rich::para_start(&p.t, a - p.from as i32)) > 3 {
         return false;
     }
+    let t = rich::text(e);
+    let ps = rich::para_start(&t, a);
     // In code a "- " is just code, and a table's cells hold plain lines (their lists
     // wouldn't survive export): only quotes take lists.
     if lists_refused(e, &t, a) {
@@ -382,6 +385,15 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
 /// where the caret is put.)
 pub(super) fn block_backspace(e: HWND) -> bool {
     let (a, b) = rich::sel(e);
+    // Only in a cell's first paragraph, which follows a row's start or another cell: said
+    // by the marks before the caret's paragraph, without the whole text (each Backspace
+    // copied it).
+    let p = rich::paras_around(e, a.max(0) as usize, a.max(0) as usize);
+    let ps = p.from + rich::para_start(&p.t, a - p.from as i32) as usize;
+    let before = rich::raw_text(e, ps.saturating_sub(2), ps);
+    if !(before.last() == Some(&rich::CELL) || before == [rich::ROW_START, rich::CR]) {
+        return false;
+    }
     let t = rich::text(e);
     match rich::cell_at(e, &t, a) {
         Some((rich::Block::Quote, _, ca, _)) if a == b && a as usize == ca => {
@@ -487,12 +499,13 @@ pub(super) fn delete_into_item(e: HWND) -> bool {
     if a != b {
         return false;
     }
-    let t = rich::text(e);
-    let n = a as usize + 1;
-    if t.get(a as usize) != Some(&rich::CR) || !t.get(n).copied().is_some_and(is_task) {
+    // The paragraph mark at the caret and the box after it, not the whole text.
+    let t = rich::raw_text(e, a.max(0) as usize, a.max(0) as usize + 3);
+    if t.first() != Some(&rich::CR) || !t.get(1).copied().is_some_and(is_task) {
         return false;
     }
-    let gap = if t.get(n + 1) == Some(&(b' ' as u16)) { 2 } else { 1 };
+    let n = a as usize + 1;
+    let gap = if t.get(2) == Some(&(b' ' as u16)) { 2 } else { 1 };
     rich::still(e, || {
         rich::set_sel(e, a, (n + gap) as i32);
         rich::replace_sel(e, "");
@@ -619,6 +632,39 @@ mod tests {
         // Enter in an empty block takes it away.
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h).replace('^', ""), "Title/");
+    }
+
+    /// Backspace takes a block apart wherever it did when it looked through the whole
+    /// text: at the start of a quote's or a code block's text (past its language), in a
+    /// note, in a list item and nested, and nowhere else.
+    #[test]
+    fn backspace_finds_block_starts_as_before() {
+        crate::common::i18n::init("en");
+        let h = editor("");
+        let md = "T\n> quoted\n> more\n\n```rust\nlet x = 1;\n```\n| a | b |\n| --- | --- |\n| 1 | 2 |\n- item\n    > under it\n> > nested\n\nend";
+        rich::load_markdown(h, md);
+        let t = rich::text(h);
+        let was = |a: i32| match rich::cell_at(h, &t, a) {
+            Some((rich::Block::Quote, _, ca, _)) => a as usize == ca,
+            Some((rich::Block::Code, _, ca, cb)) => a as usize == ca || a as usize == rich::past_tag(h, &t, ca, cb),
+            _ => false,
+        };
+        let mut starts = 0;
+        for a in 0..=t.len() as i32 {
+            // Where RichEdit puts the caret (never on a row's own marks).
+            rich::set_sel(h, a, a);
+            let a = rich::sel(h).0;
+            if was(a) {
+                starts += 1;
+                // Taken apart, then the note as it was again.
+                assert!(block_backspace(h), "at {a}");
+                rich::load_markdown(h, md);
+                assert_eq!(rich::text(h), t);
+            } else {
+                assert!(!block_backspace(h), "at {a}");
+            }
+        }
+        assert!(starts >= 4, "{starts}");
     }
 
     #[test]
