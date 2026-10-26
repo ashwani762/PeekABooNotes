@@ -317,7 +317,7 @@ fn render(t: &mut Toast) {
     c.shape(&card, 0xFFFFFF, 0.10 * a, 1.0, 1.0);
     c.begin_batch();
     if notice {
-        c.text(&msg, &t.body, rect((x + 20.0 * s) as i32, y as i32, w - (40.0 * s) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        c.text(&msg, &t.body, rect((x + 24.0 * s) as i32, y as i32, w - (48.0 * s) as i32, h), 0xF2F2F2, a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         c.flush();
         present(t, cw, ch);
         return;
@@ -359,11 +359,12 @@ fn sizes(s: f32, msg_w: i32, label_w: i32) -> (i32, f32) {
     (need.clamp(320.0 * s, 560.0 * s).ceil() as i32, bw)
 }
 
-/// `sizes` for what the toast says now (a notice has no button: its text, with margins).
+/// `sizes` for what the toast says now. A notice has no ring or button: the capsule hugs
+/// its text, centred, rather than leaving the Undo toast's room empty beside it.
 fn measure(t: &Toast) -> (i32, f32) {
     let s = t.s;
     match (&t.notice, &t.undo) {
-        (Some(msg), _) => (((t.body.measure(msg).0 as f32 + 40.0 * s).clamp(320.0 * s, 560.0 * s)).ceil() as i32, 0.0),
+        (Some(msg), _) => (((t.body.measure(msg).0 as f32 + 48.0 * s).clamp(140.0 * s, 560.0 * s)).ceil() as i32, 0.0),
         (None, Some(msg)) => sizes(s, t.body.measure(msg).0, t.bold.measure(t!("toast_undo")).0),
         (None, None) => t.size,
     }
