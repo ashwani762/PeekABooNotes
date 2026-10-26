@@ -13,6 +13,7 @@ pub mod anim;
 pub mod attach;
 pub mod emoji;
 pub mod frontmatter;
+pub mod hotkey;
 pub mod log;
 pub mod mcp;
 pub mod search;
