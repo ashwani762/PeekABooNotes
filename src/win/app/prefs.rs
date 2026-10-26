@@ -35,6 +35,8 @@ pub fn apply_typography() {
 /// Switch the interface language and redraw everything that shows text.
 pub fn apply_language() {
     crate::common::i18n::init(&store(|s| s.d.settings.language.clone()));
+    // Display names ("Built-in display", "Display 2") are in the language they were made in.
+    crate::win::ui::displays::forget();
     allnotes::relabel();
     settings::relabel();
     for h in note::windows() {
