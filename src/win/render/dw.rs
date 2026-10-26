@@ -73,7 +73,7 @@ const KEPT_LAYOUTS: usize = 192;
 /// than `KEPT_LAYOUTS`, an animation would otherwise make every one of them again each
 /// frame. Past `MOST_LAYOUTS` the least recently drawn go regardless.
 const IN_USE: std::time::Duration = std::time::Duration::from_millis(250);
-const MOST_LAYOUTS: usize = 256;
+const MOST_LAYOUTS: usize = 384;
 
 thread_local! {
     static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
@@ -528,21 +528,21 @@ mod tests {
     fn layouts_kept_are_bounded() {
         let f = Font::new(14.0, 400, "Segoe UI");
         LAYOUTS.with(|c| c.borrow_mut().clear());
-        for i in 0..KEPT_LAYOUTS + 100 {
+        for i in 0..MOST_LAYOUTS + 100 {
             f.measure(&format!("text {i}"));
         }
         // All drawn just now: kept, up to the most.
         assert_eq!(cached_layouts(), MOST_LAYOUTS);
         // Drawn again, from the cache.
         let before = cached_layouts();
-        f.measure(&format!("text {}", KEPT_LAYOUTS + 99));
+        f.measure(&format!("text {}", MOST_LAYOUTS + 99));
         assert_eq!(cached_layouts(), before);
         std::thread::sleep(IN_USE + std::time::Duration::from_millis(50));
         f.measure("one more");
         assert_eq!(cached_layouts(), KEPT_LAYOUTS * 3 / 4 + 1);
         // The one drawn last is among those kept.
         let kept = cached_layouts();
-        f.measure(&format!("text {}", KEPT_LAYOUTS + 99));
+        f.measure(&format!("text {}", MOST_LAYOUTS + 99));
         assert_eq!(cached_layouts(), kept);
         LAYOUTS.with(|c| c.borrow_mut().clear());
     }
