@@ -255,7 +255,7 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
             let indent = "  ".repeat(quote_level(h, rows[0]));
             let body = body_md(h, t, a, b, inline);
             let body = body.strip_suffix('\n').unwrap_or(&body);
-            let lines: Vec<String> = body.split('\n').map(|l| format!("{indent}> {l}").trim_end().to_string()).collect();
+            let lines: Vec<String> = body.split('\n').map(|l| if l.is_empty() { format!("{indent}>") } else { format!("{indent}> {l}") }).collect();
             out.push_str(&lines.join("\n"));
         }
         Block::Code => {
@@ -910,15 +910,16 @@ fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
     // ``` code (```rust: with its language), to a closing fence at least as long (or the
     // end).
     if let Some((ticks, lang)) = crate::common::store::fence(l) {
-        let body: Vec<String> = next.iter().take_while(|n| !crate::common::store::closes_fence(n, ticks)).map(|n| n.trim_end().to_string()).collect();
+        let body: Vec<String> = next.iter().take_while(|n| !crate::common::store::closes_fence(n, ticks)).map(|n| n.to_string()).collect();
         let used = (body.len() + 1).min(next.len());
         return Some((Fill::Code(lang.to_string(), body), used));
     }
     // > quote lines, together, read as a note of their own: each a paragraph of its own
     // kind (`> - item`), or more blocks (`> > nested`, a fenced code block). Indented two
     // spaces a level, a quote under a list item.
+    // (Spaces at a line's end stay: in code they're its text.)
     let quoted = |s: &str| {
-        let t = s.trim_end();
+        let t = s;
         let q = t.trim_start();
         let mut lead = t.len() - q.len();
         // `- > text`, a quote as a list item: under the item before it.
@@ -1475,6 +1476,14 @@ mod tests {
         cycle(md, md);
     }
 
+    /// Spaces at the end of a line of code are its text, in a quote too.
+    #[test]
+    fn code_keeps_trailing_spaces() {
+        for md in ["# T\n```\ncode with trailing   \n   \nend\t\n```", "# T\n> ```\n> code  \n> ```\n> after"] {
+            cycle(md, md);
+        }
+    }
+
     /// A mark on part of a link's text, or starting in it, opens and closes inside its
     /// brackets; one on all of it may stay open around it.
     #[test]
@@ -1507,7 +1516,8 @@ mod tests {
             ("# T\n- a\n- \n- b", "# T\n- a\n- \n- b"),
             ("# T\n1. a\n2. \n3. b", "# T\n1. a\n2. \n3. b"),
             ("# T\n- a\n  - \n- b", "# T\n- a\n  - \n- b"),
-            ("# T\n> - a\n> - \n> - b", "# T\n> - a\n> -\n> - b"),
+            ("# T\n> - a\n> - \n> - b", "# T\n> - a\n> - \n> - b"),
+            ("# T\n> - a\n> -\n> - b", "# T\n> - a\n> - \n> - b"),
             ("# T\n- a\n- ", "# T\n- a\n-"),
             ("# T\n1. a\n2.", "# T\n1. a\n2."),
         ] {
