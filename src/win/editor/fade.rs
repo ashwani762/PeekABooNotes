@@ -94,6 +94,21 @@ pub fn paint(e: HWND, paper: u32, s: f32, touched: u8) {
     }
 }
 
+/// The client rows of editor `e` (at scale `s`) that other overlays mustn't draw on now:
+/// above the first, the faded top band, and from the second, the faded bottom one. A band
+/// being drawn fresh this moment (inside our own redraw) or with nothing beyond it isn't
+/// kept out, since it's faded after. Drawing there otherwise put full-strength checkbox
+/// circles on faded text, as no fade followed it.
+pub fn kept_clear(e: HWND, s: f32) -> (i32, i32) {
+    let fresh = FRESH.get();
+    let mut rc: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetClientRect(e, &mut rc) };
+    let band = band(s);
+    let top = if fresh & TOP == 0 && rich::scroll_y(e) > 0 { rc.top + band } else { rc.top };
+    let bottom = if fresh & BOTTOM == 0 && below(e, &rc) > 0 { rc.bottom - band } else { rc.bottom };
+    (top, bottom)
+}
+
 pub fn forget(e: HWND) {
     SEEN.with(|m| m.borrow_mut().remove(&(e as isize)));
 }

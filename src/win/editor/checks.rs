@@ -148,7 +148,9 @@ pub fn paint(e: HWND) {
         let v = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 1.0 } else { 0.0 });
         items.push((text_x, cy, d, gap, v, hot == Some((e as isize, cp))));
     }
-    let (ux0, uy0, ux1, uy1) = (ux0.max(rc.left), uy0.max(rc.top), ux1.min(rc.right), uy1.min(rc.bottom));
+    // Not over a faded edge (unless it's being faded again right after).
+    let (clear_top, clear_bottom) = crate::win::editor::fade::kept_clear(e, s);
+    let (ux0, uy0, ux1, uy1) = (ux0.max(rc.left), uy0.max(rc.top).max(clear_top), ux1.min(rc.right), uy1.min(rc.bottom).min(clear_bottom));
     if items.is_empty() || ux1 <= ux0 || uy1 <= uy0 {
         return;
     }
