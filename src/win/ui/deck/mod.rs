@@ -40,6 +40,7 @@ use crate::win::util::{WM_MOUSELEAVE, key_down, rect, wide, x_of, y_of};
 mod layout;
 mod draw;
 mod keys;
+mod fullscreen;
 use layout::*;
 use draw::*;
 use keys::{Move, Stop};
@@ -263,14 +264,15 @@ pub fn holds_keys(h: HWND) -> bool {
     !h.is_null() && with(|d| d.hwnd == h && d.kbd.is_some()).unwrap_or(false)
 }
 
-/// Whether the foreground window is on the deck's monitor (true when there is none).
-fn front_on_deck_monitor() -> bool {
-    let fg = unsafe { GetForegroundWindow() };
-    if fg.is_null() {
-        return true;
+/// Look again whether a full-screen window covers the deck's display, and step aside for
+/// it (or come back) accordingly.
+fn check_fullscreen(d: &mut Deck) {
+    let fs = fullscreen::on(&monitor_geo().0);
+    if fs != d.fullscreen {
+        d.fullscreen = fs;
+        update_visibility(d);
+        render(d);
     }
-    let (a, b) = (crate::win::ui::screen::of(fg).0, monitor_geo().0);
-    (a.left, a.top, a.right, a.bottom) == (b.left, b.top, b.right, b.bottom)
 }
 
 pub fn create() {
@@ -335,8 +337,14 @@ pub fn shutdown() {
 /// Notes or settings changed: resync and redraw.
 pub fn refresh() {
     with(|d| {
+        let was = d.geo.work;
         update_visibility(d);
         sync(d);
+        // At start, or on another display now: is a full-screen window covering this one?
+        let now = d.geo.work;
+        if (was.left, was.top, was.right, was.bottom) != (now.left, now.top, now.right, now.bottom) {
+            check_fullscreen(d);
+        }
         render(d);
     });
 }
@@ -1086,11 +1094,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }),
         WM_APPBAR => with(|d| {
             if wp as u32 == ABN_FULLSCREENAPP {
-                // Sent for a full-screen window on any monitor: the deck only steps aside
-                // for one on its own (the window in front, which just went full screen).
-                d.fullscreen = lp != 0 && front_on_deck_monitor();
-                update_visibility(d);
-                render(d);
+                // Sent for a full-screen window on any monitor, coming or going: the deck
+                // only steps aside while one covers its own, whatever the others do.
+                check_fullscreen(d);
             }
             Action::None
         }),
@@ -1100,6 +1106,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             crate::win::ui::displays::forget();
             sync(d);
             render(d);
+            // A full-screen window may cover the deck's display now, or no longer.
+            if msg != WM_SETTINGCHANGE {
+                check_fullscreen(d);
+            }
             Action::None
         }),
         _ => None,
