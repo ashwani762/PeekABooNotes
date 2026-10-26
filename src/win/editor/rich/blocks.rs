@@ -357,12 +357,17 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
                     let mut pf = ParaFormat2::new();
                     pf.mask = PFM_SPACEBEFORE | PFM_SPACEAFTER;
                     send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
-                    for (at, before) in [(ca, true), (cb, false)] {
+                    // The last line is given both: a selection ending at an empty last line's
+                    // start leaves that line out of the clearing above, and Enter at the end
+                    // of the first line had given it the first line's air above it, so the
+                    // last line sat lower than the rest until it held text and was restyled.
+                    let last = para_start(&t, cb as i32) as usize;
+                    for (at, before, after) in [(ca, CODE_AIR, if last == ca { CODE_AIR } else { 0 }), (last, if last == ca { CODE_AIR } else { 0 }, CODE_AIR)] {
                         set_sel(h, at as i32, at as i32);
                         let mut pf = ParaFormat2::new();
-                        pf.mask = if before { PFM_SPACEBEFORE } else { PFM_SPACEAFTER };
-                        pf.space_before = CODE_AIR;
-                        pf.space_after = CODE_AIR;
+                        pf.mask = PFM_SPACEBEFORE | PFM_SPACEAFTER;
+                        pf.space_before = before;
+                        pf.space_after = after;
                         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
                     }
                 }

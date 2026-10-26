@@ -1401,6 +1401,70 @@ mod tests {
         assert!(gaps.iter().all(|&g| g == gaps[0]), "line gaps {gaps:?}, lines (baseline, before, after) {l:?}");
     }
 
+    /// Where each line of the code block holding `cp` sits (its baseline), from the first.
+    fn code_baselines(h: HWND, cp: i32) -> Vec<i32> {
+        let t = rich::text(h);
+        let (_, _, ca, cb) = rich::cell_at(h, &t, cp).unwrap();
+        std::iter::once(ca)
+            .chain((ca..cb).filter(|&i| t[i] == CR).map(|i| i + 1))
+            .map(|i| rich::baseline_at(h, i as i32).unwrap())
+            .collect()
+    }
+
+    /// A code block typed line by line, at the top level and under a list item: after each
+    /// line and each Enter every line is as far below the one before as the rest (the empty
+    /// last line Enter made kept the first line's air above it, 6 px lower, until it held
+    /// text and the block was next restyled). Left, the note sits exactly as it does opened
+    /// from its Markdown.
+    #[test]
+    fn code_lines_stay_evenly_spaced_as_typed() {
+        for start in ["T\nabove", "T\n- ab\n- x"] {
+            let h = editor("");
+            rich::apply_base_format(h, 0x1D1D1F, 0xFFFFFF);
+            rich::load_markdown(h, start);
+            let end = rich::text(h).len() as i32;
+            rich::set_sel(h, end - if start.ends_with('x') { 1 } else { 0 }, end);
+            if start.ends_with('x') {
+                rich::replace_sel(h, "```");
+            } else {
+                rich::replace_sel(h, "\r```");
+            }
+            assert_eq!(block_enter(h), Some(true), "{start}");
+            let cell = rich::sel(h).0;
+            let even = |h: HWND, at: &str| {
+                let y = code_baselines(h, cell);
+                let gaps: Vec<i32> = y.windows(2).map(|w| w[1] - w[0]).collect();
+                assert!(gaps.iter().all(|&g| g == gaps[0]), "{start}, {at}: lines at {y:?}");
+                gaps.first().copied()
+            };
+            let mut pitch = None;
+            for line in ["one", "two", "three"] {
+                rich::replace_sel(h, line);
+                pitch = even(h, &format!("{line} typed")).or(pitch);
+                assert_eq!(block_enter(h), Some(true));
+                let now = even(h, &format!("Enter after {line}"));
+                assert_eq!(now, pitch.or(now), "{start}: Enter after {line}");
+                pitch = now;
+            }
+            // A second empty line at the end leaves the block, and both go.
+            assert_eq!(block_enter(h), Some(true));
+            assert_eq!(block_enter(h), Some(true));
+            assert!(rich::cell_at(h, &rich::text(h), rich::sel(h).0).is_none(), "{start}: out of the block");
+            rich::replace_sel(h, "after");
+            even(h, "left");
+            let md = rich::to_markdown(h, true);
+            let opened = editor("");
+            rich::apply_base_format(opened, 0x1D1D1F, 0xFFFFFF);
+            rich::load_markdown(opened, md.strip_prefix("# ").unwrap());
+            assert_eq!(rich::to_markdown(opened, true), md);
+            let ys = |h: HWND| {
+                let t = String::from_utf16_lossy(&rich::text(h));
+                ["one", "two", "three", "after"].map(|w| rich::baseline_at(h, t.find(w).unwrap() as i32).unwrap())
+            };
+            assert_eq!(ys(h), ys(opened), "{start}: typed, then as opened from\n{md}");
+        }
+    }
+
     /// A selection from a line into the quote below it: the line becomes a code block,
     /// the quote stays a quote, and no row marks end up as text.
     #[test]
