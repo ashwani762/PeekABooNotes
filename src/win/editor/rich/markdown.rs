@@ -72,8 +72,9 @@ fn body_md(h: HWND, t: &[u16], a: usize, b: usize, inline: bool) -> String {
             item_end = None;
             out.push_str(&block_md(h, t, kind, &rows, inline));
             out.push('\n');
-            // A quote under a list item is part of it: the list's count goes on after it.
-            if kind != Block::Quote || quote_level(h, rows[0]) == 0 {
+            // A quote or code under a list item is part of it: the list's count goes on
+            // after it.
+            if quote_level(h, rows[0]) == 0 {
                 numbers = [0; MAX_LEVEL as usize + 1];
             }
             start = rows.last().map_or(b, |r| r.end);
@@ -281,11 +282,23 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
             // of them ends it early. (The light text keeps to three, as previews read it.)
             let most = lines.iter().flat_map(|l| l.split('\n')).map(|l| l.trim_start().bytes().take_while(|&c| c == b'`').count()).max().unwrap_or(0);
             let fence = "`".repeat(if inline && most >= 3 { most + 1 } else { 3 });
-            out.push_str(&format!("{fence}{lang}\n"));
+            // Under a list item, indented as the item's text is, fences and lines alike.
+            let indent = "  ".repeat(quote_level(h, rows[0]));
+            out.push_str(&format!("{indent}{fence}{lang}\n"));
             for l in lines {
-                out.push_str(&l);
+                for (k, part) in l.split('\n').enumerate() {
+                    if k > 0 {
+                        out.push('\n');
+                    }
+                    // (An empty line stays empty: spaces at its end would be its text.)
+                    if !part.is_empty() {
+                        out.push_str(&indent);
+                    }
+                    out.push_str(part);
+                }
                 out.push('\n');
             }
+            out.push_str(&indent);
             out.push_str(&fence);
         }
         Block::Table => {
@@ -855,8 +868,8 @@ type Inline = (String, Runs, Links);
 enum Fill {
     /// How far it's indented under a list item, and what it holds (blocks of its own too).
     Quote(usize, Body),
-    /// Its language (```rust), and its lines.
-    Code(String, Vec<String>),
+    /// Its language (```rust), its lines, and how far it's indented under a list item.
+    Code(String, Vec<String>, usize),
     /// Rows of cells (each cell's paragraphs), and each column's alignment.
     Table(Vec<Vec<Vec<Inline>>>, Vec<u16>),
 }
@@ -917,9 +930,13 @@ fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
     // ``` code (```rust: with its language), to a closing fence at least as long (or the
     // end).
     if let Some((ticks, lang)) = crate::common::store::fence(l) {
-        let body: Vec<String> = next.iter().take_while(|n| !crate::common::store::closes_fence(n, ticks)).map(|n| n.to_string()).collect();
+        // Indented two spaces a level, under a list item: its lines are, too (as far as
+        // they have spaces there), as the fence is.
+        let lead = raw.len() - l.len();
+        let unindent = |n: &str| n[n.bytes().take(lead).take_while(|&c| c == b' ').count()..].to_string();
+        let body: Vec<String> = next.iter().take_while(|n| !crate::common::store::closes_fence(n, ticks)).map(|n| unindent(n)).collect();
         let used = (body.len() + 1).min(next.len());
-        return Some((Fill::Code(lang.to_string(), body), used));
+        return Some((Fill::Code(lang.to_string(), body, lead / 2), used));
     }
     // > quote lines, together, read as a note of their own: each a paragraph of its own
     // kind (`> - item`), or more blocks (`> > nested`, a fenced code block). Indented two
@@ -1046,7 +1063,7 @@ fn put_block(h: HWND, at: i32, fill: &Fill) {
     insert_block_over(h, at, over, kind, rows, cols);
     let t = text(h);
     let Some((_, rs)) = block_at(h, &t, at) else { return };
-    if let Fill::Quote(level, _) = fill
+    if let Fill::Quote(level, _) | Fill::Code(_, _, level) = fill
         && *level > 0
     {
         set_quote_level(h, rs[0], *level);
@@ -1061,7 +1078,7 @@ fn put_block(h: HWND, at: i32, fill: &Fill) {
                 insert_text(h, &body.joined());
                 put_body(h, a as i32, body);
             }
-            Fill::Code(lang, lines) => {
+            Fill::Code(lang, lines, _) => {
                 set_sel(h, a as i32, a as i32);
                 insert_text(h, &lines.join("\r"));
                 set_code_tag(h, a as i32, lang);

@@ -316,11 +316,22 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
         return None;
     }
     if ps > 0 && pe == a && String::from_utf16_lossy(&t[ps as usize..pe as usize]).trim() == "```" {
+        // On a list item the block takes the item's place, under the item above it, as deep
+        // as the item was (as "> " does): no empty item is left below it.
+        let item = rich::list_level(e);
         rich::still(e, || {
             rich::set_sel(e, ps, pe);
             rich::replace_sel(e, "");
+            if item.is_some() {
+                rich::set_numbering(e, 0);
+            }
             let over = if rich::text(e).get(ps as usize) == Some(&rich::CR) { 1 } else { 0 };
             let cell = rich::insert_block_over(e, ps, over, Block::Code, 1, 1);
+            if let Some(level) = item
+                && let Some((_, rows)) = rich::block_at(e, &rich::text(e), ps)
+            {
+                rich::set_quote_level(e, rows[0], level as usize + 1);
+            }
             rich::set_sel(e, cell, cell);
         });
         return Some(true);
@@ -725,6 +736,26 @@ mod tests {
         // Enter in an empty block takes it away.
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h).replace('^', ""), "Title/");
+        // ``` on a new list item: the block goes under the item above, and no empty item
+        // is left below it.
+        let cases = [
+            ("Title\n- ab\n- x", 1, "# Title\n- ab\n  ```\n  xyz\n  ```"),
+            ("Title\n- ab\n  - x", 2, "# Title\n- ab\n    ```\n    xyz\n    ```"),
+        ];
+        for (md, level, want) in cases {
+            let h = editor("");
+            rich::load_markdown(h, md);
+            let end = rich::text(h).len() as i32;
+            rich::set_sel(h, end - 1, end);
+            rich::replace_sel(h, "```");
+            assert_eq!(block_enter(h), Some(true));
+            assert_eq!(plain(h), "Title/ab/[/^|]/", "{md}");
+            let t = rich::text(h);
+            let (_, rows) = rich::block_at(h, &t, rich::sel(h).0).unwrap();
+            assert_eq!(rich::quote_level(h, rows[0]), level, "{md}");
+            rich::replace_sel(h, "xyz");
+            assert_eq!(rich::to_markdown(h, true), want, "{md}");
+        }
         // Empty lines in the middle of code stay, however many.
         let h = editor("Title\ra\rb\rend");
         caret(h, "a");
