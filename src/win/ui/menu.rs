@@ -281,7 +281,6 @@ fn create(x: i32, y: i32, w: i32, h: i32, sub: bool) -> HWND {
     unsafe { CreateWindowExW(ex, wide(CLASS).as_ptr(), wide("Menu").as_ptr(), WS_POPUP, x, y, w, h, null_mut(), null_mut(), app::hinst(), null_mut()) }
 }
 
-/// Show a menu at `at` (screen coordinates). Returns the chosen command id, 0 if dismissed.
 /// Tell Windows a menu popup opened or closed, as its own menus do (`TrackPopupMenu`
 /// raises these). The taskbar's hidden-icons flyout stays open while the menu of one of its
 /// icons is up only when it hears this; without it, the flyout closed as soon as the
@@ -293,6 +292,7 @@ fn announce(hwnd: HWND, open: bool) {
     unsafe { windows_sys::Win32::UI::Accessibility::NotifyWinEvent(event, hwnd, OBJID_CLIENT, CHILDID_SELF) };
 }
 
+/// Show a menu at `at` (screen coordinates). Returns the chosen command id, 0 if dismissed.
 pub fn show(items: Vec<Item>, at: POINT) -> u32 {
     show_with(items, at, false, None)
 }
@@ -1069,21 +1069,8 @@ fn on_key(o: &mut Open, vk: u16) {
         VK_RIGHT => Key::Arrow(Arrow::Right),
         VK_RETURN | VK_SPACE => Key::Enter,
         VK_ESCAPE => Key::Esc,
-        _ => {
-            // First-letter jump, among the rows that can be picked.
-            let ch = (vk as u8 as char).to_ascii_lowercase();
-            if ch.is_ascii_alphanumeric() {
-                let found = o.menus[level].items.iter().position(|it| match it {
-                    Item::Action { label, disabled: false, .. } | Item::Submenu { label, disabled: false, .. } => label.to_lowercase().starts_with(ch),
-                    _ => false,
-                });
-                if let Some(i) = found {
-                    plan(o, level, Hover::Cancel);
-                    focus(o, level, Target::Row(i));
-                }
-            }
-            return;
-        }
+        // Letters come as characters, in the keyboard's own layout (`on_char`).
+        _ => return,
     };
     // The keys take over from the pointer: nothing it set going happens now.
     plan(o, level, Hover::Cancel);
@@ -1114,6 +1101,33 @@ fn on_key(o: &mut Open, vk: u16) {
             choose(o, level, t);
         }
         Step::Dismiss => dismiss(o),
+    }
+}
+
+/// A typed character: the focus jumps to the next row that can be picked whose label
+/// starts with it, from the row it's on, so typing it again goes on to the next.
+fn on_char(o: &mut Open, ch: char) {
+    if o.closing || o.blink.is_some() {
+        return;
+    }
+    let level = o.keys.min(o.menus.len() - 1);
+    let m = &o.menus[level];
+    let rows: Vec<(usize, &str)> = m
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, it)| match it {
+            Item::Action { label, disabled: false, .. } | Item::Submenu { label, disabled: false, .. } => Some((i, label.as_str())),
+            _ => None,
+        })
+        .collect();
+    let at = match m.hot {
+        Target::Row(i) => Some(i),
+        _ => None,
+    };
+    if let Some(i) = crate::win::ui::focus::by_letter(&rows, at, ch) {
+        plan(o, level, Hover::Cancel);
+        focus(o, level, Target::Row(i));
     }
 }
 
@@ -1176,6 +1190,12 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             WM_KEYDOWN => {
                 let vk = wp as u16;
                 with(|o| on_key(o, vk));
+                return 0;
+            }
+            WM_CHAR => {
+                if let Some(ch) = char::from_u32(wp as u32) {
+                    with(|o| on_char(o, ch));
+                }
                 return 0;
             }
             WM_TIMER if wp == T_SUB => {

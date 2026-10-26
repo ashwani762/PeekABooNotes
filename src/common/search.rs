@@ -48,7 +48,7 @@ pub struct Match {
 }
 
 /// Lowercase, without accents, one char for one char (so indices carry over).
-fn fold(c: char) -> char {
+pub fn fold(c: char) -> char {
     // Most text is ASCII, which only needs its capitals lowered.
     if c.is_ascii() {
         return c.to_ascii_lowercase();

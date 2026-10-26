@@ -62,14 +62,7 @@ pub(super) fn refocus(before: &[Stop], after: &[Stop], at: Option<Stop>) -> Opti
 /// round from the top, so pressing it again goes on to the next such card. Menus jump to
 /// their rows the same way.
 pub(super) fn by_letter(cards: &[(Stop, &str)], at: Option<Stop>, ch: char) -> Option<Stop> {
-    let lower = |c: char| c.to_lowercase().collect::<String>();
-    let want = lower(ch);
-    if want.trim().is_empty() {
-        return None;
-    }
-    let n = cards.len();
-    let from = at.and_then(|a| cards.iter().position(|(s, _)| *s == a)).map_or(0, |i| i + 1);
-    (0..n).map(|k| &cards[(from + k) % n]).find(|(_, title)| title.trim_start().chars().next().is_some_and(|c| lower(c) == want)).map(|(s, _)| *s)
+    focus::by_letter(cards, at, ch)
 }
 
 #[cfg(test)]
@@ -149,6 +142,7 @@ mod tests {
         assert_eq!(by_letter(&cards, Some(Card(1)), 'p'), Some(Card(2)));
         assert_eq!(by_letter(&cards, Some(Card(2)), 'p'), Some(Card(2)), "the only match stays");
         assert_eq!(by_letter(&cards, None, 'é'), Some(Card(5)));
+        assert_eq!(by_letter(&cards, Some(Card(1)), 'e'), Some(Card(5)), "accents don't matter");
         assert_eq!(by_letter(&cards, None, 'x'), None);
         assert_eq!(by_letter(&cards, None, ' '), None);
         assert_eq!(by_letter(&[], None, 'a'), None);

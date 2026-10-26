@@ -38,6 +38,20 @@ pub fn step<T: Copy + PartialEq>(order: &[T], cur: Option<T>, back: bool, wrap: 
     cur.filter(|&c| at.is_some() && live(c))
 }
 
+/// A typed letter: the next item after `at` whose label starts with it, coming round from
+/// the top, so pressing it again goes on to the next such item (as Windows' own menus and
+/// lists do). Case and accents don't count: "e" finds "Éclairs", "A" finds "archive".
+pub fn by_letter<T: Copy + PartialEq>(items: &[(T, &str)], at: Option<T>, ch: char) -> Option<T> {
+    use crate::common::search::fold;
+    if ch.is_whitespace() || ch.is_control() {
+        return None;
+    }
+    let want = fold(ch);
+    let n = items.len();
+    let from = at.and_then(|a| items.iter().position(|(t, _)| *t == a)).map_or(0, |i| i + 1);
+    (0..n).map(|k| &items[(from + k) % n]).find(|(_, label)| label.trim_start().chars().next().is_some_and(|c| fold(c) == want)).map(|(t, _)| *t)
+}
+
 /// The focus ring around control `sh`: its corners follow the control's.
 pub fn ring(c: &mut Canvas, sh: &Shape, rgb: u32, alpha: f32, s: f32) {
     c.shape(&sh.inset(-(GAP + WIDTH) * s), rgb, alpha, 1.0, WIDTH * s);
@@ -52,7 +66,32 @@ pub fn ring_haloed(c: &mut Canvas, sh: &Shape, rgb: u32, halo: u32, alpha: f32, 
 
 #[cfg(test)]
 mod tests {
-    use super::step;
+    use super::{by_letter, step};
+
+    #[test]
+    fn letters_go_round_from_the_focus() {
+        let rows = [(0, "Open"), (2, "Keep on Top"), (3, "Show in Deck"), (5, "Archive"), (6, "Delete"), (8, "archive all")];
+        assert_eq!(by_letter(&rows, None, 'a'), Some(5));
+        assert_eq!(by_letter(&rows, Some(5), 'a'), Some(8), "on to the next");
+        assert_eq!(by_letter(&rows, Some(8), 'A'), Some(5), "round from the top, either case");
+        assert_eq!(by_letter(&rows, Some(0), 'k'), Some(2));
+        assert_eq!(by_letter(&rows, Some(2), 'k'), Some(2), "the only match stays");
+        assert_eq!(by_letter(&rows, Some(42), 'd'), Some(6), "focus not among them: from the top");
+        assert_eq!(by_letter(&rows, None, 'z'), None);
+        assert_eq!(by_letter(&rows, None, ' '), None);
+        assert_eq!(by_letter::<i32>(&[], None, 'a'), None);
+    }
+
+    #[test]
+    fn letters_ignore_accents_and_reach_any_script() {
+        let rows = [(1, "Éclairs"), (2, "Öffnen"), (3, "नया नोट"), (4, "アーカイブ"), (5, " eggs")];
+        assert_eq!(by_letter(&rows, None, 'e'), Some(1));
+        assert_eq!(by_letter(&rows, Some(1), 'E'), Some(5), "leading spaces don't count");
+        assert_eq!(by_letter(&rows, None, 'ö'), Some(2));
+        assert_eq!(by_letter(&rows, None, 'o'), Some(2));
+        assert_eq!(by_letter(&rows, None, 'न'), Some(3));
+        assert_eq!(by_letter(&rows, None, 'ア'), Some(4));
+    }
 
     const ORDER: [char; 4] = ['a', 'b', 'c', 'd'];
     fn all(_: char) -> bool {
