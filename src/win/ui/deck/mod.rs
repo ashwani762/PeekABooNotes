@@ -229,6 +229,9 @@ struct Deck {
     /// Hidden (by the user, or for a full-screen window), it's out only while it has the
     /// keys: Ctrl+Alt+K brought it.
     summoned: bool,
+    /// Where the pointer was when a note opened from the deck: until it moves, the cards
+    /// sliding up under it don't count as pointed at.
+    still: Option<POINT>,
 }
 
 struct Kbd {
@@ -334,6 +337,7 @@ pub fn create() {
             marquee_live: false,
             kbd: None,
             summoned: false,
+            still: None,
         })
     });
     // As an app bar (without reserving space) we get ABN_FULLSCREENAPP for free.
@@ -408,6 +412,7 @@ pub fn frame(dt: f32) -> bool {
         if draw {
             render(d);
         }
+        repoint(d);
         (moving || d.marquee_live, folded)
     })
     .unwrap_or((false, false));
@@ -832,6 +837,74 @@ fn end_preview(d: &mut Deck) {
     anim::wake(Client::Deck);
 }
 
+/// The pointer is over `hit` now: it lights up, and a card comes out after a rest there (at
+/// once while another is out, as the pointer scrubs along the deck).
+fn point_at(d: &mut Deck, hit: Hit) {
+    if hit == d.hover {
+        return;
+    }
+    d.hover = hit;
+    // While the deck has the keys, the ring goes where the pointer lights, so Enter opens
+    // what's shown.
+    let stop = match hit {
+        Hit::Tab(i) => Some(Stop::Card(d.tabs[i].id)),
+        Hit::More => Some(Stop::More),
+        Hit::Plus => Some(Stop::Plus),
+        Hit::None => None,
+    };
+    if let (Some(k), Some(stop)) = (d.kbd.as_mut(), stop) {
+        k.at = Some(stop);
+    }
+    unsafe { KillTimer(d.hwnd, T_PREVIEW) };
+    match hit {
+        Hit::Tab(i) if d.previewing => begin_preview(d, i),
+        Hit::Tab(_) => unsafe {
+            SetTimer(d.hwnd, T_PREVIEW, motion::PREVIEW_DWELL_MS, None);
+        },
+        _ => {
+            if d.previewing {
+                end_preview(d);
+            }
+        }
+    }
+    anim::wake(Client::Deck);
+}
+
+/// A note opens from the deck: the cards close up behind its card, but what slides under
+/// the pointer is not pointed at until the pointer moves.
+fn hold_still() {
+    let mut at = POINT { x: 0, y: 0 };
+    unsafe { GetCursorPos(&mut at) };
+    with(|d| {
+        d.still = Some(at);
+        point_at(d, Hit::None);
+    });
+}
+
+/// The cards moved under a pointer that didn't (fanning out, making room, tucking back):
+/// what it's over now is what it points at, as if it had moved, so resting on a card that
+/// slid under it brings that card out. Not while dragging, a menu is up or the deck has
+/// the keys, nor while the pointer stays where it was when a note opened from here.
+fn repoint(d: &mut Deck) {
+    if !(d.open && d.wide) || d.drag.is_some() || d.menu || d.kbd.is_some() {
+        return;
+    }
+    let mut at = POINT { x: 0, y: 0 };
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    unsafe {
+        GetCursorPos(&mut at);
+        GetWindowRect(d.hwnd, &mut r);
+    }
+    if !crate::win::util::pt_in(&r, at.x, at.y) || d.still.is_some_and(|p| (p.x, p.y) == (at.x, at.y)) {
+        return;
+    }
+    let hit = hit_test(d, at.x - r.left, at.y - r.top);
+    if hit != d.hover {
+        point_at(d, hit);
+        tip(d, hit, false);
+    }
+}
+
 /// While a card's menu is up: has the pointer moved on to another card (or the + / more
 /// buttons)? Then the menu and the pulled-out card go away together, and the deck is
 /// live again under the pointer for whatever it reaches next.
@@ -971,40 +1044,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     return Action::None;
                 }
             }
-            let hit = hit_test(d, x, y);
-            if hit != d.hover {
-                d.hover = hit;
-                // While the deck has the keys, the ring goes where the pointer lights, so
-                // Enter opens what's shown.
-                let stop = match hit {
-                    Hit::Tab(i) => Some(Stop::Card(d.tabs[i].id)),
-                    Hit::More => Some(Stop::More),
-                    Hit::Plus => Some(Stop::Plus),
-                    Hit::None => None,
-                };
-                if let (Some(k), Some(stop)) = (d.kbd.as_mut(), stop) {
-                    k.at = Some(stop);
-                }
-                unsafe { KillTimer(hwnd, T_PREVIEW) };
-                match hit {
-                    Hit::Tab(i) if d.previewing => begin_preview(d, i), // scrub between cards instantly
-                    Hit::Tab(_) => unsafe {
-                        SetTimer(hwnd, T_PREVIEW, motion::PREVIEW_DWELL_MS, None);
-                    },
-                    _ => {
-                        if d.previewing {
-                            end_preview(d);
-                        }
-                    }
-                }
-                anim::wake(Client::Deck);
+            // A note just opened from here, and the pointer hasn't moved since: the cards
+            // that slid up under it aren't what it's pointing at.
+            let mut at = POINT { x: 0, y: 0 };
+            unsafe { GetCursorPos(&mut at) };
+            if d.still.is_some_and(|p| (p.x, p.y) != (at.x, at.y)) {
+                d.still = None;
             }
+            let hit = if d.still.is_some() { Hit::None } else { hit_test(d, x, y) };
+            point_at(d, hit);
             // On every move: the buttons slide as a pulled-out card tucks back.
             tip(d, hit, false);
             Action::None
         }),
         WM_MOUSELEAVE => with(|d| {
             d.tracking = false;
+            d.still = None;
             crate::win::ui::tooltip::leave(hwnd);
             // The pointer "leaves" for our own context menu: hold still until it closes.
             // While the deck has the keys it stays open, lit where the ring is.
@@ -1208,8 +1263,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         _ => None,
     };
     match action {
-        Some(Action::Open(id)) => app::toggle_note(id),
-        Some(Action::New) => app::new_note(),
+        Some(Action::Open(id)) => {
+            hold_still();
+            app::toggle_note(id)
+        }
+        Some(Action::New) => {
+            hold_still();
+            app::new_note()
+        }
         Some(Action::More) => app::show_all_notes(false),
         Some(Action::TabMenu(id, at)) => {
             // Beside the pulled-out card, never over it, at the height you clicked (from

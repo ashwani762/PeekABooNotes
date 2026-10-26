@@ -63,6 +63,7 @@ pub(super) fn deck() -> Deck {
         marquee_live: false,
         kbd: None,
         summoned: false,
+        still: None,
     }
 }
 
