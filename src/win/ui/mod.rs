@@ -96,7 +96,7 @@ fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u
         after_block = false;
         i += 1;
         let t = l.trim_start_matches(' ');
-        let x = r.left + ((l.len() - t.len()) / 2) as i32 * step;
+        let x = r.left + nest_x((l.len() - t.len()) / 2, step);
         // Text that only looks like a quote or a fence comes escaped (see `store::body_of`).
         let t = store::unescaped(t).unwrap_or(t);
         let (mark, text) = split_marker(t);
@@ -214,6 +214,13 @@ enum Block<'a> {
     Empty,
 }
 
+/// How far in a preview line nested `level` deep starts, at `step` a level: as in the
+/// editor, the levels past the first few step in half as far.
+fn nest_x(level: usize, step: i32) -> i32 {
+    let (l, full) = (level as i32, crate::win::editor::rich::FULL_LEVELS);
+    l.min(full) * step + (l - full).max(0) * step / 2
+}
+
 /// The block starting at line `i`, and the line after it; None for an ordinary line.
 fn block_at<'a>(lines: &'a [&'a str], i: usize) -> Option<(Block<'a>, usize)> {
     let l = lines[i];
@@ -254,7 +261,7 @@ fn quote(c: Option<&mut Canvas>, p: &Pass, lines: &[&str], y: i32) -> Option<i32
     // Indented two spaces a level, a quote sits under a list item: so does its bar.
     let first = lines.first().copied().unwrap_or("");
     let level = ((first.len() - first.trim_start().len()) / 2) as i32;
-    let left = p.r.left + level * (16.0 * p.s) as i32;
+    let left = p.r.left + nest_x(level as usize, (16.0 * p.s) as i32);
     let tx = left + (bar + 12.0 * p.s).round() as i32;
     let w = (p.r.right - tx).max(1);
     // Its lines can be list items and checklist items: shown with their marks.

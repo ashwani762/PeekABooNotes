@@ -1604,4 +1604,66 @@ mod tests {
         let md = "# T\n| - a<br>- b | [ ] c<br>1. d |\n| --- | --- |\n| x | y |";
         cycle(md, md);
     }
+
+    /// Lists nest nine levels deep (0 to `MAX_LEVEL`): bullets, numbers and checklist
+    /// items, with quotes under the deepest of them, go out and come back at every level.
+    /// Deeper Markdown comes in at the deepest level.
+    #[test]
+    fn deep_lists_round_trip() {
+        let deep = |mark: &dyn Fn(usize) -> String| {
+            let mut md = String::from("# T");
+            for l in 0..=MAX_LEVEL as usize {
+                md.push_str(&format!("\n{}{} level {l}", "  ".repeat(l), mark(l)));
+            }
+            for l in (0..MAX_LEVEL as usize).rev() {
+                md.push_str(&format!("\n{}{} back at {l}", "  ".repeat(l), mark(l)));
+            }
+            md
+        };
+        let bullets = deep(&|_| "-".into());
+        let numbers = deep(&|_| "1.".into());
+        let tasks = deep(&|l| if l % 2 == 0 { "- [ ]".into() } else { "- [x]".into() });
+        let mixed = deep(&|l| ["-", "1.", "- [ ]"][l % 3].into());
+        for md in [&bullets, &tasks, &mixed] {
+            cycle(md, md);
+        }
+        // Numbers count on at each level after the deeper ones under them.
+        let want = numbers.replace("1. back at", "2. back at");
+        cycle(&numbers, &want);
+        // Each level its own indent, further in than the one before.
+        let h = editor();
+        load_markdown(h, &bullets);
+        let t = text(h);
+        let mut last = -1;
+        for l in 0..=MAX_LEVEL {
+            set_sel(h, find(&t, &format!("level {l}")), find(&t, &format!("level {l}")));
+            let mut pf = ParaFormat2::new();
+            send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+            assert!(pf.start_indent > last, "level {l}");
+            last = pf.start_indent;
+        }
+        // A quote under the deepest item, and under every level before it.
+        let mut md = String::from("# T");
+        for l in 0..=MAX_LEVEL as usize {
+            md.push_str(&format!("\n{}- item {l}\n{}> under {l}", "  ".repeat(l), "  ".repeat(l + 1)));
+        }
+        cycle(&md, &md);
+        // Deeper than the deepest: at the deepest.
+        let pad = "  ".repeat(MAX_LEVEL as usize);
+        cycle(&format!("T\n{pad}- deep\n{pad}    - deeper\n{pad}      > under"), &format!("# T\n{pad}- deep\n{pad}- deeper\n{pad}  > under"));
+    }
+
+    /// Quotes nest in quotes as deep as RichEdit nests tables, 15; Markdown quoted deeper
+    /// comes in 15 deep, its text all there.
+    #[test]
+    fn deep_quotes_round_trip() {
+        for n in [6, 9, 15] {
+            let md = format!("# T\n{q}- item\n{q}  1. number\nafter", q = "> ".repeat(n));
+            cycle(&md, &md);
+        }
+        let h = editor();
+        load_markdown(h, &format!("T\n{}x\nafter", "> ".repeat(18)));
+        assert_eq!(blocks(h, &text(h)).len(), 15);
+        assert_eq!(to_markdown(h, true), format!("# T\n{}x\nafter", "> ".repeat(15)));
+    }
 }

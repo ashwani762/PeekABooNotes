@@ -654,9 +654,31 @@ const LIST_TEXT: i32 = 345;
 /// The checklist marker glyph: tiny, so it never makes its line taller than prose.
 const MARK_SIZE: i32 = 180; // 9pt
 
-/// One list nesting step, in twips, and the deepest level.
+/// One list nesting step, in twips, for the first `FULL_LEVELS` levels; the levels past
+/// them step in by `DEEP_LEVEL`, half as far, so the deepest item still leaves a narrow
+/// note room for its text. The deepest level (0 is at the margin): nine in all, as in Word.
 const LEVEL: i32 = 320;
-const MAX_LEVEL: i32 = 5;
+pub(crate) const FULL_LEVELS: i32 = 5;
+const DEEP_LEVEL: i32 = 160;
+const MAX_LEVEL: i32 = crate::common::store::MAX_LIST_LEVEL as i32;
+
+/// How far a list paragraph at nesting `level` starts in from one at level 0, in twips.
+fn level_indent(level: i32) -> i32 {
+    let l = level.clamp(0, MAX_LEVEL);
+    l.min(FULL_LEVELS) * LEVEL + (l - FULL_LEVELS).max(0) * DEEP_LEVEL
+}
+
+/// The nesting level whose indent is nearest `dx` twips in from level 0 (half way between
+/// two, the deeper one, as rounding had it when every step was the same).
+fn level_at(dx: i32) -> i32 {
+    let mut best = 0;
+    for l in 1..=MAX_LEVEL {
+        if (level_indent(l) - dx).abs() <= (level_indent(best) - dx).abs() {
+            best = l;
+        }
+    }
+    best
+}
 
 /// Paste the clipboard's text, plain (through `replace_sel`, so selectors are kept out
 /// and it's undoable).

@@ -1226,11 +1226,15 @@ fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
     out.trim_end().to_string()
 }
 
+/// The deepest nesting level of a list item (0 is at the margin): nine levels, as in Word.
+/// Markdown deeper than that comes in at this level.
+pub const MAX_LIST_LEVEL: usize = 8;
+
 /// A body line as previews show it: list markers as the glyphs the editor draws (• ◦ ▪,
 /// ○ ●, 1. a. i.), nested two spaces a level.
 pub fn pretty_line(l: &str) -> String {
     let t = l.trim_start();
-    let level = ((l.len() - t.len()) / 2).min(5);
+    let level = ((l.len() - t.len()) / 2).min(MAX_LIST_LEVEL);
     let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
     let pretty = if let Some(r) = unescaped(t) {
         // Text that only looks like a quote or a fence stays escaped, or the preview
@@ -1416,6 +1420,12 @@ mod tests {
         assert_eq!(body_of("Title\n```\n[ ] not a task\n```\n[ ] a task"), "```\n[ ] not a task\n```\n○  a task");
         // Text that only looks like a quote or a fence stays escaped.
         assert_eq!(body_of("Title\n\\> not a quote\n\\```"), "\\> not a quote\n\\```");
+        // Nested as deep as the editor goes, each level with its mark (• ◦ ▪, 1. a. i.);
+        // deeper than that, at the deepest.
+        assert_eq!(
+            body_of("T\n            - six\n              1. seven\n                - eight\n                  - nine"),
+            "            •  six\n              a. seven\n                ▪  eight\n                ▪  nine"
+        );
     }
 
     #[test]

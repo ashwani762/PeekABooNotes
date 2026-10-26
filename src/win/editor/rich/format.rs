@@ -328,7 +328,7 @@ fn style_boxes_now(h: HWND, only: Option<(usize, usize)>) {
         // the nesting. Any other offset belongs to a former bullet or number.
         let level = if cur.offset == indent.offset || cur.offset == 0 { level_of(cur.start_indent, indent.start_indent) } else { 0 };
         let mut nested = indent;
-        nested.start_indent += level * LEVEL;
+        nested.start_indent += level_indent(level);
         send(h, EM_SETPARAFORMAT, 0, &nested as *const _ as isize);
         let gap = if t.get(i + 1) == Some(&(b' ' as u16)) { 2 } else { 1 };
         let end = para_end(&t, i as i32);
