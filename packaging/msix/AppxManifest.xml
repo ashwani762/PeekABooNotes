@@ -16,7 +16,7 @@
   <Identity
     Name="PeekABooNotes"
     Publisher="CN=PeekABoo Notes Dev"
-    Version="0.5.2.0"
+    Version="0.6.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
