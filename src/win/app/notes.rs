@@ -16,6 +16,13 @@ pub fn refresh() {
     settings::notes_changed();
 }
 
+/// Note `id`'s content was saved as it was typed: the deck and All Notes bring its card
+/// and row up to date, and nothing else (the Data page's counts can't have changed).
+pub fn note_edited(id: u64) {
+    deck::note_edited(id);
+    allnotes::note_edited(id);
+}
+
 /// Plain text + list markers for an RTF blob, via the hidden worker editor.
 pub fn rtf_to_text(rtf: &str) -> String {
     let w = ui(|u| u.worker);
