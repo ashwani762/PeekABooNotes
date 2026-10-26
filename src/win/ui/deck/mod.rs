@@ -48,6 +48,9 @@ const CLASS: &str = "PeekABooDeck";
 const T_PREVIEW: usize = 2;
 const T_COLLAPSE: usize = 3;
 const WM_APPBAR: u32 = WM_APP + 20;
+/// Activated without the keys being wanted here: pass the activation on (posted, so it
+/// happens after Windows is done activating the deck).
+const WM_PASS_ON: u32 = WM_APP + 21;
 
 // Shape tokens (in device-independent pixels; multiplied by the DPI scale).
 const PILL_W: f32 = 18.0;
@@ -222,6 +225,9 @@ struct Kbd {
 
 thread_local! {
     static DECK: RefCell<Option<Deck>> = const { RefCell::new(None) };
+    /// The window the deck last took the keys from, after it let them go: where they go
+    /// if Windows hands the deck the activation again (a note opened from it closing).
+    static PASS_TO: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
 }
 
 /// Let the label fonts go (with no window open): each keeps DirectWrite state alive.
@@ -604,6 +610,7 @@ pub fn take_keys() {
 /// unless the pointer is on it. Returns the window that had the keys before.
 fn drop_keys(d: &mut Deck) -> Option<HWND> {
     let k = d.kbd.take()?;
+    PASS_TO.set(k.prev as isize);
     d.hover = Hit::None;
     unsafe {
         KillTimer(d.hwnd, T_PREVIEW);
@@ -992,8 +999,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         drop_keys(d);
                     }
                 });
+            } else if with(|d| d.kbd.is_none() && !d.menu) == Some(true) {
+                // Active without the keys (the note it opened has closed, and Windows gives
+                // the activation back to the deck): typing would go nowhere, so it goes
+                // on to the window that had the keys before Ctrl+Alt+K.
+                unsafe { PostMessageW(hwnd, WM_PASS_ON, 0, 0) };
             }
             None
+        }
+        WM_PASS_ON => {
+            let back = PASS_TO.replace(0) as HWND;
+            unsafe {
+                if GetForegroundWindow() == hwnd && with(|d| d.kbd.is_none()) == Some(true) {
+                    let to = if !back.is_null() && back != hwnd && IsWindow(back) != 0 && IsWindowVisible(back) != 0 { back } else { GetShellWindow() };
+                    if !to.is_null() {
+                        SetForegroundWindow(to);
+                    }
+                }
+            }
+            Some(Action::None)
         }
         // Alt+F4 while the deck has the keys is Esc: the deck itself never closes. Nor is
         // there a menu bar for F10 or Alt to go to.
