@@ -277,6 +277,8 @@ pub(super) fn toggle_pin(id: u64) {
             windows_sys::Win32::Graphics::Gdi::InvalidateRect(h, std::ptr::null(), 0);
         }
     }
+    // Its capsule in the deck shows the pin.
+    deck::refresh();
 }
 
 /// Note `id`'s window, if it's open, saved and gone (the note archived or deleted).
