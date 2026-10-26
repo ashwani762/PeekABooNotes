@@ -24,6 +24,7 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Shift</string>
+    <string name="key_win">Win</string>
     <string name="key_enter">Enter</string>
     <string name="key_del">Del</string>
     <string name="key_esc">Esc</string>
@@ -133,6 +134,7 @@
     <string name="empty_archive_body">Archived notes leave the deck but stay searchable here.</string>
     <string name="empty_notes_title">No notes yet</string>
     <string name="empty_notes_body">Press %1$s, or click + above, to write one.</string>
+    <string name="empty_notes_body_plain">Click + above to write one.</string>
     <string name="state_in_deck">Active · In the deck</string>
     <string name="state_off_deck">Active · Not in the deck</string>
     <string name="state_archived">Archived</string>
@@ -290,6 +292,15 @@
     <string name="shortcut_deck_leave">Back to the previous window</string>
     <string name="shortcut_off_types">Off (beta): these keys type a character on your keyboard</string>
     <string name="shortcut_off_taken">Off: another app uses these keys</string>
+    <string name="shortcut_press">Press keys</string>
+    <string name="shortcut_none">Off</string>
+    <string name="shortcut_recording">Esc cancels, Backspace turns it off</string>
+    <string name="shortcut_need_modifiers">Hold two of %1$s, %2$s, %3$s and %4$s with the key</string>
+    <string name="shortcut_need_key">End with a letter, a digit or F1 to F12</string>
+    <string name="shortcut_used_by">Already used for “%1$s”</string>
+    <string name="shortcut_refused_types">These keys type a character on your keyboard</string>
+    <string name="shortcut_refused_taken">Taken by another app</string>
+    <string name="settings_shortcuts_default">Default shortcuts</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notes folder</string>
@@ -305,6 +316,7 @@
     <string name="settings_delete_all">Delete all notes</string>
     <string name="settings_delete_all_sub">Every note, archived ones too</string>
     <string name="button_delete_all">Delete All</string>
+    <string name="button_reset_defaults">Reset to Defaults</string>
     <plurals name="menu_delete_all_notes">
         <item quantity="one">Delete %d Note</item>
         <item quantity="other">Delete All %d Notes</item>

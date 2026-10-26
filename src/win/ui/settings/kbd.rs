@@ -84,13 +84,13 @@ pub(super) fn nudge(w: &mut Win, by: i32) -> Option<(Key, usize)> {
 }
 
 /// Space or Enter: a switch flips, a button or the language choice is pressed, the
-/// swatch focus is on is chosen.
+/// swatch focus is on is chosen, a shortcut waits for new keys.
 pub(super) fn activate(w: &mut Win) -> Option<(Key, usize)> {
     let Focus::Ctl(k) = w.kbd else { return None };
     let groups = groups(w);
     match control(&groups, k)? {
         Ctl::Toggle => click(w, Hit::Ctl(k, 0)),
-        Ctl::Button(_) | Ctl::Choice => Some((k, 0)),
+        Ctl::Button(_) | Ctl::Choice | Ctl::Hotkey(_) => Some((k, 0)),
         Ctl::Swatches => Some((k, w.swatch_k)),
         _ => None,
     }

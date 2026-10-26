@@ -36,7 +36,9 @@ pub use menus::*;
 pub use files::*;
 pub use share::share;
 pub use prefs::*;
-pub use hotkeys::{Off as HotkeyOff, hotkey_off, hotkey_text};
+pub use hotkeys::{
+    Off as HotkeyOff, clear_hotkey, hotkey_keys, hotkey_off, hotkey_text, hotkeys_default, pause_hotkeys, reset_hotkeys, resume_hotkeys, set_hotkey,
+};
 pub use mcp::{CLIENTS as MCP_CLIENTS, Connect as McpConnect, connect as mcp_connect, connected as mcp_connected, set_enabled as set_mcp_enabled};
 
 // Note commands (menus, shortcuts).

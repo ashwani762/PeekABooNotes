@@ -14,6 +14,7 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Mayús</string>
+    <string name="key_win">Win</string>
     <string name="key_enter">Intro</string>
     <string name="key_del">Supr</string>
     <string name="key_esc">Esc</string>
@@ -123,6 +124,7 @@
     <string name="empty_archive_body">Las notas archivadas salen del mazo pero siguen apareciendo en las búsquedas.</string>
     <string name="empty_notes_title">Aún no hay notas</string>
     <string name="empty_notes_body">Pulsa %1$s o haz clic en + arriba para escribir una.</string>
+    <string name="empty_notes_body_plain">Haz clic en + arriba para escribir una.</string>
     <string name="state_in_deck">Activa · En el mazo</string>
     <string name="state_off_deck">Activa · Fuera del mazo</string>
     <string name="state_archived">Archivada</string>
@@ -278,6 +280,15 @@
     <string name="shortcut_deck_leave">Volver a la ventana anterior</string>
     <string name="shortcut_off_types">Desactivado (beta): estas teclas escriben un carácter en tu teclado</string>
     <string name="shortcut_off_taken">Desactivado: otra aplicación usa estas teclas</string>
+    <string name="shortcut_press">Pulsa las teclas</string>
+    <string name="shortcut_none">Desactivado</string>
+    <string name="shortcut_recording">Esc cancela; Retroceso lo desactiva</string>
+    <string name="shortcut_need_modifiers">Mantén pulsadas dos de %1$s, %2$s, %3$s y %4$s</string>
+    <string name="shortcut_need_key">Termina con una letra, un número o de F1 a F12</string>
+    <string name="shortcut_used_by">Ya se usa para «%1$s»</string>
+    <string name="shortcut_refused_types">Estas teclas escriben un carácter en tu teclado</string>
+    <string name="shortcut_refused_taken">Lo usa otra aplicación</string>
+    <string name="settings_shortcuts_default">Atajos predeterminados</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Carpeta de notas</string>
@@ -293,6 +304,7 @@
     <string name="settings_delete_all">Eliminar todas las notas</string>
     <string name="settings_delete_all_sub">Todas, también las archivadas</string>
     <string name="button_delete_all">Eliminar todo</string>
+    <string name="button_reset_defaults">Restablecer</string>
     <plurals name="menu_delete_all_notes">
         <item quantity="one">Eliminar %d nota</item>
         <item quantity="other">Eliminar las %d notas</item>

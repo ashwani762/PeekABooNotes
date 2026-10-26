@@ -4,6 +4,7 @@
 //! The note, colour and tray menus, and the app commands they send.
 
 use super::*;
+use crate::common::hotkey;
 
 /// The colour row on its own (the note header's colour button).
 pub fn color_menu(id: u64) -> Vec<menu::Item> {
@@ -190,18 +191,18 @@ pub fn tray_menu(at: Option<POINT>) {
         }
     });
     let mut v = vec![
-        action(CMD_NEW, t!("menu_new_note"), &hotkey_text(b'N'), IC_ADD),
-        action(CMD_ALL, t!("menu_all_notes"), &hotkey_text(b'A'), IC_LIST),
-        action(CMD_ARCHIVE, t!("menu_archive"), &hotkey_text(b'L'), IC_ARCHIVE),
-        action(CMD_REOPEN, t!("menu_reopen_last"), &hotkey_text(b'O'), IC_REFRESH),
+        action(CMD_NEW, t!("menu_new_note"), &hotkey_text(hotkey::NEW_NOTE), IC_ADD),
+        action(CMD_ALL, t!("menu_all_notes"), &hotkey_text(hotkey::ALL_NOTES), IC_LIST),
+        action(CMD_ARCHIVE, t!("menu_archive"), &hotkey_text(hotkey::ARCHIVE), IC_ARCHIVE),
+        action(CMD_REOPEN, t!("menu_reopen_last"), &hotkey_text(hotkey::REOPEN), IC_REFRESH),
     ];
     if let Some(label) = undo {
         v.push(action(CMD_UNDO, label, "", IC_UNDO));
     }
     v.extend([
         Item::Separator,
-        check(CMD_TOGGLE_DECK, t!("menu_show_deck"), &hotkey_text(b'H'), !hidden),
-        action(CMD_SWAP_EDGE, t!("menu_move_deck"), &hotkey_text(b'E'), IC_SWAP),
+        check(CMD_TOGGLE_DECK, t!("menu_show_deck"), &hotkey_text(hotkey::TOGGLE_DECK), !hidden),
+        action(CMD_SWAP_EDGE, t!("menu_move_deck"), &hotkey_text(hotkey::MOVE_DECK), IC_SWAP),
         Item::Separator,
         action(CMD_SETTINGS, t!("menu_settings"), "", IC_SETTINGS),
         Item::Separator,

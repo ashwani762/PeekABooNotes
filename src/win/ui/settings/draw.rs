@@ -286,7 +286,10 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             // nothing left to delete.
             let danger = row.key == Some(Key::DeleteAll);
             let empty = danger && app::store(|s| s.d.notes.is_empty());
+            // Reset to Defaults is dimmed while every shortcut has its default keys.
+            let idle = row.key == Some(Key::ResetKeys) && app::hotkeys_default();
             let (fill, fa, ink) = match (danger, empty) {
+                _ if idle => (p.field.0, p.field.1, p.sub),
                 (true, true) => (p.field.0, p.field.1, p.sub),
                 (true, false) if hovered(0) => (p.danger.0, if pressed(0) { 0.82 } else { 1.0 }, 0xFFFFFF),
                 (true, false) => (p.danger.0, 0.10, p.danger.1),
@@ -327,32 +330,71 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             let chev = rect((sh.x + sh.w - 26.0 * s) as i32, sh.y as i32, (16.0 * s) as i32, sh.h as i32);
             c.text_ct("\u{E70D}", &f.chrome, chev, None, p.sub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
-        Ctl::Keys(ks) => {
-            let mut x = r.right as f32 - INSET * s;
-            let h = 22.0 * s;
-            let y = mid as f32 - h / 2.0;
-            for k in ks.iter().rev() {
-                if *k == "/" {
-                    // "or" between two alternatives: plain text, not a keycap.
-                    let kw = f.key.measure("/").0 as f32 + 8.0 * s;
-                    x -= kw;
-                    c.line_ct("/", &f.key, x as i32, mid + f.key.cap / 2, kw as i32, None, p.sub, DT_CENTER);
-                    x -= 5.0 * s;
-                    continue;
+        Ctl::Keys(ks) => draw_caps(w, c, p, ks, row.off, r.right as f32 - INSET * s, mid),
+        Ctl::Hotkey(i) => {
+            let sh = hotkey_shape(w, *i, &r);
+            let waiting = w.edit.rec == Some(*i);
+            // A field round the keys, as the pointer or the keys come to it; while it waits
+            // for keys, tinted and outlined in the accent.
+            if waiting {
+                c.shape(&sh, p.accent, 0.10, 1.0, 0.0);
+                c.shape(&sh, p.accent, 0.85, 1.0, 1.5 * s);
+            } else if hovered(0) || focused {
+                c.shape(&sh, p.field.0, p.field.1 * if pressed(0) { 2.4 } else { 1.6 }, 1.0, 0.0);
+            }
+            ring(c, &sh);
+            let right = r.right as f32 - INSET * s;
+            let words = |c: &mut Canvas, text: &str, ink: u32| {
+                let tw = f.seg.measure(text).0 as f32;
+                c.line_ct(text, &f.seg, (right - tw) as i32, mid + f.seg.cap / 2, tw as i32 + 2, None, ink, DT_LEFT);
+                tw
+            };
+            if waiting {
+                // The modifiers held so far, then the prompt.
+                let tw = words(c, t!("shortcut_press"), p.accent);
+                let held = hotkey::modifier_parts(w.held);
+                if !held.is_empty() {
+                    draw_caps(w, c, p, &held, false, right - tw - HELD_GAP * s, mid);
                 }
-                let k = key_name(k);
-                let kw = (f.key.measure(k).0 as f32 + 14.0 * s).max(h);
-                x -= kw;
-                let cap = Shape::new(x, y, kw, h, 5.0 * s);
-                // A keycap: a darker lip under a lighter face; flat and grey when it's off.
-                if !row.off {
-                    c.shape(&Shape::new(cap.x, cap.y + 1.0 * s, cap.w, cap.h, cap.r), p.text, 0.10, 1.0, 0.0);
+            } else {
+                match app::hotkey_keys(*i) {
+                    Some(k) => draw_caps(w, c, p, &k.parts(), row.off, right, mid),
+                    None => {
+                        words(c, t!("shortcut_none"), p.sub);
+                    }
                 }
-                c.shape(&cap, mix(p.group, p.text, if row.off { 0.04 } else { 0.06 }), 1.0, 1.0, 0.0);
-                c.line_ct(k, &f.key, x as i32, mid + f.key.cap / 2, kw as i32, None, if row.off { p.sub } else { p.text }, DT_CENTER);
-                x -= 5.0 * s;
             }
         }
+    }
+}
+
+/// Keycaps `ks`, ending at `right` around the row's middle `mid`; "/" between two
+/// alternatives is plain text. Flat and grey when the shortcut is `off`.
+fn draw_caps(w: &Win, c: &mut Canvas, p: &Pal, ks: &[&str], off: bool, right: f32, mid: i32) {
+    let (s, f) = (w.s, &w.fonts);
+    let mut x = right;
+    let h = 22.0 * s;
+    let y = mid as f32 - h / 2.0;
+    for k in ks.iter().rev() {
+        if *k == "/" {
+            // "or" between two alternatives: plain text, not a keycap.
+            let kw = f.key.measure("/").0 as f32 + 8.0 * s;
+            x -= kw;
+            c.line_ct("/", &f.key, x as i32, mid + f.key.cap / 2, kw as i32, None, p.sub, DT_CENTER);
+            x -= 5.0 * s;
+            continue;
+        }
+        let k = key_name(k);
+        let kw = (f.key.measure(k).0 as f32 + 14.0 * s).max(h);
+        x -= kw;
+        let cap = Shape::new(x, y, kw, h, 5.0 * s);
+        // A keycap: a darker lip under a lighter face; flat and grey when it's off.
+        if !off {
+            c.shape(&Shape::new(cap.x, cap.y + 1.0 * s, cap.w, cap.h, cap.r), p.text, 0.10, 1.0, 0.0);
+        }
+        c.shape(&cap, mix(p.group, p.text, if off { 0.04 } else { 0.06 }), 1.0, 1.0, 0.0);
+        c.line_ct(k, &f.key, x as i32, mid + f.key.cap / 2, kw as i32, None, if off { p.sub } else { p.text }, DT_CENTER);
+        x -= 5.0 * s;
     }
 }
 
@@ -401,7 +443,7 @@ fn key_name(k: &str) -> &str {
 }
 
 /// Width of a row of keycaps as drawn (caps, "/" separators and the gaps between).
-fn keys_width(w: &Win, ks: &[&str]) -> f32 {
+pub(super) fn keys_width(w: &Win, ks: &[&str]) -> f32 {
     let (s, f) = (w.s, &w.fonts);
     let h = 22.0 * s;
     let caps: f32 = ks
@@ -421,6 +463,7 @@ pub(super) fn px_ctl(w: &Win, row: &Row, r: &RECT) -> i32 {
         Ctl::Button(l) => button_shape(w, l, r).x,
         Ctl::Choice => choice_shape(w, row.key.unwrap_or(Key::Language), r).x,
         Ctl::Keys(ks) => r.right as f32 - INSET * s - keys_width(w, ks),
+        Ctl::Hotkey(i) => hotkey_shape(w, *i, r).x,
         Ctl::Preview => r.right as f32,
     };
     r.right - left as i32

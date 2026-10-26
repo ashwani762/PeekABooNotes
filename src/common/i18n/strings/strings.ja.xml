@@ -14,6 +14,7 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Shift</string>
+    <string name="key_win">Win</string>
     <string name="key_enter">Enter</string>
     <string name="key_del">Del</string>
     <string name="key_esc">Esc</string>
@@ -116,6 +117,7 @@
     <string name="empty_archive_body">アーカイブしたメモはデッキから外れますが、ここで検索できます。</string>
     <string name="empty_notes_title">メモはまだありません</string>
     <string name="empty_notes_body">%1$s を押すか、上の + をクリックして書き始めましょう。</string>
+    <string name="empty_notes_body_plain">上の + をクリックして書き始めましょう。</string>
     <string name="state_in_deck">使用中 · デッキにあり</string>
     <string name="state_off_deck">使用中 · デッキになし</string>
     <string name="state_archived">アーカイブ済み</string>
@@ -266,6 +268,15 @@
     <string name="shortcut_deck_leave">前のウィンドウに戻る</string>
     <string name="shortcut_off_types">オフ（ベータ）: お使いのキーボードでは、このキーで文字が入力されます</string>
     <string name="shortcut_off_taken">オフ: 別のアプリがこのキーを使用しています</string>
+    <string name="shortcut_press">キーを押してください</string>
+    <string name="shortcut_none">オフ</string>
+    <string name="shortcut_recording">Esc でキャンセル、Backspace でオフ</string>
+    <string name="shortcut_need_modifiers">%1$s、%2$s、%3$s、%4$s のうち 2 つを押したままにしてください</string>
+    <string name="shortcut_need_key">最後に文字、数字、または F1〜F12 を押してください</string>
+    <string name="shortcut_used_by">「%1$s」で使用中です</string>
+    <string name="shortcut_refused_types">お使いのキーボードでは、このキーで文字が入力されます</string>
+    <string name="shortcut_refused_taken">別のアプリが使用しています</string>
+    <string name="settings_shortcuts_default">既定のショートカット</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">メモのフォルダ</string>
@@ -280,6 +291,7 @@
     <string name="settings_delete_all">すべてのメモを削除</string>
     <string name="settings_delete_all_sub">アーカイブ済みのメモも含みます</string>
     <string name="button_delete_all">すべて削除</string>
+    <string name="button_reset_defaults">既定に戻す</string>
     <plurals name="menu_delete_all_notes">
         <item quantity="other">%d 件のメモをすべて削除</item>
     </plurals>

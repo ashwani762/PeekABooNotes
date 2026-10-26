@@ -32,7 +32,7 @@ pub(super) fn row_h(r: &Row) -> f32 {
     match (&r.ctl, &r.sub) {
         (Ctl::Preview, _) => PREVIEW_H,
         (_, Some(_)) => ROW_SUB_H,
-        (Ctl::Keys(_), _) => KEY_ROW_H,
+        (Ctl::Keys(_) | Ctl::Hotkey(_), _) => KEY_ROW_H,
         _ => ROW_H,
     }
 }
@@ -166,6 +166,34 @@ pub(super) fn choice_shape(w: &Win, k: Key, r: &RECT) -> Shape {
     Shape::new(r.right as f32 - INSET * s - bw, (r.top + r.bottom) as f32 / 2.0 - bh / 2.0, bw, bh, 8.0 * s)
 }
 
+/// The width of what shortcut `i`'s field shows: its keycaps; "Off"; or, while it waits
+/// for keys, the modifiers held so far and the prompt.
+fn hotkey_content_w(w: &Win, i: usize) -> f32 {
+    let f = &w.fonts;
+    if w.edit.rec == Some(i) {
+        let held = hotkey::modifier_parts(w.held);
+        let prompt = f.seg.measure(t!("shortcut_press")).0 as f32;
+        return if held.is_empty() { prompt } else { keys_width(w, &held) + HELD_GAP * w.s + prompt };
+    }
+    match app::hotkey_keys(i) {
+        Some(k) => keys_width(w, &k.parts()),
+        None => f.seg.measure(t!("shortcut_none")).0 as f32,
+    }
+}
+
+/// Between the modifiers held and the prompt.
+pub(super) const HELD_GAP: f32 = 6.0;
+
+/// Shortcut `i`'s field: round its keycaps, which still end where other rows' do. Shown
+/// when the pointer or the keys are on it, and while it waits for keys.
+pub(super) fn hotkey_shape(w: &Win, i: usize, r: &RECT) -> Shape {
+    let s = w.s;
+    let (pad, h) = (7.0 * s, 28.0 * s);
+    let right = r.right as f32 - INSET * s + pad;
+    let fw = hotkey_content_w(w, i) + 2.0 * pad;
+    Shape::new(right - fw, (r.top + r.bottom) as f32 / 2.0 - h / 2.0, fw, h, 7.0 * s)
+}
+
 pub(super) fn inside(sh: &Shape, x: i32, y: i32, pad: f32) -> bool {
     let (x, y) = (x as f32, y as f32);
     x >= sh.x - pad && x < sh.x + sh.w + pad && y >= sh.y - pad && y < sh.y + sh.h + pad
@@ -223,6 +251,13 @@ pub(super) fn hit_test(w: &Win, x: i32, y: i32) -> Hit {
             }
             Ctl::Choice => {
                 if inside(&choice_shape(w, k, &p.r), x, y, 2.0 * s) {
+                    Hit::Ctl(k, 0)
+                } else {
+                    Hit::None
+                }
+            }
+            Ctl::Hotkey(i) => {
+                if inside(&hotkey_shape(w, *i, &p.r), x, y, 2.0 * s) {
                     Hit::Ctl(k, 0)
                 } else {
                     Hit::None

@@ -21,6 +21,7 @@ use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+use crate::common::hotkey;
 use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
@@ -87,6 +88,9 @@ enum Key {
     DeleteAll,
     Mcp,
     McpSetup,
+    /// A shortcut that works anywhere, by its place in `hotkey::ACTIONS`.
+    Hotkey(usize),
+    ResetKeys,
 }
 
 enum Ctl {
@@ -98,6 +102,8 @@ enum Ctl {
     Choice,
     /// Keycaps; lowercase names ("ctrl") are shown in this language's key names.
     Keys(&'static [&'static str]),
+    /// Shortcut `i`'s keycaps, which a click (or Enter) asks new keys for.
+    Hotkey(usize),
     /// A sample note in the chosen type and colour.
     Preview,
 }
@@ -129,15 +135,51 @@ fn keys(label: &'static str, k: &'static [&'static str]) -> Row {
     Row { key: None, label, sub: None, ctl: Ctl::Keys(k), off: false }
 }
 
-/// A shortcut that works anywhere (Ctrl+Alt and the letter last in `k`): greyed out,
-/// saying why, while it's off.
-fn hotkey(label: &'static str, k: &'static [&'static str]) -> Row {
-    let letter = k.last().and_then(|l| l.bytes().next()).unwrap_or(0);
-    let why = app::hotkey_off(letter).map(|off| match off {
+/// Shortcut `i`'s name in Settings.
+fn hotkey_label(i: usize) -> &'static str {
+    match i {
+        hotkey::NEW_NOTE => t!("shortcut_new_note"),
+        hotkey::ALL_NOTES => t!("shortcut_all_notes"),
+        hotkey::ARCHIVE => t!("shortcut_archive"),
+        hotkey::REOPEN => t!("shortcut_reopen"),
+        hotkey::TOGGLE_DECK => t!("shortcut_toggle_deck"),
+        hotkey::MOVE_DECK => t!("shortcut_move_deck"),
+        hotkey::DECK_KEYS => t!("shortcut_deck_keys"),
+        _ => "",
+    }
+}
+
+/// Shortcut `i`, which works anywhere: its keys, which a click asks new ones for; greyed
+/// out, saying why, while it's off; while it waits for keys, how to cancel or turn it off;
+/// and for a moment, why keys pressed for it won't do.
+fn hotkey(i: usize, edit: &Edit) -> Row {
+    let waiting = edit.rec == Some(i);
+    let why = app::hotkey_off(i).filter(|_| !waiting).map(|off| match off {
         app::HotkeyOff::Types => t!("shortcut_off_types").to_string(),
         app::HotkeyOff::Taken => t!("shortcut_off_taken").to_string(),
     });
-    Row { key: None, label, off: why.is_some(), sub: why, ctl: Ctl::Keys(k) }
+    let said = edit.say.as_ref().filter(|(j, _)| *j == i).map(|(_, text)| text.clone());
+    let sub = said.or_else(|| waiting.then(|| t!("shortcut_recording").to_string())).or_else(|| why.clone());
+    Row { key: Some(Key::Hotkey(i)), label: hotkey_label(i), off: why.is_some(), sub, ctl: Ctl::Hotkey(i) }
+}
+
+/// The shortcut waiting for new keys, and the one saying why keys pressed for it won't do.
+#[derive(Default)]
+struct Edit {
+    rec: Option<usize>,
+    say: Option<(usize, String)>,
+}
+
+/// Why keys pressed for a shortcut won't do, as its row says it.
+fn refusal_text(r: hotkey::Refusal) -> String {
+    use crate::common::i18n::get;
+    match r {
+        hotkey::Refusal::Modifiers => t!("shortcut_need_modifiers", get("key_ctrl"), get("key_alt"), get("key_shift"), get("key_win")),
+        hotkey::Refusal::Key => t!("shortcut_need_key").to_string(),
+        hotkey::Refusal::UsedBy(j) => t!("shortcut_used_by", hotkey_label(j)),
+        hotkey::Refusal::Types => t!("shortcut_refused_types").to_string(),
+        hotkey::Refusal::Taken => t!("shortcut_refused_taken").to_string(),
+    }
 }
 
 struct Pal {
@@ -277,6 +319,14 @@ struct Win {
     scroll: Spring,
     /// The page's rows as `page` built them, for page `.0` (see `groups`).
     built: RefCell<Option<(usize, Rc<Vec<Group>>)>>,
+    /// A shortcut waiting for new keys, and what a shortcut's row has to say.
+    edit: Edit,
+    /// The modifiers held while a shortcut waits for keys (`hotkey::CTRL` and so on),
+    /// shown ahead of the prompt.
+    held: u8,
+    /// Keys let go after a shortcut got its keys go nowhere (Alt's would open the window
+    /// menu), until no modifier is held.
+    eat_keys: bool,
 }
 
 /// The shown page's rows. Building them formats every label, counts the notes and looks
@@ -288,7 +338,7 @@ fn groups(w: &Win) -> Rc<Vec<Group>> {
     match &*built {
         Some((p, g)) if *p == w.page => g.clone(),
         _ => {
-            let g = Rc::new(page(w.page));
+            let g = Rc::new(page(w.page, &w.edit));
             *built = Some((w.page, g.clone()));
             g
         }
@@ -522,6 +572,125 @@ fn show_text(hwnd: HWND, k: Key, ok: bool, text: String) {
     unsafe { SetTimer(hwnd, T_RESULT, RESULT_MS, None) };
 }
 
+// ---------------------------------------------------------------- shortcuts
+
+/// How long a shortcut's row says why keys pressed for it won't do.
+const T_SAY: usize = 8;
+const SAY_MS: u32 = 4000;
+
+/// Shortcut `i` waits for new keys. None of ours is registered meanwhile, so whatever is
+/// pressed comes here, our own shortcuts too.
+fn record(i: usize) {
+    let fresh = with(|w| {
+        let was = w.edit.rec.replace(i);
+        if w.edit.say.as_ref().is_some_and(|(j, _)| *j == i) {
+            w.edit.say = None;
+        }
+        w.held = held_mods();
+        rebuild(w);
+        was.is_none()
+    });
+    anim::wake(Client::Settings);
+    if fresh == Some(true) {
+        app::pause_hotkeys();
+    }
+}
+
+/// Stop waiting for keys (they were given, Esc, a click elsewhere, the window losing the
+/// keys or closing): the shortcuts are registered again, with the keys they have now.
+fn stop_recording() {
+    let was = with(|w| {
+        let was = w.edit.rec.take();
+        if was.is_some() {
+            // The modifiers still held are let go of here, not in the window menu.
+            w.eat_keys = held_mods() != 0;
+            rebuild(w);
+        }
+        was
+    })
+    .flatten();
+    if was.is_some() {
+        anim::wake(Client::Settings);
+        app::resume_hotkeys();
+    }
+}
+
+/// Shortcut `i`'s row says `text` for a few seconds.
+fn say(hwnd: HWND, i: usize, text: String) {
+    with(|w| {
+        w.edit.say = Some((i, text));
+        rebuild(w);
+    });
+    anim::wake(Client::Settings);
+    unsafe { SetTimer(hwnd, T_SAY, SAY_MS, None) };
+}
+
+/// The modifiers held now, as `hotkey` has them.
+fn held_mods() -> u8 {
+    use crate::win::util::key_down;
+    let mut m = 0;
+    for (vk, bit) in [(VK_CONTROL, hotkey::CTRL), (VK_MENU, hotkey::ALT), (VK_SHIFT, hotkey::SHIFT), (VK_LWIN, hotkey::WIN), (VK_RWIN, hotkey::WIN)] {
+        if key_down(vk) {
+            m |= bit;
+        }
+    }
+    m
+}
+
+/// Key `vk` went down while shortcut `i` waits for keys: Esc cancels, Backspace or Delete
+/// turns the shortcut off, a modifier shows; anything else, with the modifiers held, is
+/// the new keys if they will do. Keys that aren't a shortcut's form are said and waited
+/// past; keys a shortcut, the keyboard or another app has end the wait, the old ones kept.
+fn recorded_key(hwnd: HWND, i: usize, vk: u16) {
+    let mods = held_mods();
+    match vk {
+        VK_ESCAPE => stop_recording(),
+        VK_BACK | VK_DELETE => {
+            app::clear_hotkey(i);
+            stop_recording();
+        }
+        VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | VK_LSHIFT | VK_RSHIFT | VK_LCONTROL | VK_RCONTROL | VK_LMENU | VK_RMENU => {
+            with(|w| w.held = mods);
+            anim::wake(Client::Settings);
+        }
+        _ => match app::set_hotkey(i, mods, u8::try_from(vk).unwrap_or(0)) {
+            Ok(()) => stop_recording(),
+            Err(r @ (hotkey::Refusal::Modifiers | hotkey::Refusal::Key)) => say(hwnd, i, refusal_text(r)),
+            Err(r) => {
+                stop_recording();
+                say(hwnd, i, refusal_text(r));
+            }
+        },
+    }
+}
+
+/// A keyboard message while a shortcut waits for keys, or while the keys that gave it
+/// some are let go: whether it was taken here (none of it reaches the window menu).
+fn recording_keys(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> bool {
+    let Some((rec, eat)) = with(|w| (w.edit.rec, w.eat_keys)) else { return false };
+    match (msg, rec) {
+        (WM_KEYDOWN | WM_SYSKEYDOWN, Some(i)) => {
+            // A key held down repeats: only its first press counts.
+            if lp & (1 << 30) == 0 {
+                recorded_key(hwnd, i, wp as u16);
+            }
+            true
+        }
+        (WM_KEYUP | WM_SYSKEYUP, _) if rec.is_some() || eat => {
+            let mods = held_mods();
+            with(|w| {
+                w.held = mods;
+                w.eat_keys &= mods != 0;
+            });
+            anim::wake(Client::Settings);
+            true
+        }
+        (WM_CHAR | WM_SYSCHAR | WM_DEADCHAR | WM_SYSDEADCHAR, _) => rec.is_some() || eat,
+        (WM_KEYDOWN | WM_SYSKEYDOWN, None) => eat,
+        _ => false,
+    }
+}
+
 /// Carry out a control change. Runs outside the window's borrow: it calls back into
 /// the app, which may retheme or refresh this window.
 fn apply(hwnd: HWND, k: Key, v: usize) {
@@ -577,6 +746,8 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
                 show_connected(hwnd, choice as usize - 1, outcome);
             }
         }
+        Key::Hotkey(i) => record(i),
+        Key::ResetKeys => app::reset_hotkeys(),
     }
 }
 
@@ -708,6 +879,9 @@ fn on_create(hwnd: HWND) {
         knobs: HashMap::new(),
         scroll: Spring::px(0.0, motion::SNAPPY),
         built: RefCell::new(None),
+        edit: Edit::default(),
+        held: 0,
+        eat_keys: false,
     };
     sync_knobs(&mut w);
     WIN.with(|c| *c.borrow_mut() = Some(w));
@@ -812,6 +986,9 @@ fn click(w: &mut Win, hit: Hit) -> Option<(Key, usize)> {
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe {
+        if (WM_KEYFIRST..=WM_KEYLAST).contains(&msg) && recording_keys(hwnd, msg, wp, lp) {
+            return 0;
+        }
         match msg {
             WM_CREATE => {
                 on_create(hwnd);
@@ -885,8 +1062,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_LBUTTONDOWN => {
-                SetCapture(hwnd);
                 let (x, y) = (x_of(lp), y_of(lp));
+                // A click anywhere but the keys of the shortcut waiting for keys cancels.
+                if let Some((Some(i), hit)) = with(|w| (w.edit.rec, hit_test(w, x, y)))
+                    && hit != Hit::Ctl(Key::Hotkey(i), 0)
+                {
+                    stop_recording();
+                }
+                SetCapture(hwnd);
                 let page_hit = with(|w| {
                     let hit = hit_test(w, x, y);
                     w.pressed = hit;
@@ -981,9 +1164,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 }
                 return 0;
             }
-            // The ring shows only while this window has the keys.
+            // The ring shows only while this window has the keys, and a shortcut waits for
+            // keys only while it does.
             WM_SETFOCUS | WM_KILLFOCUS => {
+                if msg == WM_KILLFOCUS {
+                    stop_recording();
+                }
                 paint_now(hwnd);
+                return 0;
+            }
+            // Dragging the window, or its frame: as a click elsewhere.
+            WM_NCLBUTTONDOWN | WM_NCRBUTTONDOWN | WM_RBUTTONDOWN => stop_recording(),
+            WM_TIMER if wp == T_SAY => {
+                KillTimer(hwnd, T_SAY);
+                with(|w| {
+                    w.edit.say = None;
+                    rebuild(w);
+                });
+                anim::wake(Client::Settings);
                 return 0;
             }
             WM_ACTIVATE if (wp & 0xFFFF) as u32 != WA_INACTIVE => {
@@ -1056,6 +1254,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_DESTROY => {
+                // Closed while a shortcut waited for keys: the shortcuts come back.
+                stop_recording();
                 WIN.with(|w| {
                     if let Ok(mut w) = w.try_borrow_mut() {
                         w.take();

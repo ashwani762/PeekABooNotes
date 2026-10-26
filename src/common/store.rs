@@ -281,6 +281,11 @@ pub struct Settings {
     /// AI assistants may use the notes through MCP (off until turned on).
     #[serde(default)]
     pub mcp: bool,
+    /// The shortcuts that work anywhere, where the user changed them: each one's name in
+    /// `hotkey::ACTIONS` and its keys ("Win+Shift+N"), "" for one turned off. Empty, and
+    /// left out of the file, while every shortcut has its default keys.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub hotkeys: std::collections::BTreeMap<String, String>,
     /// Settings from a newer version of the app, kept as they are.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -324,6 +329,7 @@ impl Default for Settings {
             export_dir: String::new(),
             keep_open: false,
             mcp: false,
+            hotkeys: std::collections::BTreeMap::new(),
             extra: serde_json::Map::new(),
         }
     }
@@ -1366,6 +1372,29 @@ mod tests {
         let back: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(back.settings.deck_display, d.settings.deck_display);
         assert_eq!(back.settings.deck_display_name, "DELL U2720Q");
+    }
+
+    #[test]
+    fn hotkeys_default_until_changed() {
+        use crate::common::hotkey::{self, Combo};
+        // Settings saved before the shortcuts could be changed: every one has its default.
+        let d: Data = serde_json::from_str(r#"{"settings":{"edge_left":true,"mcp":true}}"#).unwrap();
+        assert!(d.settings.hotkeys.is_empty() && d.settings.edge_left && d.settings.mcp);
+        assert!(hotkey::all_default(&d.settings.hotkeys));
+        // Left out while they're the defaults, so such files stay as they were.
+        assert!(!serde_json::to_string(&d).unwrap().contains("hotkeys"));
+        let mut d = d;
+        hotkey::set(&mut d.settings.hotkeys, hotkey::NEW_NOTE, Some(Combo { mods: hotkey::WIN | hotkey::SHIFT, key: 0x74 }));
+        hotkey::set(&mut d.settings.hotkeys, hotkey::REOPEN, None);
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""hotkeys":{"new_note":"Win+Shift+F5","reopen":""}"#), "{json}");
+        let back: Data = serde_json::from_str(&json).unwrap();
+        let keys = hotkey::resolve(&back.settings.hotkeys);
+        assert_eq!(keys[hotkey::NEW_NOTE], Some(Combo { mods: hotkey::WIN | hotkey::SHIFT, key: 0x74 }));
+        assert_eq!(keys[hotkey::REOPEN], None);
+        assert_eq!(keys[hotkey::ALL_NOTES], Some(Combo::default_for(hotkey::ALL_NOTES)));
+        // Not mistaken for a field from a newer version.
+        assert!(back.settings.extra.is_empty());
     }
 
 

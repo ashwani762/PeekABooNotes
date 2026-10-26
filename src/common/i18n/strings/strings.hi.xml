@@ -14,6 +14,7 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Shift</string>
+    <string name="key_win">Win</string>
     <string name="key_enter">Enter</string>
     <string name="key_del">Del</string>
     <string name="key_esc">Esc</string>
@@ -123,6 +124,7 @@
     <string name="empty_archive_body">संग्रहित नोट्स डेक से हट जाते हैं, पर यहाँ खोजे जा सकते हैं।</string>
     <string name="empty_notes_title">अभी कोई नोट नहीं</string>
     <string name="empty_notes_body">नया नोट लिखने के लिए %1$s दबाएँ या ऊपर + पर क्लिक करें।</string>
+    <string name="empty_notes_body_plain">नया नोट लिखने के लिए ऊपर + पर क्लिक करें।</string>
     <string name="state_in_deck">सक्रिय · डेक में</string>
     <string name="state_off_deck">सक्रिय · डेक में नहीं</string>
     <string name="state_archived">संग्रहित</string>
@@ -278,6 +280,15 @@
     <string name="shortcut_deck_leave">पिछली विंडो पर लौटें</string>
     <string name="shortcut_off_types">बंद (बीटा): आपके कीबोर्ड पर इन कुंजियों से एक अक्षर टाइप होता है</string>
     <string name="shortcut_off_taken">बंद: कोई दूसरा ऐप इन कुंजियों का उपयोग करता है</string>
+    <string name="shortcut_press">कुंजियाँ दबाएँ</string>
+    <string name="shortcut_none">बंद</string>
+    <string name="shortcut_recording">Esc रद्द करता है, Backspace इसे बंद करता है</string>
+    <string name="shortcut_need_modifiers">कुंजी के साथ %1$s, %2$s, %3$s और %4$s में से दो दबाए रखें</string>
+    <string name="shortcut_need_key">आख़िर में कोई अक्षर, अंक या F1 से F12 दबाएँ</string>
+    <string name="shortcut_used_by">पहले से “%1$s” के लिए उपयोग में है</string>
+    <string name="shortcut_refused_types">आपके कीबोर्ड पर इन कुंजियों से एक अक्षर टाइप होता है</string>
+    <string name="shortcut_refused_taken">कोई दूसरा ऐप इसका उपयोग करता है</string>
+    <string name="settings_shortcuts_default">डिफ़ॉल्ट शॉर्टकट</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">नोट्स फ़ोल्डर</string>
@@ -293,6 +304,7 @@
     <string name="settings_delete_all">सभी नोट्स हटाएँ</string>
     <string name="settings_delete_all_sub">हर नोट, संग्रहित नोट्स भी</string>
     <string name="button_delete_all">सभी हटाएँ</string>
+    <string name="button_reset_defaults">डिफ़ॉल्ट पर लौटाएँ</string>
     <plurals name="menu_delete_all_notes">
         <item quantity="one">%d नोट हटाएँ</item>
         <item quantity="other">सभी %d नोट हटाएँ</item>
