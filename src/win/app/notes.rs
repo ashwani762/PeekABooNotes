@@ -463,11 +463,11 @@ pub(super) fn sweep_attachments() {
         return;
     }
     let Some((mut kept, path)) = store(|s| {
-        (s.whole() && !s.d.notes.is_empty()).then(|| (s.d.notes.iter().flat_map(|n| [n.rtf.clone(), n.text.clone()]).collect::<Vec<String>>(), s.path.clone()))
+        (s.whole() && !s.d.notes.is_empty()).then(|| (s.d.notes.iter().flat_map(|n| [links_of(&n.rtf), n.text.clone()]).collect::<Vec<String>>(), s.path.clone()))
     }) else {
         return;
     };
-    kept.extend(ui(|u| u.pending.iter().flat_map(|(_, n)| [n.rtf.clone(), n.text.clone()]).collect::<Vec<_>>()));
+    kept.extend(ui(|u| u.pending.iter().flat_map(|(_, n)| [links_of(&n.rtf), n.text.clone()]).collect::<Vec<_>>()));
     // Cut out of a note in an earlier session, and not pasted back yet; or copied in
     // Explorer, as files, from the folder itself.
     kept.extend(crate::win::util::clipboard_rtf());
@@ -477,6 +477,40 @@ pub(super) fn sweep_attachments() {
     if spawned.is_err() {
         log::warn("attachments not swept: no thread for it");
     }
+}
+
+/// A note's RTF as the sweep reads it: each picture's group (most of a note with
+/// pictures, and never a link) left as an empty one, so the copy handed to the sweep holds
+/// only what can link. A group that never ends is left as it is.
+fn links_of(rtf: &str) -> String {
+    let b = rtf.as_bytes();
+    let mut out = String::with_capacity(rtf.len().min(64 * 1024));
+    let mut from = 0;
+    while let Some(i) = rtf[from..].find("{\\pict").map(|i| from + i) {
+        // To its closing brace: from brace to brace (a picture's data has none), past
+        // escaped ones.
+        let (mut depth, mut j, mut end) = (0, i, None);
+        // The next brace: the next closing one, unless an opening one comes first (each
+        // looked for on its own, which is quick through a picture's data).
+        let next = |j: usize| rtf[j..].find('}').map(|c| rtf[j..j + c].find('{').unwrap_or(c) + j);
+        while let Some(k) = next(j) {
+            let escaped = k > 0 && b[k - 1] == b'\\' && !(k > 1 && b[k - 2] == b'\\');
+            if !escaped {
+                depth += if b[k] == b'{' { 1 } else { -1 };
+                if depth == 0 {
+                    end = Some(k + 1);
+                    break;
+                }
+            }
+            j = k + 1;
+        }
+        let Some(end) = end else { break };
+        out.push_str(&rtf[from..i]);
+        out.push_str("{}");
+        from = end;
+    }
+    out.push_str(&rtf[from..]);
+    out
 }
 
 /// `sweep_attachments`, off the UI thread: `kept` is every note's RTF and text; `notes`
@@ -582,5 +616,55 @@ pub fn note_command(id: u64, cmd: u32) {
                 unsafe { PostMessageW(h, note::WM_NOTE_CMD, cmd as usize, 0) };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sweep's copy of a note leaves its pictures' data out, and every link in.
+    #[test]
+    fn the_sweep_reads_the_links_not_the_pictures() {
+        let pict = crate::win::editor::rich::test_picture(40, 30, 600, 450);
+        let link = |name: &str| format!("{{\\field{{\\*\\fldinst{{HYPERLINK \"{}\"}}}}{{\\fldrslt{{\\u8203?}}}}}}", crate::common::attach::url(name));
+        let rtf = format!("{{\\rtf1 a \\{{not a group {pict}{}\\par {{\\*\\shppict{pict}}}{}\\par b}}", link("one.png"), link("two {x}.png"));
+        let read = links_of(&rtf);
+        assert!(read.len() < rtf.len() / 4, "{} of {}", read.len(), rtf.len());
+        assert!(!read.contains("\\pict"));
+        assert_eq!(crate::common::attach::linked(&read), crate::common::attach::linked(&rtf));
+        assert_eq!(read, format!("{{\\rtf1 a \\{{not a group {{}}{}\\par {{\\*\\shppict{{}}}}{}\\par b}}", link("one.png"), link("two {x}.png")));
+        // Nothing to leave out, or a group that never ends: as it is.
+        assert_eq!(links_of("{\\rtf1 plain}"), "{\\rtf1 plain}");
+        assert_eq!(links_of("{\\rtf1 {\\pict 0a0b"), "{\\rtf1 {\\pict 0a0b");
+    }
+
+    /// Timing (run with --ignored --nocapture): what the start-up sweep copies of 2,000
+    /// notes, a tenth of them with a picture, on the UI thread.
+    #[test]
+    #[ignore]
+    fn probe_sweep_copy() {
+        let pict = crate::win::editor::rich::test_picture(200, 150, 3000, 2250);
+        let notes: Vec<(String, String)> = (0..2000)
+            .map(|i| {
+                let body = "Paragraph: we leave early on Friday and come back on Sunday evening.\\par ".repeat(6);
+                let p = if i % 10 == 0 { pict.as_str() } else { "" };
+                (format!("{{\\rtf1 Note {i}\\par {body}{p}\\par end}}"), format!("Note {i}\nwe leave early on Friday"))
+            })
+            .collect();
+        let time = |f: &dyn Fn() -> Vec<String>| {
+            let mut best = std::time::Duration::MAX;
+            let mut bytes = 0;
+            for _ in 0..5 {
+                let t0 = std::time::Instant::now();
+                let v = f();
+                best = best.min(t0.elapsed());
+                bytes = v.iter().map(String::len).sum::<usize>();
+            }
+            (best, bytes / 1024)
+        };
+        let cloned = time(&|| notes.iter().flat_map(|(r, t)| [r.clone(), t.clone()]).collect());
+        let read = time(&|| notes.iter().flat_map(|(r, t)| [links_of(r), t.clone()]).collect());
+        eprintln!("PROBE sweep's copy of 2000 notes: every RTF whole {:?}, {} KB; pictures left out {:?}, {} KB", cloned.0, cloned.1, read.0, read.1);
     }
 }
