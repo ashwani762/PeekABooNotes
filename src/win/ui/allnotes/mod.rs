@@ -585,6 +585,8 @@ enum Action {
     ClearSearch,
     /// The Undo toast's Undo, from the keyboard.
     Undo,
+    /// The selection moved with the arrow keys.
+    Browse,
     Focus(Focus),
     Reorder(Vec<u64>),
     Close,
@@ -593,6 +595,17 @@ enum Action {
 }
 
 fn perform(hwnd: HWND, a: Action) {
+    if matches!(a, Action::Browse) {
+        // Arrowing through the list, as when typing a search: each note shows its quick
+        // preview, and its editor comes once the keys rest (making one for every press
+        // was most of what a press cost).
+        if with(|l| wanted_editor(l).map(|w| w.0) != Some(l.editor_id)).unwrap_or(false) {
+            close_editor();
+        }
+        paint_now(hwnd);
+        unsafe { SetTimer(hwnd, T_SYNC, 250, None) };
+        return;
+    }
     if matches!(a, Action::Open(..) | Action::Archive(..) | Action::Delete(_) | Action::Color(..) | Action::Share(_)) {
         close_editor();
     }
@@ -602,8 +615,10 @@ fn perform(hwnd: HWND, a: Action) {
 
 fn perform_inner(hwnd: HWND, a: Action) {
     match a {
-        Action::None => {}
+        Action::None | Action::Browse => {}
         Action::Edit => {
+            // Its editor, if the keys moved onto the note a moment ago and it's still to come.
+            sync_editor();
             if let Some(e) = with(|l| l.editor)
                 && !e.is_null() {
                     unsafe { SetFocus(e) };
@@ -711,13 +726,15 @@ pub fn pre_translate(msg: &MSG) -> bool {
             }
             VK_DOWN => {
                 move_selection(l, 1);
-                Some(Action::None)
+                Some(Action::Browse)
             }
             VK_UP => {
                 move_selection(l, -1);
-                Some(Action::None)
+                Some(Action::Browse)
             }
-            VK_RETURN => Some(if l.editor.is_null() { open_selected(l) } else { Action::Edit }),
+            // Into the note's text; in its own window when it has none here (several
+            // selected, a narrow window, or it's open already).
+            VK_RETURN => Some(if l.editor.is_null() && wanted_editor(l).is_none() { open_selected(l) } else { Action::Edit }),
             VK_ESCAPE => {
                 if !l.query.is_empty() {
                     // Not here: the EDIT's change notification re-enters this window
