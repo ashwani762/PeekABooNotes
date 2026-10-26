@@ -11,7 +11,7 @@ cargo build --release
 target\release\peekaboo-notes.exe
 ```
 
-`cargo test` runs the unit tests: the note store, Markdown in and out of the editor (lists, emphasis, links, emoji, attachments), search, the zip writer, the MCP protocol, the string files and plural rules, and a check that `src/common` stays free of OS calls.
+`cargo test` runs the unit tests: the note store, Markdown in and out of the editor (lists, emphasis, links, emoji, attachments), search, the zip writer, the MCP protocol, the shortcuts' keys, the string files and plural rules, and a check that `src/common` stays free of OS calls.
 
 ### Installers
 
@@ -36,7 +36,7 @@ The app is split so other platforms can be added beside Windows: `src/common/` i
 | Path | Contents |
 |---|---|
 | `src/main.rs` | Entry point: picks the platform module |
-| `src/common/` | The portable app: the note store (`store.rs`), interface strings (`i18n/`), search (`search.rs`), attachments (`attach.rs`), emoji (`emoji.rs`), the MCP protocol and tools (`mcp.rs`), the zip writer (`zip.rs`), design tokens (`theme.rs`), springs (`anim.rs`), the log (`log.rs`) and small helpers (`util.rs`) |
+| `src/common/` | The portable app: the note store (`store.rs`), interface strings (`i18n/`), search (`search.rs`), attachments (`attach.rs`), emoji (`emoji.rs`), the MCP protocol and tools (`mcp.rs`), the zip writer (`zip.rs`), the shortcuts' keys (`hotkey.rs`), design tokens (`theme.rs`), springs (`anim.rs`), the log (`log.rs`) and small helpers (`util.rs`) |
 | `src/win/` | Windows: `os.rs` (what `common` asks of the OS), `app/` (message loop, note lifecycle, menus, import, export and share, autostart, the MCP pipe), `ui/` (deck, note windows, All Notes, Settings, menus, toasts, tooltips, flying cards), `editor/` (RichEdit, links, quotes, code blocks and tables, and the checklist, colour-emoji and header-fade overlays), `render/` (software canvas, DirectWrite, frame clock), `crash.rs`, `theme.rs`, `util.rs` |
 | `src/bin/peekaboo-mcp.rs` | The MCP bridge: stdin/stdout to the app's pipe |
 
@@ -135,6 +135,8 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 | Ctrl+Alt+H | Show or hide the deck |
 | Ctrl+Alt+E | Move the deck to the other edge |
 | Ctrl+Alt+K | Give the deck the keys (again, or Esc, to give them back) |
+
+These are the defaults. Settings › Shortcuts gives any of them other keys: a click on its keycaps (or Enter or Space on the focused row) has the row wait for keys, with "Press keys" where the keycaps were and the modifiers held so far ahead of it. The next key that isn't a modifier, with the modifiers held, is taken if it's two of Ctrl, Alt, Shift and Win and a letter, a digit or F1 to F12 (`common/hotkey.rs`, `Combo::from_press`); otherwise the row says why and keeps waiting. Esc, a click anywhere else or the window losing the keys cancels; Backspace or Delete turns the shortcut off. Keys another shortcut has ("Already used for “New note”"), keys that type a character on one of the user's layouts (the AltGr test below, with Shift when it's held) and keys `RegisterHotKey` refuses ("Taken by another app", tried under an id of its own) are refused and the old keys kept; the reason shows in the row's subtitle for four seconds. While a row waits, every shortcut is unregistered (`pause_hotkeys`), so the keys pressed reach Settings, ours too, and they're registered again with the keys they have now when it stops (`resume_hotkeys`); the key-ups after it are kept from the window menu. Reset to Defaults, at the end of the group, brings back Ctrl+Alt and the letters. The keys are kept in `notes.json` as `settings.hotkeys`, each changed shortcut's name and its keys as text (`{"new_note": "Win+Shift+N", "reopen": ""}`, "" for one turned off); a shortcut with its default keys isn't written, so the field is left out until one changes, and a name or keys this version can't read stay as they are. The tray menu, the deck's tooltips, Settings and All Notes' empty list (which leaves the shortcut out while New Note's is off) show the keys in use (`hotkey_text`).
 
 Ctrl+Alt is also AltGr, and on many keyboards AltGr and a letter types a character (€ with E on German, French and Spanish keyboards; ą, ę, ł, ń, ó on Polish ones). A hotkey would swallow it in every app, so `app/hotkeys.rs` asks each of the user's keyboard layouts (`GetKeyboardLayoutList`, then `ToUnicodeEx` with Ctrl and Alt down) whether Ctrl+Alt and the letter types something, and leaves out every shortcut that does. The layouts are looked at again on `WM_INPUTLANGCHANGE` and `WM_SETTINGCHANGE`, and when a hotkey arrives from a window whose layout wasn't known yet; that press then does nothing if the new layout types a character with it. Menus and tooltips leave out a shortcut that's off. A shortcut steps aside only for a character people write every day: any symbol (such as €), and letters on a layout for another language than English; an English layout's extra accented letters (English (India) types ā ē ō ṇ ḥ with AltGr) don't take a shortcut away. Stepping aside for other languages' keyboards is a beta: only English layouts have been tried on a real machine, and Settings says "beta" on such a shortcut.
 
