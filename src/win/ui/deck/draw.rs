@@ -264,6 +264,13 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
         let a = clamp01(d.pill.value);
         if d.tabs[i].open {
             c.shape(&cp.shape, col.accent, a, 1.0, 1.6 * s);
+            if d.tabs[i].pinned {
+                // Pinned on top of everything: a pin's head in the hollow capsule.
+                let sh = cp.shape;
+                let r = 1.4 * s;
+                let (x, y) = (sh.x + sh.w / 2.0, sh.y + sh.h / 2.0);
+                c.shape(&Shape::new(x - r, y - r, 2.0 * r, 2.0 * r, r), col.accent, a, 1.0, 0.0);
+            }
         } else {
             c.shape(&cp.shape, col.accent, a, 1.0, 0.0);
         }

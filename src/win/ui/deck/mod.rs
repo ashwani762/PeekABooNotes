@@ -86,6 +86,8 @@ struct Tab {
     color: u8,
     /// The note's window is open: its card is out of the deck (no spine, hollow capsule).
     open: bool,
+    /// Pinned on top of other windows: a dot in its hollow capsule while it's open.
+    pinned: bool,
     /// Position in the spine stack (for open cards: where the spine will return).
     slot: usize,
     reveal: Spring, // 0 = capsule in the pill, 1 = spine on the edge
@@ -114,6 +116,7 @@ impl Tab {
             body: String::new(),
             color: 0,
             open: false,
+            pinned: false,
             reveal: Spring::unit(0.0, motion::SHINGLE),
             delay: 0.0,
             reveal_goal: 0.0,

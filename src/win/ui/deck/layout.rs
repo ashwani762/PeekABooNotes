@@ -53,14 +53,14 @@ pub(super) fn tab_texts(id: u64) -> (String, String) {
 
 /// Rebuild the tab list from the store, keeping the springs of tabs that still exist.
 pub(super) fn sync(d: &mut Deck) {
-    let rows: Vec<(u64, u8)> = app::store(|s| s.active_notes().into_iter().filter(|n| !n.off_deck).map(|n| (n.id, n.color)).collect());
+    let rows: Vec<(u64, u8, bool)> = app::store(|s| s.active_notes().into_iter().filter(|n| !n.off_deck).map(|n| (n.id, n.color, n.pinned)).collect());
     let open: Vec<u64> = app::ui(|u| u.notes.keys().copied().collect());
     let in_deck = rows.iter().filter(|r| !open.contains(&r.0)).count();
     let before = stops(d);
     let mut g = compute_geo(in_deck);
     let mut old: HashMap<u64, Tab> = d.tabs.drain(..).map(|t| (t.id, t)).collect();
     let mut slot = 0usize;
-    for (id, color) in rows.into_iter() {
+    for (id, color, pinned) in rows.into_iter() {
         let is_open = open.contains(&id);
         // Only cards in the deck count toward its size: open notes take no slot (they
         // keep a hollow capsule in the pill), so they must never crowd real cards out.
@@ -90,6 +90,7 @@ pub(super) fn sync(d: &mut Deck) {
         t.title = title;
         t.body = body;
         t.color = color;
+        t.pinned = pinned;
         if is_open != t.open {
             t.open = is_open;
             // Out: the ghost carried the card away. Back: it slides in from its capsule.

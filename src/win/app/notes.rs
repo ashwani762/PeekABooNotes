@@ -132,8 +132,10 @@ pub(super) fn placement(id: u64) -> RECT {
     RECT { left: x, top: y, right: x + w, bottom: y + h }
 }
 
+/// Open a note, growing out of its card in the deck: the card fanned out, else its capsule
+/// in the pill (Reopen Last Note, the tray), when the deck is showing it.
 pub fn open_note(id: u64) {
-    open_note_from(id, deck::card_rect(id));
+    open_note_from(id, deck::card_rect(id).or_else(|| deck::holds(id).then(|| deck::home_rect(id))));
 }
 
 /// Open a note, growing it out of `from` (a screen rect + corner radius) when given.
@@ -147,8 +149,18 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
         }
         return;
     }
-    let Some((color, text)) = store(|s| s.note(id).map(|n| (n.color, n.text.clone()))) else { return };
+    let Some((color, text, placed)) = store(|s| s.note(id).map(|n| (n.color, n.text.clone(), n.rect.is_some()))) else { return };
     let r = placement(id);
+    if !placed {
+        // Where it first opens (beside its card in the deck) is where it opens again,
+        // moved or not: from the pill or the tray it would be beside the pill instead.
+        store_mut(|s| {
+            if let Some(n) = s.note_mut(id) {
+                n.rect = Some([r.left, r.top, r.right, r.bottom]);
+            }
+        });
+        save();
+    }
     match from {
         Some(from) if !crate::win::render::anim::reduced() => {
             // Its picture before the deck tucks it away.
