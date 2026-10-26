@@ -970,7 +970,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 mm.ptMinTrackSize = POINT { x: (420.0 * s) as i32, y: (420.0 * s) as i32 };
                 return 0;
             }
+            // Another app in front, or the window minimized: a tooltip of ours (a picture's
+            // name in the note) goes, rather than stay over whatever is there now.
+            WM_ACTIVATE if (wp & 0xFFFF) as u32 == WA_INACTIVE => {
+                crate::win::ui::tooltip::leave(hwnd);
+            }
             WM_SIZE => {
+                if wp as u32 == SIZE_MINIMIZED {
+                    crate::win::ui::tooltip::leave(hwnd);
+                }
                 with(|l| {
                     place_search(l);
                     clamp_scroll(l);
