@@ -53,7 +53,10 @@ pub struct Content {
 struct Ghost {
     hwnd: HWND,
     kind: Kind,
+    /// Where the springs' coordinates start on screen: the top-left of the flight's path.
     origin: (i32, i32),
+    /// The room around the card in its window, for its shadow.
+    pad: i32,
     canvas: Canvas,
     x: Spring,
     y: Spring,
@@ -84,6 +87,15 @@ fn union(a: &RECT, b: &RECT, pad: i32) -> RECT {
     RECT { left: a.left.min(b.left) - pad, top: a.top.min(b.top) - pad, right: a.right.max(b.right) + pad, bottom: a.bottom.max(b.bottom) + pad }
 }
 
+/// The flying card's window for a flight between `a` and `b`: as big as the bigger of the
+/// two with room for a spring's overshoot and `pad` around for the shadow. It moves with
+/// the card, so a flight across two monitors never needs a canvas the size of both.
+fn window_size(a: &RECT, b: &RECT, pad: i32) -> (i32, i32) {
+    let w = (a.right - a.left).max(b.right - b.left).max(1);
+    let h = (a.bottom - a.top).max(b.bottom - b.top).max(1);
+    ((w as f32 * 1.1).ceil() as i32 + 2 * pad, (h as f32 * 1.1).ceil() as i32 + 2 * pad)
+}
+
 /// Fly a card from `from` to `to` (screen rects with corner radii).
 pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, on_arrive: Option<Box<dyn FnOnce()>>) {
     if anim::reduced() {
@@ -98,6 +110,7 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     let (_, s) = crate::win::ui::screen::of_rect(window);
     let pad = (48.0 * s) as i32;
     let b = union(&from.0, &to.0, pad);
+    let (ww, wh) = window_size(&from.0, &to.0, pad);
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
     let hwnd = unsafe {
         CreateWindowExW(
@@ -105,10 +118,10 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
             wide(CLASS).as_ptr(),
             wide("").as_ptr(),
             WS_POPUP,
-            b.left,
-            b.top,
-            b.right - b.left,
-            b.bottom - b.top,
+            from.0.left - pad,
+            from.0.top - pad,
+            ww,
+            wh,
             null_mut(),
             null_mut(),
             app::hinst(),
@@ -127,7 +140,8 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
         hwnd,
         kind,
         origin: (b.left, b.top),
-        canvas: Canvas::new(b.right - b.left, b.bottom - b.top),
+        pad,
+        canvas: Canvas::new(ww, wh),
         x: Spring::px(lx(f), params),
         y: Spring::px(ly(f), params),
         w: Spring::px((f.right - f.left) as f32, params),
@@ -181,7 +195,12 @@ fn render(g: &mut Ghost) {
     };
     let c = &mut g.canvas;
     c.clear(0);
-    let sh = Shape::new(g.x.value, g.y.value, g.w.value.max(1.0), g.h.value.max(1.0), g.r.value.max(0.0));
+    // The window sits on whole pixels where the card is; the card keeps its fraction of one
+    // inside it, so the flight stays smooth.
+    let pad = g.pad as f32;
+    let (wx, wy) = (g.x.value.floor(), g.y.value.floor());
+    let (cw, ch) = ((c.w as f32 - 2.0 * pad).max(1.0), (c.h as f32 - 2.0 * pad).max(1.0));
+    let sh = Shape::new(pad + g.x.value - wx, pad + g.y.value - wy, g.w.value.clamp(1.0, cw), g.h.value.clamp(1.0, ch), g.r.value.max(0.0));
     c.card(&sh, theme::paper(g.color, dark), alpha, 0x000000, 0.06 * alpha, 1.6 * alpha, s);
     c.begin_batch();
     // Content sits where the note window draws it; the growing card reveals it.
@@ -223,7 +242,7 @@ fn render(g: &mut Ghost) {
         }
     }
     c.flush();
-    c.present(g.hwnd, g.origin.0, g.origin.1);
+    c.present(g.hwnd, g.origin.0 + wx as i32 - g.pad, g.origin.1 + wy as i32 - g.pad);
 }
 
 /// Drop every card still in flight (quitting).
@@ -273,4 +292,21 @@ pub fn frame(dt: f32) -> bool {
 
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     unsafe { DefWindowProcW(h, msg, wp, lp) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::window_size;
+    use windows_sys::Win32::Foundation::RECT;
+
+    #[test]
+    fn a_flight_across_monitors_keeps_a_card_sized_window() {
+        // From a capsule at the right edge of a 4K monitor to a note on the one to its left.
+        let capsule = RECT { left: 3800, top: 1000, right: 3808, bottom: 1020 };
+        let note = RECT { left: -1500, top: 200, right: -1100, bottom: 700 };
+        let (w, h) = window_size(&capsule, &note, 48);
+        assert_eq!((w, h), (440 + 96, 550 + 96));
+        // Four bytes a pixel: about a megabyte, where the whole path would take 50.
+        assert!(w * h * 4 < 2_000_000);
+    }
 }
