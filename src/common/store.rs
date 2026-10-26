@@ -440,6 +440,22 @@ pub fn is_fence(l: &str) -> bool {
     l.trim() == "```"
 }
 
+/// A code block's opening line, as Markdown has it: three backticks or more, then the
+/// language or nothing (```rust): how many backticks, and the language. Backticks after
+/// the first ones make it a line of text (```inline```).
+pub fn fence(l: &str) -> Option<(usize, &str)> {
+    let t = l.trim();
+    let ticks = t.bytes().take_while(|&b| b == b'`').count();
+    let info = t[ticks..].trim();
+    (ticks >= 3 && !info.contains('`')).then_some((ticks, info))
+}
+
+/// Whether `l` closes a code block opened with `ticks` backticks: as many or more, alone.
+pub fn closes_fence(l: &str, ticks: usize) -> bool {
+    let t = l.trim();
+    t.len() >= ticks && t.bytes().all(|b| b == b'`')
+}
+
 /// The text of a quote's paragraph, when `l` is one ("> Ship it on Friday").
 pub fn quoted(l: &str) -> Option<&str> {
     let t = l.trim_start();
@@ -509,31 +525,67 @@ fn table_starts<'a>(mut lines: impl Iterator<Item = &'a str>) -> bool {
 ///
 /// Code blocks are left exactly as they are. Quote paragraphs break like plain lines, and
 /// a table gets a blank line on either side, without which the text next to it would read
-/// as more of the table (or, after a quote, as more of the quote).
+/// as more of the table (or, after a quote, as more of the quote). What a quote holds
+/// (a quote or code block in it too) breaks the same way, a level in.
 pub fn hard_breaks(md: &str) -> String {
     let lines: Vec<&str> = md.split('\n').collect();
+    breaks(&lines).join("\n")
+}
+
+fn breaks(lines: &[&str]) -> Vec<String> {
     let quote = |l: &str| quoted(l).is_some();
     let row = |l: &str| table_cells(l).is_some();
     let item = |l: &str| {
         let t = l.trim_start();
         looks_like_marker(t) && !t.starts_with('#') && !quote(t) && !t.starts_with("```")
     };
-    let plain = |l: &str| !l.trim().is_empty() && !item(l) && !quote(l) && !row(l) && !is_fence(l) && !l.trim_start().starts_with('#');
-    let mut out = String::with_capacity(md.len() + lines.len() * 2);
-    let mut code = false;
-    for (i, l) in lines.iter().enumerate() {
-        out.push_str(l);
-        let Some(&next) = lines.get(i + 1) else { break };
-        if is_fence(l) {
-            code = !code;
-        } else if code {
+    let plain = |l: &str| !l.trim().is_empty() && !item(l) && !quote(l) && !row(l) && fence(l).is_none() && !l.trim_start().starts_with('#');
+    let lead = |l: &str| l.len() - l.trim_start().len();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    // The backticks of the code block the lines are in.
+    let mut code: Option<usize> = None;
+    let mut i = 0;
+    while i < lines.len() {
+        let l = lines[i];
+        if let Some(ticks) = code {
             // Exactly as written.
-        } else if (plain(l) && plain(next)) || (quote(l) && quote(next)) {
-            out.push_str("  ");
-        } else if ((item(l) || quote(l) || row(l)) && plain(next)) || (plain(l) && table_starts(lines[i + 1..].iter().copied())) {
-            out.push('\n');
+            out.push(l.to_string());
+            if closes_fence(l, ticks) {
+                code = None;
+            }
+            i += 1;
+            continue;
         }
-        out.push('\n');
+        if let Some((ticks, _)) = fence(l) {
+            out.push(l.to_string());
+            code = Some(ticks);
+            i += 1;
+            continue;
+        }
+        // A quote's lines (as far in as its first) are taken together, broken as what they
+        // hold, and put back in the quote.
+        let (end, mut piece) = if quote(l) {
+            let k = lead(l);
+            let end = i + lines[i..].iter().take_while(|x| quote(x) && lead(x) == k).count();
+            let inner: Vec<&str> = lines[i..end].iter().filter_map(|x| quoted(x)).collect();
+            let pre = &l[..k];
+            let piece = breaks(&inner).into_iter().map(|x| if x.is_empty() { format!("{pre}>") } else { format!("{pre}> {x}") }).collect();
+            (end, piece)
+        } else {
+            (i + 1, vec![l.to_string()])
+        };
+        let last = lines[end - 1];
+        if let Some(&next) = lines.get(end) {
+            if (plain(last) && plain(next)) || (quote(last) && quote(next)) {
+                if let Some(p) = piece.last_mut() {
+                    p.push_str("  ");
+                }
+            } else if ((item(last) || quote(last) || row(last)) && plain(next)) || (plain(last) && table_starts(lines[end..].iter().copied())) {
+                piece.push(String::new());
+            }
+        }
+        out.extend(piece);
+        i = end;
     }
     out
 }
