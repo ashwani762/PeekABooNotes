@@ -466,6 +466,10 @@ pub fn run() -> i32 {
         theme::allow_dark_menus();
 
         STORE.with(|s| *s.borrow_mut() = Some(Store::load(data_dir())));
+        // Notes lost with an earlier notes file can still have versions: a new note never
+        // takes one of their ids, or it would show their versions as its own.
+        let versioned = note::versions::max_id();
+        store_mut(|s| s.d.next_id = s.d.next_id.max(versioned));
         crate::common::i18n::init(&store(|s| s.d.settings.language.clone()));
         log::info(&format!("language {}", crate::common::i18n::tag()));
         crate::win::crash::test_from_env();
