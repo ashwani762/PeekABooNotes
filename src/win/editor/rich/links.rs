@@ -585,13 +585,20 @@ pub fn name_start(t: &[u16], a: i32, b: i32) -> i32 {
 }
 
 /// `[name](url)` links within a line of Markdown: the line without their syntax, and
-/// each link's (start, end, url) there, in UTF-16 units.
+/// each link's (start, end, url) there, in UTF-16 units. `\[` is a bracket.
 pub(super) fn md_links(s: &str) -> (String, Vec<(i32, i32, String)>) {
     let mut out = String::new();
     let mut links = Vec::new();
     let mut rest = s;
     let mut n = 0i32;
     while let Some(open) = rest.find('[') {
+        if let Some(pre) = rest[..open].strip_suffix('\\') {
+            out.push_str(pre);
+            out.push('[');
+            n += pre.encode_utf16().count() as i32 + 1;
+            rest = &rest[open + 1..];
+            continue;
+        }
         let after = &rest[open + 1..];
         let parsed = after.find("](").and_then(|close| {
             let name = &after[..close];

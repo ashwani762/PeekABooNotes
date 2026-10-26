@@ -358,7 +358,7 @@ fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
             continue;
         }
         let n = char_len(t, i, b);
-        if literal_star(t, i) {
+        if literal(t, i) {
             out.push('\\');
         }
         out.push_str(&unmark_str(&t[i..i + n]));
@@ -514,7 +514,7 @@ fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, o
             cur = st;
         }
         // (Not in an address, which is read back as it is.)
-        if !link && literal_star(t, i) {
+        if !link && literal(t, i) {
             out.push('\\');
         }
         out.push_str(&unmark_str(&t[i..i + n]));
@@ -523,25 +523,45 @@ fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, o
     cur
 }
 
-/// Whether the `*` at `i` in `t` would read back as a mark (`*italic*`, `**bold**`), so
-/// it goes out as `\*`: not when its run of stars stands between spaces (2 ** 3), or is
-/// one star inside a word (2*3*4).
-fn literal_star(t: &[u16], i: usize) -> bool {
-    let star = b'*' as u16;
-    if t[i] != star {
+/// What a backslash before it makes text on the way back in (`inline_marks`, `md_links`).
+const ESCAPED: [char; 5] = ['*', '_', '~', '<', '['];
+
+/// Whether the character at `i` in `t` would read back as part of a mark (`*italic*`,
+/// `__bold__`, `~~struck~~`), a tag (`<u>`, `<br>`, `<p align=...>`) or a link
+/// (`[a](url)`), so it goes out escaped (`\_`): typed, it's text. Not when it can't be read
+/// so: a run of stars or underscores between spaces (2 ** 3), one star or any underscores
+/// inside a word (2*3*4, snake_case), one tilde. Always after a backslash that's text, which
+/// would otherwise read as its escape (C:\_temp).
+fn literal(t: &[u16], i: usize) -> bool {
+    let c = t[i];
+    if !ESCAPED.iter().any(|&e| e as u16 == c) {
         return false;
     }
+    if i > 0 && t[i - 1] == b'\\' as u16 {
+        return true;
+    }
     let (mut a, mut b) = (i, i + 1);
-    while a > 0 && t[a - 1] == star {
+    while a > 0 && t[a - 1] == c {
         a -= 1;
     }
-    while b < t.len() && t[b] == star {
+    while b < t.len() && t[b] == c {
         b += 1;
     }
     let gap = |k: Option<&u16>| k.is_none_or(|&c| c == CR || c == CELL || char::from_u32(c as u32).is_some_and(char::is_whitespace));
     let word = |k: Option<&u16>| k.is_some_and(|&c| char::from_u32(c as u32).is_some_and(char::is_alphanumeric));
     let (before, after) = (a.checked_sub(1).and_then(|k| t.get(k)), t.get(b));
-    !(gap(before) && gap(after)) && !(b - a == 1 && word(before) && word(after))
+    let follows = |s: &str| s.encode_utf16().enumerate().all(|(k, u)| t.get(i + 1 + k) == Some(&u));
+    match c as u8 {
+        b'*' => !(gap(before) && gap(after)) && !(b - a == 1 && word(before) && word(after)),
+        b'_' => !(gap(before) && gap(after)) && !(word(before) && word(after)),
+        b'~' => b - a >= 2 && !(gap(before) && gap(after)),
+        b'<' => ["u>", "/u>", "br>", "p align=", "h1 align=", "h2 align=", "h3 align=", "h4 align=", "h5 align=", "h6 align="].iter().any(|s| follows(s)),
+        // A link: `](` further on in the paragraph.
+        _ => {
+            let end = t[i..].iter().position(|&c| c == CR || c == CELL).map_or(t.len(), |k| i + k);
+            t[i..end].windows(2).any(|w| w == [b']' as u16, b'(' as u16])
+        }
+    }
 }
 
 pub(super) fn close_marks(out: &mut String, cur: Marks, next: Marks) {
@@ -909,13 +929,27 @@ fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
         let cols = rows.iter().map(Vec::len).max().unwrap_or(1).max(aligns.len()).max(1);
         let cells: Vec<Vec<Vec<Inline>>> = rows
             .iter()
-            .map(|r| (0..cols).map(|c| r.get(c).map(|s| s.split("<br>").map(parse_inline).collect()).unwrap_or_else(|| vec![parse_inline("")])).collect())
+            .map(|r| (0..cols).map(|c| r.get(c).map(|s| cell_lines(s).into_iter().map(parse_inline).collect()).unwrap_or_else(|| vec![parse_inline("")])).collect())
             .collect();
         let mut aligns = aligns;
         aligns.resize(cols, PFA_LEFT);
         return Some((Fill::Table(cells, aligns), used));
     }
     None
+}
+
+/// A table cell's lines: `<br>` breaks one, `\<br>` is text.
+fn cell_lines(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (i, _) in s.match_indices("<br>") {
+        if !s[..i].ends_with('\\') {
+            out.push(&s[from..i]);
+            from = i + 4;
+        }
+    }
+    out.push(&s[from..]);
+    out
 }
 
 /// The cells of a table line `| a | b |`, without their pipes (`\|` is a pipe in a cell).
@@ -1034,8 +1068,9 @@ type Links = Vec<(i32, i32, String)>;
 /// Strip `**bold**`, `_italic_` and `~~strike~~` marks from one line (as `to_markdown`
 /// writes them), and the other ways assistants and other apps write them (`*italic*`,
 /// `__bold__`, `***both***`), returning the text and the (start, end, effect) runs in
-/// UTF-16 units. A mark without a partner stays literal text, as do one written `\*`
-/// and a `_` or `*` inside a word (snake_case, 2*3*4).
+/// UTF-16 units. A mark without a partner stays literal text, as do one written escaped
+/// (`\*`, `\_`, `\~`, and `\<` for a tag) and a `_` or `*` inside a word (snake_case,
+/// 2*3*4).
 pub(super) fn inline_marks(s: &str) -> (String, Runs) {
     let c: Vec<char> = s.chars().collect();
     let at = |k: usize| c.get(k).copied();
@@ -1063,9 +1098,11 @@ pub(super) fn inline_marks(s: &str) -> (String, Runs) {
     let tag = |k: usize, s: &str| s.chars().enumerate().all(|(j, ch)| at(k + j) == Some(ch));
     let mut i = 0;
     while i < c.len() {
-        // An escaped star is a star.
-        if c[i] == '\\' && at(i + 1) == Some('*') {
-            out.push('*');
+        // An escaped star is a star, and so on (`\[` is `md_links`' to read).
+        if c[i] == '\\'
+            && let Some(e) = at(i + 1).filter(|e| ESCAPED.contains(e) && *e != '[')
+        {
+            out.push(e);
             n += 1;
             i += 2;
             continue;
@@ -1338,6 +1375,40 @@ mod tests {
         load_markdown(h2, &md);
         assert_eq!(text(h2), text(h), "{md}");
         assert_eq!(to_markdown(h2, true), md);
+    }
+
+    /// `text`, typed (no Markdown read), exported and imported again: the same note.
+    fn typed_cycle(text: &str) -> String {
+        let h = editor();
+        insert_text(h, text);
+        let md = to_markdown(h, true);
+        let h2 = editor();
+        load_markdown(h2, &crate::common::store::hard_breaks(&md));
+        assert_eq!(String::from_utf16_lossy(&super::text(h2)), text, "went out as {md:?}");
+        md
+    }
+
+    /// Typed text that reads as Markdown stays the text it is, through an export, a saved
+    /// version or an assistant: it goes out escaped, and only where it would read so.
+    #[test]
+    fn typed_markdown_stays_text() {
+        for text in [
+            "T\r__init__ method",
+            "T\r_not italic_ here",
+            "T\r~~not struck~~ here",
+            "T\r<u>tag</u> literal",
+            "T\r[a](https://x.com) literal",
+            "T\r<p align=\"center\">x</p>",
+            "T\rC:\\_temp, a\\*b, \\[x](y), a\\~~b~~ and \\<u>c</u>",
+            "_T_ and [t](x)\rbody",
+        ] {
+            typed_cycle(text);
+        }
+        // Nothing escaped that can't read as Markdown.
+        assert_eq!(typed_cycle("T\rsnake_case, user__id, a ~~ b, 2*3, a < b, [x] and x~y"), "# T\nsnake_case, user__id, a ~~ b, 2*3, a < b, [x] and x~y");
+        assert_eq!(typed_cycle("T\r__init__"), "# T\n\\_\\_init\\_\\_");
+        // A `<br>` typed in a table cell stays text there.
+        cycle("# T\n| a \\<br> b | c<br>d |\n| --- | --- |", "# T\n| a \\<br> b | c<br>d |\n| --- | --- |");
     }
 
     /// Text after a list goes out with the blank line Markdown needs there, and comes back
