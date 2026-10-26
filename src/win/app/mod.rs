@@ -506,6 +506,12 @@ pub fn run() -> i32 {
         hotkeys::register(main);
 
         reopen_at_start();
+        // Started by hand with no note coming back: All Notes, as a second launch shows,
+        // rather than a faint pill at the edge that's easy to miss. A quiet start (at
+        // sign-in, from an assistant's bridge) stays at the deck.
+        if !quiet && ui(|u| u.notes.is_empty()) {
+            show_all_notes(false);
+        }
         share::cleanup();
         sweep_attachments();
         upgrade_startup();
