@@ -1299,7 +1299,8 @@ mod tests {
             let cp = rich::char_from_pos(e, x, y);
             let t = rich::text(e);
             let ps = rich::para_start(&t, cp.max(0));
-            [ps, cp, cp - 1].into_iter().find(|&c| {
+            let after = if t.get(cp.max(0) as usize) == Some(&rich::CR) { cp + 1 } else { ps };
+            [ps, cp, cp - 1, after].into_iter().find(|&c| {
                 c >= 0 && t.get(c as usize).copied().is_some_and(is_task) && (c == 0 || t[c as usize - 1] == rich::CR) && {
                     let (cx, cy, r) = crate::win::editor::checks::circle(e, c, t.get(c as usize + 1).copied());
                     (x as f32 - cx).abs() <= r && (y as f32 - cy).abs() <= r
@@ -1338,6 +1339,39 @@ mod tests {
             }
         }
         assert!(boxes > 20 && links > 100, "{boxes} box and {links} link points");
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(e) };
+    }
+
+    /// A pointer that jumps onto a circle (from the text, the margin, another line) finds
+    /// the box there, as one that moved onto it a pixel at a time does; and every point
+    /// well inside a drawn circle, the last item's too, is on its box.
+    #[test]
+    fn pointer_jumping_onto_a_circle_finds_its_box() {
+        crate::common::i18n::init("en");
+        let e = editor("");
+        rich::load_markdown(e, "Title\nsome text here\n- [ ] alpha task\n- [ ] beta task\n- [ ] gamma task");
+        rich::style_boxes(e);
+        crate::win::editor::checks::set_style(e, 0, 0xFFFFFF, 1.0);
+        let t = rich::text(e);
+        let all: Vec<i32> = (0..t.len() as i32).filter(|&c| is_task(t[c as usize]) && (c == 0 || t[c as usize - 1] == rich::CR)).collect();
+        assert_eq!(all.len(), 3);
+        let mut inside = 0;
+        for &c in &all {
+            let (cx, cy, r) = crate::win::editor::checks::circle(e, c, t.get(c as usize + 1).copied());
+            for y in (cy - r + 2.0) as i32..=(cy + r - 2.0) as i32 {
+                for x in (cx - r + 2.0).max(0.0) as i32..=(cx + r - 2.0) as i32 {
+                    for (qx, qy) in [(x + 60, y), (x + 120, y), (x, y + 40), (x, y - 30), (300, 290), (2, y)] {
+                        hover_forget();
+                        let _ = checkbox_at(e, qx, qy);
+                        let _ = link_under(e, qx, qy);
+                        assert_eq!(checkbox_at(e, x, y), Some(c), "onto {x},{y} from {qx},{qy}");
+                        assert_eq!(checkbox_now(e, x, y), Some(c), "pressed at {x},{y}");
+                    }
+                    inside += 1;
+                }
+            }
+        }
+        assert!(inside > 300, "{inside} points");
         unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(e) };
     }
 

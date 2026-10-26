@@ -134,12 +134,19 @@ fn hover<R>(e: HWND, x: i32, y: i32, f: impl FnOnce(&Hover) -> R) -> R {
 
 impl Hover {
     fn new(e: HWND, at: (i32, i32), cp: i32, view: (i32, usize)) -> Hover {
-        let t = rich::paras_around(e, (cp - 1).max(0) as usize, cp.max(0) as usize);
+        let t = rich::paras_around(e, (cp - 1).max(0) as usize, (cp + 1).max(0) as usize);
         // The box of the line under the point: the circle is drawn left of the text, over
-        // the glyph and the gap after it.
+        // the glyph and the gap after it. A point left of a line can come back as the mark
+        // ending the line above: the box after that mark counts too.
         let ps = (t.from + rich::para_start(&t.t, cp.max(0) - t.from as i32) as usize) as i32;
-        let boxes = [ps, cp, cp - 1]
+        let after = if t.get(cp.max(0) as usize) == Some(rich::CR) { cp + 1 } else { ps };
+        let mut near = [ps, cp, cp - 1, after];
+        near.sort_unstable();
+        let boxes = near
             .into_iter()
+            .enumerate()
+            .filter(|&(i, c)| i == 0 || near[i - 1] != c)
+            .map(|(_, c)| c)
             .filter(|&c| c >= 0 && t.get(c as usize).is_some_and(is_task) && (c == 0 || t.get(c as usize - 1) == Some(rich::CR)))
             .map(|c| {
                 let (cx, cy, r) = crate::win::editor::checks::circle(e, c, t.get(c as usize + 1));
@@ -194,6 +201,14 @@ impl Hover {
 /// The checkbox whose circle is at (`x`, `y`) in editor `e`.
 pub(super) fn checkbox_at(e: HWND, x: i32, y: i32) -> Option<i32> {
     hover(e, x, y, |hv| hv.box_at(x, y))
+}
+
+/// `checkbox_at`, worked out afresh for this very point: what the cursor shows and what a
+/// click acts on, never what was kept from an earlier move. (A pointer that jumped onto a
+/// circle from the text kept the I-beam, and its click went into the text.)
+pub(super) fn checkbox_now(e: HWND, x: i32, y: i32) -> Option<i32> {
+    hover_forget();
+    checkbox_at(e, x, y)
 }
 
 /// The link under the pointer: (start, end, address, the character pointed at). A
@@ -433,7 +448,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 return 0;
             }
             if !key_down(VK_SHIFT)
-                && let Some(cp) = checkbox_at(e, x_of(lp), y_of(lp)) {
+                && let Some(cp) = checkbox_now(e, x_of(lp), y_of(lp)) {
                     unsafe { SetFocus(e) };
                     toggle_check(e, cp);
                     mark_dirty(h);
@@ -498,6 +513,12 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             crate::win::editor::checks::set_hot(e, hot);
             pointer_in(h);
             link_tip(e, x_of(lp), y_of(lp));
+            if hot.is_some() && wp & 0x0001 == 0 {
+                // RichEdit may set its own cursor as it takes the move: the hand stays.
+                let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+                unsafe { SetCursor(LoadCursorW(null_mut(), IDC_HAND)) };
+                return r;
+            }
         }
         WM_MOUSELEAVE => {
             crate::win::ui::tooltip::leave(e);
@@ -510,7 +531,8 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 GetCursorPos(&mut p);
                 ScreenToClient(e, &mut p);
             }
-            if checkbox_at(e, p.x, p.y).is_some() {
+            // Once a move, before its WM_MOUSEMOVE (which then asks the same point again).
+            if checkbox_now(e, p.x, p.y).is_some() {
                 unsafe { SetCursor(LoadCursorW(null_mut(), IDC_HAND)) };
                 return 1;
             }
