@@ -130,12 +130,14 @@ pub fn purge_trash(dir: &Path, today: i64) -> usize {
 }
 
 /// "attachment:Q3%20plan.pdf" for "Q3 plan.pdf": no spaces or quotes, which would end
-/// the address inside a link.
+/// the address inside a link, nor brackets: a Markdown link ends at ")", and "plan (2).pdf"
+/// was cut at its own (export left the file behind, import made a dead link). Notes saved
+/// before keep "(2)" as it was; `decode` reads both.
 pub fn url(name: &str) -> String {
     let mut out = String::from(SCHEME);
     for b in name.bytes() {
         match b {
-            b' ' | b'"' | b'%' | b'#' | b'?' | b'\\' | 0..0x20 | 0x7F.. => out.push_str(&format!("%{b:02X}")),
+            b' ' | b'"' | b'%' | b'#' | b'?' | b'(' | b')' | b'\\' | 0..0x20 | 0x7F.. => out.push_str(&format!("%{b:02X}")),
             _ => out.push(b as char),
         }
     }
@@ -222,14 +224,16 @@ where
     }
     // Then, for the few left, their address anywhere at all: a name the link reader
     // stops short in ("a{b}.png", which RTF writes "a\{b\}.png") is still seen.
-    let forms: Vec<[String; 3]> = left
+    let forms: Vec<[String; 4]> = left
         .iter()
         .map(|n| {
             let u = url(n).to_lowercase();
-            [u.replace('{', "\\{").replace('}', "\\}"), export_link(n).to_lowercase(), u]
+            // Also as notes saved before brackets were escaped have it.
+            let old = u.replace("%28", "(").replace("%29", ")");
+            [u.replace('{', "\\{").replace('}', "\\}"), export_link(n).to_lowercase(), u, old]
         })
         .collect();
-    let mut left: Vec<(&String, [String; 3])> = left.into_iter().zip(forms).collect();
+    let mut left: Vec<(&String, [String; 4])> = left.into_iter().zip(forms).collect();
     for k in kept {
         if left.is_empty() {
             break;
@@ -326,6 +330,20 @@ fn file_url(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A name with brackets: the link holds them escaped, so a Markdown link around it ends
+    /// at its own ")", and links saved before (brackets as they are) still count.
+    #[test]
+    fn brackets_in_names_stay_in_the_link() {
+        assert_eq!(export_link("Lisbon (2).jpg"), "attachments/Lisbon%20%282%29.jpg");
+        assert_eq!(name_of(&url("Lisbon (2).jpg")).as_deref(), Some("Lisbon (2).jpg"));
+        let md = format!("![Lisbon (2).jpg]({}) and more", export_link("Lisbon (2).jpg"));
+        assert!(linked(&md).contains("Lisbon (2).jpg"));
+        let old = "{\\rtf1 HYPERLINK \"attachment:Lisbon%20(2).jpg\"}";
+        assert!(linked(old).contains("Lisbon (2).jpg"));
+        let gone: BTreeSet<String> = ["Lisbon (2).jpg".to_string()].into();
+        assert!(orphans(&gone, [old]).is_empty(), "an old-style link still keeps its file");
+    }
 
     #[test]
     fn addresses_round_trip() {
