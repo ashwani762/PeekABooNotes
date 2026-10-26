@@ -99,6 +99,10 @@ struct NoteWin {
     /// When the note was last changed in this window: the first change of a visit (the
     /// window just opened, or the note left alone a while) keeps a version of it first.
     edited_at: Option<std::time::Instant>,
+    /// The note as that first change found it: its text, its edited time, and when the
+    /// version kept of it then was taken (if one was). Changed back to that text, it isn't
+    /// edited after all.
+    before: Option<(String, i64, Option<i64>)>,
     /// When typing last ran into the note limit (the footer says so for a moment).
     full_at: Option<std::time::Instant>,
     swallow: bool,
@@ -193,6 +197,7 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         loading: true,
         discard: false,
         edited_at: None,
+        before: None,
         full_at: None,
         swallow: false,
         icons: None,
@@ -270,6 +275,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         loading: true,
         discard: false,
         edited_at: None,
+        before: None,
         full_at: None,
         swallow: false,
         icons: None,
@@ -604,11 +610,37 @@ pub fn flush(h: HWND) {
         app::save();
         return;
     }
+    // Back to what it read when this stretch of work began (a letter typed, a pause that
+    // saved it, then Backspace): not an edit after all. It gets its edited time back, and
+    // the version its first save kept goes, being the note as it is.
+    if let Some((_, updated, taken)) = st.before.take_if(|b| b.0 == text) {
+        if let Some(taken) = taken {
+            versions::unkeep(id, taken, &app::rtf_to_markdown(&rtf));
+        }
+        // The next change starts a stretch again, and keeps a version again.
+        st.edited_at = None;
+        app::store_mut(|s| {
+            if let Some(n) = s.note_mut(id) {
+                n.rtf = rtf;
+                n.text = text.clone();
+                n.updated = updated;
+                n.view = view;
+            }
+        });
+        app::save();
+        unsafe {
+            SetWindowTextW(h, wide(&title_of(&text)).as_ptr());
+            InvalidateRect(h, std::ptr::null(), 0); // the footer's edited time
+        }
+        app::note_edited(id);
+        return;
+    }
     // The first change since the window opened, or since the note was left alone for a
     // while (a note kept open for days gets a version for each stretch of work): keep it
-    // as it was (see `versions`).
+    // as it was (see `versions`), and what it read then.
     if st.edited_at.is_none_or(|t| t.elapsed() >= versions::IDLE) {
-        versions::keep_for_edit(id);
+        let taken = versions::keep_for_edit(id);
+        st.before = app::store(|s| s.note(id).map(|n| (n.text.clone(), n.updated, taken)));
     }
     st.edited_at = Some(std::time::Instant::now());
     let title = title_of(&text);
@@ -757,6 +789,8 @@ pub fn reload(id: u64) {
             rich::replace_all_rtf(st.edit, &rtf);
         }
         st.dirty = false;
+        // Changed from elsewhere: what this stretch of work began from is no more.
+        st.before = None;
         apply_theme(h);
         let len = rich::text(st.edit).len() as i32;
         rich::set_sel(st.edit, a.min(len), a.min(len));

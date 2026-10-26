@@ -78,6 +78,19 @@ impl Book {
         true
     }
 
+    /// Drop note `id`'s newest version when it's the one taken at `taken` and reads `md`,
+    /// the note as it is again (a change typed and taken back after a pause): it would be
+    /// the note as it is. True when dropped.
+    fn drop_same(&mut self, id: u64, taken: i64, md: &str) -> bool {
+        let Some(list) = self.notes.get_mut(&id) else { return false };
+        if !list.last().is_some_and(|v| v.taken == taken && v.md == md) {
+            return false;
+        }
+        list.pop();
+        self.notes.retain(|_, l| !l.is_empty());
+        true
+    }
+
     /// Drop what's too old, too many, and (oldest first, across notes) too much. An
     /// assistant's versions go first; a note's newest version of the user's own stays
     /// whatever the size.
@@ -169,29 +182,42 @@ pub fn keep_for_assistant(id: u64) {
 }
 
 /// Note `id` was just changed for the first time since its window opened: keep it as it
-/// was saved before, unless its last version is only minutes old.
-pub(super) fn keep_for_edit(id: u64) {
-    take(id, true, false);
+/// was saved before, unless its last version is only minutes old. When the version kept
+/// was taken, if one was.
+pub(super) fn keep_for_edit(id: u64) -> Option<i64> {
+    take(id, true, false)
+}
+
+/// The edits that made note `id` keep the version taken at `taken` were all taken back:
+/// it reads `md` again, so that version goes when it reads the same.
+pub(super) fn unkeep(id: u64, taken: i64, md: &str) {
+    let Ok(mut b) = load() else { return };
+    if b.drop_same(id, taken, md) {
+        store(&b);
+    }
 }
 
 /// Keep note `id` as it is now (`quiet`: see `Book::add`); `assistant_next` says whether
 /// what it holds after is an assistant's writing. Nothing is kept, nor written, when
-/// `versions.json` is there but can't be read.
-fn take(id: u64, quiet: bool, assistant_next: bool) {
-    let Some(mut v) = current(id) else { return };
+/// `versions.json` is there but can't be read. When the version kept was taken, if one
+/// was.
+fn take(id: u64, quiet: bool, assistant_next: bool) -> Option<i64> {
+    let mut v = current(id)?;
     let mut b = match load() {
         Ok(b) => b,
         Err(e) => {
             crate::common::log::warn(&format!("versions: none kept, versions.json can't be read ({e})"));
-            return;
+            return None;
         }
     };
     v.assistant = b.assistant_made.contains(&id);
+    let taken = v.taken;
     let added = b.add(id, v, crate::win::util::now(), quiet);
     let marked = if assistant_next { b.assistant_made.insert(id) } else { b.assistant_made.remove(&id) };
     if added || marked {
         store(&b);
     }
+    added.then_some(taken)
 }
 
 /// Note `id`'s versions, newest first.
@@ -275,6 +301,25 @@ mod tests {
         // "a" put back, then edited (or undone) an hour on: it's in the list already.
         assert!(!b.add(1, v("a", 4000), 4000, true));
         assert_eq!(mds(&b, 1), ["a", "b"]);
+    }
+
+    /// A change typed and taken back after a pause: the version its first save kept is
+    /// the note as it is again, and goes; any other stays.
+    #[test]
+    fn a_change_taken_back_drops_its_version() {
+        let mut b = Book::default();
+        assert!(b.add(1, v("a", 100), 100, false));
+        assert!(b.add(1, v("b", 5000), 5000, true));
+        // Not the one taken then, or not reading the same: kept.
+        assert!(!b.drop_same(1, 4999, "b"));
+        assert!(!b.drop_same(1, 5000, "b and more"));
+        assert!(!b.drop_same(2, 5000, "b"));
+        assert_eq!(mds(&b, 1), ["a", "b"]);
+        assert!(b.drop_same(1, 5000, "b"));
+        assert_eq!(mds(&b, 1), ["a"]);
+        // The last one gone, the note's list goes with it.
+        assert!(b.drop_same(1, 100, "a"));
+        assert!(!b.notes.contains_key(&1));
     }
 
     #[test]
