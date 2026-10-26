@@ -139,7 +139,8 @@ pub(super) fn paint(h: HWND) {
                 } else {
                     t!("note_edited", crate::common::i18n::time::edited_time(updated))
                 };
-                c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a * 0.85, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                // At full strength once shown: the colour is the one tuned to read at 4.5:1.
+                c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
             }
         }
         c.flush();
