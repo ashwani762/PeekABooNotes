@@ -275,7 +275,7 @@ unsafe extern "system" fn in_cb(cookie: usize, buf: *mut u8, cb: i32, pcb: *mut 
 pub fn get_rtf(h: HWND) -> String {
     let mut out: Vec<u8> = Vec::new();
     let mut es = EditStream { cookie: &mut out as *mut _ as usize, error: 0, callback: out_cb };
-    send(h, EM_STREAMOUT, SF_RTF as usize, &mut es as *mut _ as isize);
+    selectors::symbols_saved_whole(h, || send(h, EM_STREAMOUT, SF_RTF as usize, &mut es as *mut _ as isize));
     // Pictures narrowed to fit the note go out at their own size.
     pictures::own_sizes(h, String::from_utf8_lossy(&out).into_owned())
 }

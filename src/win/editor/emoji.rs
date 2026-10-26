@@ -187,7 +187,7 @@ mod tests {
     fn emoji_are_laid_out_as_wide_as_their_pictures() {
         use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
         use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, ES_MULTILINE, WS_POPUP};
-        let s = "emoji \u{1F680}\u{2764}\u{FE0F}\u{1F389}\u{1F44D}\u{1F3FD}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} ok";
+        let s = "emoji \u{1F680}\u{2764}\u{FE0F}\u{1F389}\u{1F44D}\u{1F3FD}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} ok \u{2708}\u{FE0F}\u{2615}\u{2705}";
         for typed in [true, false] {
             let h = unsafe {
                 LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
@@ -210,7 +210,7 @@ mod tests {
             rich::restyle(h);
             let t: Vec<u16> = rich::text(h).iter().map(|&c| rich::unmark(c)).collect();
             let found = crate::common::emoji::find(&t, &[]);
-            assert_eq!(found.len(), 5);
+            assert_eq!(found.len(), 8);
             for (a, b) in found {
                 let cell = rich::pos_from_char(h, b as i32).x - rich::pos_from_char(h, a as i32).x;
                 let px = (rich::size_at(h, a as i32).unwrap() * 96.0 / 72.0).round();
@@ -218,8 +218,26 @@ mod tests {
                 let picture = Font::new(px, 400, FACE).measure(&s16).0;
                 assert!((cell - picture).abs() <= 1, "{s16} typed {typed}: {cell} px laid out for a {picture} px picture");
             }
-            // Only the look changed: the text is as typed.
+            // Only the look changed: the text is as typed, also once saved and read back (a
+            // symbol's face once came with the symbol charset, which keeps only a character's
+            // low byte: ✈ U+2708 was saved as U+0008).
             assert_eq!(rich::unmark_str(&rich::text(h)), format!("T\r{s}"));
+            let h2 = unsafe {
+                CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 600, 300, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+            };
+            rich::setup(h2);
+            rich::set_rtf(h2, &rich::get_rtf(h));
+            assert_eq!(rich::unmark_str(&rich::text(h2)), format!("T\r{s}"), "typed {typed}, saved and read back");
+            // Opened again, each is as wide as its picture once more.
+            rich::restyle(h2);
+            let t2: Vec<u16> = rich::text(h2).iter().map(|&c| rich::unmark(c)).collect();
+            for (a, b) in crate::common::emoji::find(&t2, &[]) {
+                let cell = rich::pos_from_char(h2, b as i32).x - rich::pos_from_char(h2, a as i32).x;
+                let px = (rich::size_at(h2, a as i32).unwrap() * 96.0 / 72.0).round();
+                let s16 = String::from_utf16_lossy(&t2[a..b]);
+                assert!((cell - Font::new(px, 400, FACE).measure(&s16).0).abs() <= 1, "{s16} read back: {cell} px");
+            }
+            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(h2) };
             // An emoji in the title keeps its face, and the title its look, restyle after
             // restyle (each would undo the other, a selection moved at every key).
             rich::set_sel(h, 1, 1);

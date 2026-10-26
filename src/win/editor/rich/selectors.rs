@@ -8,6 +8,7 @@
 //! leaves the editor (text, Markdown, search, export, MCP) has the real selector back.
 
 use super::*;
+use windows::Win32::UI::Controls::RichEdit::{tomAnsi, tomSymbol};
 
 pub const VS16: u16 = 0xFE0F;
 pub const VS15: u16 = 0xFE0E;
@@ -126,11 +127,55 @@ pub fn style_emoji(h: HWND, t: &[u16]) {
     });
 }
 
-/// Whether all of `a..b` is in the emoji face, without touching the selection.
+/// Whether all of `a..b` is in the emoji face (and, for a symbol below U+FFFF, the symbol
+/// charset), without touching the selection.
 fn in_emoji_face(h: HWND, a: usize, b: usize) -> bool {
-    range(h, a as i32, b as i32)
-        .and_then(|r| unsafe { r.GetFont().ok()?.GetName().ok() })
-        .is_some_and(|n| n.to_string().eq_ignore_ascii_case(EMOJI_FACE))
+    let Some(font) = range(h, a as i32, b as i32).and_then(|r| unsafe { r.GetFont2().ok() }) else { return false };
+    let face = unsafe { font.GetName() }.is_ok_and(|n| n.to_string().eq_ignore_ascii_case(EMOJI_FACE));
+    let bmp = unsafe { font.GetCharRep() }.is_ok_and(|c| c == tomSymbol.0);
+    face && (bmp || !is_bmp_symbol_at(h, a))
+}
+
+fn is_bmp_symbol_at(h: HWND, a: usize) -> bool {
+    range(h, a as i32, a as i32 + 1)
+        .and_then(|r| unsafe { r.GetChar().ok() })
+        .is_some_and(|c| !(0xD800..0xE000).contains(&c))
+}
+
+/// Run `f` (streaming the document out) with the symbol emoji `style_emoji` put in the
+/// symbol charset back in the ANSI one: RichEdit writes symbol-charset text a byte a
+/// character, so ✈ U+2708 was saved as U+0008 and ❤ as "d". The RTF then holds each as
+/// `\uN`, and `style_emoji` sets the charset again when the note is next restyled.
+/// Nothing is drawn or recorded for undo meanwhile.
+pub(super) fn symbols_saved_whole<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    let t = text(h);
+    if !t.iter().any(|&c| (0x2190..0x2C00).contains(&c) || c == 0x3030 || c == 0x303D) {
+        return f();
+    }
+    let real: Vec<u16> = t.iter().map(|&c| unmark(c)).collect();
+    let fonts: Vec<_> = crate::common::emoji::find(&real, &[BOX, CHECKED])
+        .into_iter()
+        .filter(|&(a, _)| !(0xD800..0xDC00).contains(&real[a]))
+        .filter_map(|(a, b)| unsafe { range(h, a as i32, b as i32)?.GetFont2().ok() })
+        .filter(|f| unsafe { f.GetCharRep() }.is_ok_and(|c| c == tomSymbol.0))
+        .collect();
+    if fonts.is_empty() {
+        return f();
+    }
+    bulk(h, || {
+        for font in &fonts {
+            unsafe {
+                let _ = font.SetCharRep(tomAnsi.0);
+            }
+        }
+        let r = f();
+        for font in &fonts {
+            unsafe {
+                let _ = font.SetCharRep(tomSymbol.0);
+            }
+        }
+        r
+    })
 }
 
 #[cfg(test)]
