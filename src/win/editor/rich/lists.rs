@@ -146,12 +146,9 @@ pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> (usize
     let mut p = ps;
     while p > 0 {
         p = para_start(t, p - 1);
-        // A quote under an item belongs to it: the count goes on past it.
-        if t.get(p as usize) == Some(&ROW_END)
-            && let Some((Block::Quote, rows)) = block_at(h, t, p)
-            && quote_level(h, rows[0]) > 0
-        {
-            p = rows[0].start as i32;
+        // A quote or code block under an item belongs to it: the count goes on past it.
+        if let Some(row) = block_under_item_ending(h, t, p) {
+            p = row.start as i32;
             continue;
         }
         set_sel(h, p, p);
@@ -171,6 +168,57 @@ pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> (usize
         }
     }
     (n, first)
+}
+
+/// The first row of the quote or code block under a list item whose closing paragraph (its
+/// U+FFFB) starts at `p`, if one does.
+fn block_under_item_ending(h: HWND, t: &[u16], p: i32) -> Option<Row> {
+    if t.get(p.max(0) as usize) != Some(&ROW_END) {
+        return None;
+    }
+    match block_at(h, t, p) {
+        Some((Block::Quote | Block::Code, rows)) if quote_level(h, rows[0]) > 0 => Some(rows[0]),
+        _ => None,
+    }
+}
+
+/// The numbered item at `cp`, right after a quote or code block under the item before it,
+/// counts on past the block, as its Markdown does ("1. one", code under it, "2. two").
+/// RichEdit starts its count again after a block (a table row), at the item's own start,
+/// and goes on from an item only to the next one of the same start: so the item, and the
+/// items after it that RichEdit counted on from it, start at the number it has. (A note
+/// opened from Markdown has that number at every item already.)
+pub fn count_on(h: HWND, cp: i32) {
+    let t = text(h);
+    let ps = para_start(&t, cp);
+    if ps < 1 || block_under_item_ending(h, &t, para_start(&t, ps - 1)).is_none() {
+        return;
+    }
+    let (a, b) = sel(h);
+    send(h, EM_HIDESELECTION, 1, 0);
+    let numbered = |p: usize| {
+        set_sel(h, p as i32, p as i32);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        matches!(pf.numbering, PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN).then(|| (level_of(pf.start_indent, BULLET_START), pf.numbering_start))
+    };
+    if let Some((level, old)) = numbered(ps as usize) {
+        let (before, first) = siblings_before(h, &t, ps, level);
+        let want = if before > 0 { first.saturating_add(before as u16) } else { old };
+        let mut p = ps as usize;
+        while want != old && numbered(p) == Some((level, old)) {
+            let mut pf = ParaFormat2::new();
+            pf.mask = PFM_NUMBERINGSTART;
+            pf.numbering_start = want;
+            send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+            match t[p..].iter().position(|&c| c == CR) {
+                Some(i) if p + i + 1 < t.len() => p += i + 1,
+                _ => break,
+            }
+        }
+    }
+    set_sel(h, a, b);
+    show_selection(h);
 }
 
 /// Nesting level of the caret's paragraph, if it is a list item.

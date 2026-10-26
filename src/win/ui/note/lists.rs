@@ -181,6 +181,8 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
                 && let Some((_, rows)) = rich::block_at(e, &rich::text(e), ps)
             {
                 rich::set_quote_level(e, rows[0], level as usize + 1);
+                // A numbered item after it counts on past it.
+                rich::count_on(e, rows[0].end as i32);
             }
         });
         mark_dirty(h);
@@ -203,6 +205,8 @@ pub(super) fn try_auto_list(h: HWND, e: HWND) -> bool {
         match kind {
             (AutoKind::List, n) => {
                 rich::set_numbering(e, n);
+                // Right after a quote or code under an item, the count goes on.
+                rich::count_on(e, ps);
                 ps
             }
             (AutoKind::Task, ticked) => {
@@ -331,6 +335,8 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
                 && let Some((_, rows)) = rich::block_at(e, &rich::text(e), ps)
             {
                 rich::set_quote_level(e, rows[0], level as usize + 1);
+                // The numbered items after it count on past it, as its Markdown does.
+                rich::count_on(e, rows[0].end as i32);
             }
             rich::set_sel(e, cell, cell);
         });
@@ -410,10 +416,17 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
                         }
                     });
                 } else if level > 0 {
-                    rich::still(e, || rich::set_quote_level(e, rows[0], level - 1));
+                    rich::still(e, || {
+                        rich::set_quote_level(e, rows[0], level - 1);
+                        rich::count_on(e, rows[0].end as i32);
+                    });
                 }
             } else if under_item {
-                rich::still(e, || rich::set_quote_level(e, rows[0], level + 1));
+                rich::still(e, || {
+                    rich::set_quote_level(e, rows[0], level + 1);
+                    // Now under the item: a numbered item after it counts on past it.
+                    rich::count_on(e, rows[0].end as i32);
+                });
             } else if depth + 1 < rich::MAX_QUOTE_DEPTH {
                 let ps = (rich::para_start(&t, a) as usize).max(ca) as i32;
                 let pe = (rich::para_end(&t, b.max(a)) as usize).min(cb) as i32;
@@ -1462,6 +1475,127 @@ mod tests {
                 ["one", "two", "three", "after"].map(|w| rich::baseline_at(h, t.find(w).unwrap() as i32).unwrap())
             };
             assert_eq!(ys(h), ys(opened), "{start}: typed, then as opened from\n{md}");
+        }
+    }
+
+    /// The numbers RichEdit shows for the note's numbered items, in order (its RTF writes
+    /// each one it shows).
+    fn shown_numbers(h: HWND) -> Vec<u32> {
+        let rtf = rich::get_rtf(h);
+        rtf.match_indices("\\pntext")
+            .map(|(i, _)| {
+                let rest = &rtf[i..];
+                let n = &rest[rest.find(' ').unwrap() + 1..];
+                n[..n.find('.').unwrap()].parse().unwrap()
+            })
+            .collect()
+    }
+
+    /// The numbers the note's Markdown gives its numbered items.
+    fn written_numbers(h: HWND) -> Vec<u32> {
+        rich::to_markdown(h, true)
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim_start();
+                let d = l.find(". ")?;
+                l[..d].parse().ok()
+            })
+            .collect()
+    }
+
+    /// A list goes on counting on screen past a code block or quote under one of its items,
+    /// as its Markdown does: typed after the block ("1. " on the line after it), and when the
+    /// block is made under an item with items already below it. RichEdit started the count
+    /// again after the block, so the screen read "1. two" where the file had "2. two".
+    #[test]
+    fn numbers_count_on_past_blocks_under_items() {
+        // Each kind of block, made the way it's typed on a new item: ``` and Enter, "> ".
+        let under = |h: HWND, code: bool| {
+            if code {
+                rich::replace_sel(h, "\r```");
+                assert_eq!(block_enter(h), Some(true));
+            } else {
+                rich::replace_sel(h, "\r>");
+                assert!(try_auto_list(null_mut(), h));
+            }
+            rich::replace_sel(h, "inside");
+        };
+        let typed_list = |items: &str| {
+            let h = editor("T\r");
+            rich::set_sel(h, 2, 2);
+            rich::set_numbering(h, PFN_ARABIC);
+            rich::replace_sel(h, items);
+            h
+        };
+        for code in [true, false] {
+            // "1. one", a block under it, out of it, "1. " typed: it reads 2.
+            let h = typed_list("one");
+            under(h, code);
+            // Out of the block: two Enters on empty lines in code, one in a quote.
+            rich::replace_sel(h, "\r");
+            while rich::cell_at(h, &rich::text(h), rich::sel(h).0).is_some() {
+                assert_eq!(block_enter(h), Some(true));
+            }
+            rich::replace_sel(h, "1.");
+            assert!(try_auto_list(null_mut(), h));
+            rich::replace_sel(h, "two\rthree");
+            assert_eq!(shown_numbers(h), vec![1, 2, 3], "code {code}: {}", plain(h));
+            assert_eq!(written_numbers(h), shown_numbers(h), "code {code}");
+            // Items below already: a block made under the first keeps them counting.
+            let h = typed_list("alpha\rbravo\rcharlie");
+            caret(h, "/bravo");
+            under(h, code);
+            assert_eq!(shown_numbers(h), vec![1, 2, 3], "code {code}: {}", plain(h));
+            assert_eq!(written_numbers(h), shown_numbers(h), "code {code}");
+            // And Enter after the last makes the next number.
+            let end = rich::text(h).len() as i32;
+            rich::set_sel(h, end, end);
+            rich::replace_sel(h, "\rdelta");
+            assert_eq!(shown_numbers(h), vec![1, 2, 3, 4], "code {code}");
+            assert_eq!(written_numbers(h), shown_numbers(h), "code {code}");
+            // Stored and opened again: the same.
+            let h2 = editor("");
+            rich::set_rtf(h2, &rich::get_rtf(h));
+            assert_eq!(shown_numbers(h2), vec![1, 2, 3, 4], "code {code}");
+        }
+        // A quote after an item stepped in under it with Tab: the count goes on past it; out
+        // again with Shift+Tab, screen and file still agree.
+        let h = editor("");
+        rich::load_markdown(h, "T\n1. a\n> q\n1. b\n2. c");
+        assert_eq!(shown_numbers(h), vec![1, 1, 2]);
+        caret(h, "q");
+        assert!(block_tab(h, false));
+        assert_eq!(shown_numbers(h), vec![1, 2, 3], "{}", rich::to_markdown(h, true));
+        assert_eq!(written_numbers(h), shown_numbers(h));
+        caret(h, "q");
+        assert!(block_tab(h, true));
+        assert_eq!(written_numbers(h), shown_numbers(h));
+    }
+
+    /// Under a list item a code block is left as at the top level: Enter on a line of code
+    /// makes an empty line (one empty line is a gap in the code), and Enter on an empty last
+    /// line after another leaves the block, taking both.
+    #[test]
+    fn code_under_an_item_is_left_as_at_the_top() {
+        let enters = |start: &str| {
+            let h = editor("");
+            rich::load_markdown(h, start);
+            let end = rich::text(h).len() as i32;
+            rich::set_sel(h, end - 1, end);
+            rich::replace_sel(h, "```");
+            assert_eq!(block_enter(h), Some(true));
+            rich::replace_sel(h, "code");
+            let mut n = 0;
+            while rich::cell_at(h, &rich::text(h), rich::sel(h).0).is_some() {
+                assert_eq!(block_enter(h), Some(true));
+                n += 1;
+            }
+            (n, rich::to_markdown(h, true))
+        };
+        let (top, md) = enters("T\nx");
+        assert_eq!((top, md.as_str()), (3, "# T\n```\ncode\n```"));
+        for (start, want) in [("T\n- ab\n- x", "# T\n- ab\n  ```\n  code\n  ```"), ("T\n1. ab\n2. x", "# T\n1. ab\n  ```\n  code\n  ```")] {
+            assert_eq!(enters(start), (top, want.to_string()), "{start}");
         }
     }
 
