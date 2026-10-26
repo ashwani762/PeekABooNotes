@@ -24,7 +24,7 @@ pub use links::*;
 pub use lists::*;
 pub use markdown::*;
 pub use pictures::{fit_picture_widths, forget_pictures, picture_dragged, picture_pressed, pictures_changed, refit_picture_widths, widen_stored_pictures};
-pub use selectors::{has_selectors, hide_marks, marker_for, unmark, unmark_str};
+pub use selectors::{has_selectors, hide_marks, marker_for, style_emoji, unmark, unmark_str};
 
 pub const CLASS: &str = "RICHEDIT50W";
 
@@ -510,6 +510,7 @@ pub fn restyle(h: HWND) -> bool {
     let links = instructions(&t, 0, t.len());
     color_links_listed(h, &t, &links);
     fix_caret_indent(h, &t);
+    style_emoji(h, &t);
     // None of these moves or changes a character: `t` is still the text.
     send(h, EM_EXLIMITTEXT, 0, length_limit_with(&t, &links).min(i32::MAX as usize) as isize);
     has_selectors(&t)

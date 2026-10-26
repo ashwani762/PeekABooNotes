@@ -88,6 +88,51 @@ fn hide_marks_now(h: HWND, t: &[u16]) {
     send(h, EM_HIDESELECTION, 0, 0);
 }
 
+/// The face colour emoji are drawn in, over RichEdit's own glyphs.
+pub const EMOJI_FACE: &str = "Segoe UI Emoji";
+
+/// Each emoji of `t` (the editor's text) laid out by RichEdit as wide as its colour
+/// picture: in the emoji face, as one glyph. Left to its own font fallback, RichEdit took
+/// Segoe UI Symbol for some (🚀 🎉 ❤ came out narrower than their pictures, which then
+/// overlapped) and, for an emoji typed a character at a time, laid out a skin tone or the
+/// people of a family (👍🏽, 👨‍👩‍👧) as glyphs of their own, leaving a gap after the picture. A
+/// symbol under U+FFFF (❤) keeps to the face only as a symbol font's. Only emoji not yet in
+/// the face are touched, outside the undo history.
+pub fn style_emoji(h: HWND, t: &[u16]) {
+    // Most notes have none: a look at each unit, before any copy.
+    let maybe = |c: u16| (0xD83C..=0xD83E).contains(&c) || (0x2190..0x2C00).contains(&c) || c == VS16_MARK || c == 0x3030 || c == 0x303D;
+    if !t.iter().any(|&c| maybe(c)) {
+        return;
+    }
+    let real: Vec<u16> = t.iter().map(|&c| unmark(c)).collect();
+    let wrong: Vec<(usize, usize)> = crate::common::emoji::find(&real, &[BOX, CHECKED]).into_iter().filter(|&(a, b)| !in_emoji_face(h, a, b)).collect();
+    if wrong.is_empty() {
+        return;
+    }
+    unrecorded(h, || {
+        let (a0, b0) = sel(h);
+        send(h, EM_HIDESELECTION, 1, 0);
+        for (a, b) in wrong {
+            set_sel(h, a as i32, b as i32);
+            let mut cf = CharFormat2::new();
+            let bmp = !(0xD800..0xDC00).contains(&real[a]);
+            cf.mask = CFM_FACE | if bmp { CFM_CHARSET } else { 0 };
+            cf.charset = 2; // SYMBOL_CHARSET
+            set_face(&mut cf, EMOJI_FACE);
+            send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+        }
+        set_sel(h, a0, b0);
+        send(h, EM_HIDESELECTION, 0, 0);
+    });
+}
+
+/// Whether all of `a..b` is in the emoji face, without touching the selection.
+fn in_emoji_face(h: HWND, a: usize, b: usize) -> bool {
+    range(h, a as i32, b as i32)
+        .and_then(|r| unsafe { r.GetFont().ok()?.GetName().ok() })
+        .is_some_and(|n| n.to_string().eq_ignore_ascii_case(EMOJI_FACE))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

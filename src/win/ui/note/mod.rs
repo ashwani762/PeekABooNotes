@@ -758,6 +758,8 @@ fn apply_theme(h: HWND) {
         rich::set_block_colors(st.edit, bg, theme::PAPER_TEXT, dark);
         rich::style_blocks(st.edit);
         rich::color_named_links(st.edit);
+        // Last: the faces above went over the emoji too.
+        rich::style_emoji(st.edit, &rich::text(st.edit));
     });
     st.loading = was;
     if !st.embedded {

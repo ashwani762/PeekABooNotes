@@ -47,8 +47,10 @@ fn base_format_now(h: HWND, text_rgb: u32, bg_rgb: u32) {
     normalize_lists(h);
     fit_pictures(h);
     // The body font just went over everything, file chips' paperclips included.
-    let len = text(h).len() as i32;
-    style_clips(h, 0, len, crate::win::ui::note::icon_face());
+    let t = text(h);
+    style_clips(h, 0, t.len() as i32, crate::win::ui::note::icon_face());
+    // And over the emoji, which take their own face again.
+    style_emoji(h, &t);
     set_sel(h, a, b);
     send(h, EM_HIDESELECTION, 0, 0);
     style_boxes(h);
@@ -201,8 +203,23 @@ fn style_title_now(h: HWND, t: &[u16]) {
         return;
     }
     let (face, bold) = title_face();
-    // Already the title: leave the selection be, so typing stays one undo step.
-    if font_is(h, 0, end as i32, face, title_size()) {
+    // Already the title: leave the selection be, so typing stays one undo step. (Its
+    // emoji are in their own face, `style_emoji`.)
+    let real: Vec<u16> = t[..end].iter().map(|&c| unmark(c)).collect();
+    let mut from = 0;
+    let mut runs = Vec::new();
+    for (a, b) in crate::common::emoji::find(&real, &[BOX, CHECKED]).into_iter().chain(std::iter::once((end, end))) {
+        if a > from {
+            runs.push((from, a));
+        }
+        from = b;
+    }
+    let done = match runs.is_empty() {
+        // Emoji alone: their size is the title's.
+        true => size_at(h, 0).is_some_and(|pt| (pt * 20.0 - title_size() as f32).abs() < 1.0),
+        false => runs.iter().all(|&(a, b)| font_is(h, a as i32, b as i32, face, title_size())),
+    };
+    if done {
         return;
     }
     let (a, b) = sel(h);
@@ -221,6 +238,8 @@ fn style_title_now(h: HWND, t: &[u16]) {
         n.effects = if bold { CFM_BOLD } else { 0 };
         set_face(&mut n, face);
         send(h, EM_SETCHARFORMAT, SCF_SELECTION, &n as *const _ as isize);
+        // The title's emoji back in theirs.
+        style_emoji(h, &t[..end]);
     }
     set_sel(h, a, b);
     if let Some(p) = pending.filter(|_| styled || a as usize > end) {

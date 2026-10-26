@@ -179,4 +179,59 @@ mod tests {
         }
         trim();
     }
+
+    /// Emoji typed a character at a time (as keys and the emoji panel put them in), or
+    /// pasted: once the note restyles, RichEdit makes each as wide as its colour picture,
+    /// so none overlaps the next and none leaves a gap.
+    #[test]
+    fn emoji_are_laid_out_as_wide_as_their_pictures() {
+        use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, ES_MULTILINE, WS_POPUP};
+        let s = "emoji \u{1F680}\u{2764}\u{FE0F}\u{1F389}\u{1F44D}\u{1F3FD}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} ok";
+        for typed in [true, false] {
+            let h = unsafe {
+                LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+                CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 600, 300, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+            };
+            rich::setup(h);
+            rich::insert_text(h, "T\r");
+            rich::apply_base_format(h, 0, 0xFFFFFF);
+            let n = rich::text(h).len() as i32;
+            rich::set_sel(h, n, n);
+            if typed {
+                for u in s.encode_utf16() {
+                    const WM_CHAR: u32 = 0x0102;
+                    rich::send(h, WM_CHAR, rich::marker_for(u).unwrap_or(u) as usize, 0);
+                }
+            } else {
+                rich::replace_sel(h, s);
+            }
+            rich::hide_marks(h);
+            rich::restyle(h);
+            let t: Vec<u16> = rich::text(h).iter().map(|&c| rich::unmark(c)).collect();
+            let found = crate::common::emoji::find(&t, &[]);
+            assert_eq!(found.len(), 5);
+            for (a, b) in found {
+                let cell = rich::pos_from_char(h, b as i32).x - rich::pos_from_char(h, a as i32).x;
+                let px = (rich::size_at(h, a as i32).unwrap() * 96.0 / 72.0).round();
+                let s16 = String::from_utf16_lossy(&t[a..b]);
+                let picture = Font::new(px, 400, FACE).measure(&s16).0;
+                assert!((cell - picture).abs() <= 1, "{s16} typed {typed}: {cell} px laid out for a {picture} px picture");
+            }
+            // Only the look changed: the text is as typed.
+            assert_eq!(rich::unmark_str(&rich::text(h)), format!("T\r{s}"));
+            // An emoji in the title keeps its face, and the title its look, restyle after
+            // restyle (each would undo the other, a selection moved at every key).
+            rich::set_sel(h, 1, 1);
+            rich::replace_sel(h, " \u{1F680}");
+            for _ in 0..2 {
+                rich::restyle(h);
+                let cell = rich::pos_from_char(h, 4).x - rich::pos_from_char(h, 2).x;
+                let px = (rich::size_at(h, 2).unwrap() * 96.0 / 72.0).round();
+                assert!((cell - Font::new(px, 400, FACE).measure("\u{1F680}").0).abs() <= 1, "{cell} at {px}");
+                assert!(px > 16.0, "the title's size, not the body's: {px}");
+            }
+            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(h) };
+        }
+    }
 }
