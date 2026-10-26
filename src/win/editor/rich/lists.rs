@@ -183,6 +183,19 @@ pub fn list_level(h: HWND) -> Option<i32> {
     r
 }
 
+/// Whether the paragraph before the one at `cp` is a list item (`t`: the editor's text).
+pub fn item_before(h: HWND, t: &[u16], cp: i32) -> bool {
+    if cp <= 0 {
+        return false;
+    }
+    let (a, b) = sel(h);
+    send(h, EM_HIDESELECTION, 1, 0);
+    let r = para_level(h, t, para_start(t, cp - 1)).is_some();
+    set_sel(h, a, b);
+    send(h, EM_HIDESELECTION, 0, 0);
+    r
+}
+
 /// Indent (`delta` = 1) or outdent (-1) every list paragraph in the selection, like Tab
 /// and Shift+Tab in Notes. Returns false when the caret isn't in a list (Tab is a tab).
 pub fn nest(h: HWND, delta: i32) -> bool {

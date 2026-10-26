@@ -610,6 +610,14 @@ pub fn quote_level(h: HWND, row: Row) -> usize {
     get(h, row).map_or(0, |(r, _)| if r.indent <= 0 { 0 } else { 1 + level_at(r.indent - BULLET_TEXT) as usize })
 }
 
+/// How many blocks the block of `row` is nested in (a quote in a quote: 1).
+pub fn depth(t: &[u16], row: Row) -> usize {
+    rows(t).iter().filter(|p| p.start < row.start && row.end <= p.end).count()
+}
+
+/// Quotes go this deep, as RichEdit nests tables.
+pub const MAX_QUOTE_DEPTH: usize = 15;
+
 /// Indent the quote `row` to `level`: level 1 lines its bar up under a list item's text,
 /// each level after that a nesting step further, under an item of the level before (the
 /// deepest, under an item of the deepest list level).

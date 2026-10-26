@@ -374,14 +374,39 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
             });
             true
         }
-        Some((rich::Block::Quote, rows, ..)) => {
+        Some((rich::Block::Quote, rows, ca, cb)) => {
             if rich::list_level(e).is_some() {
                 return false;
             }
             let level = rich::quote_level(e, rows[0]);
-            let next = if shift { level.saturating_sub(1) } else { level + 1 };
-            if next != level {
-                rich::still(e, || rich::set_quote_level(e, rows[0], next));
+            let depth = rich::depth(&t, rows[0]);
+            // Under a list item (or right after one), the quote steps in under it; anywhere
+            // else Tab quotes the lines one level deeper, a quote in the quote, and Shift+Tab
+            // takes a quote in a quote back out.
+            let under_item = level > 0 || (depth == 0 && rich::item_before(e, &t, rows[0].start as i32));
+            if shift {
+                if depth > 0 {
+                    rich::still(e, || {
+                        // Taken out at the end of the quote around it, the lines come before
+                        // the empty paragraph RichEdit kept after the block: it goes.
+                        if let Some((_, end)) = rich::unwrap(e, a) {
+                            let t = rich::text(e);
+                            if t.get(end as usize) == Some(&rich::CR) && t.get(end as usize + 1) == Some(&rich::CELL) {
+                                rich::set_sel(e, end, end + 1);
+                                rich::replace_sel(e, "");
+                                rich::set_sel(e, end, end);
+                            }
+                        }
+                    });
+                } else if level > 0 {
+                    rich::still(e, || rich::set_quote_level(e, rows[0], level - 1));
+                }
+            } else if under_item {
+                rich::still(e, || rich::set_quote_level(e, rows[0], level + 1));
+            } else if depth + 1 < rich::MAX_QUOTE_DEPTH {
+                let ps = (rich::para_start(&t, a) as usize).max(ca) as i32;
+                let pe = (rich::para_end(&t, b.max(a)) as usize).min(cb) as i32;
+                rich::still(e, || rich::wrap(e, ps, pe, rich::Block::Quote));
             }
             true
         }
@@ -1185,6 +1210,36 @@ mod tests {
         rich::set_sel(h, end_one, end_one);
         assert!(delete_into_item(h));
         assert_eq!(plain(h), "T/\u{2610} one^two");
+    }
+
+    /// Tab in a quote: right after a list item, the quote steps in under it; anywhere else
+    /// the line is quoted a level deeper (a quote in the quote), and Shift+Tab takes it back
+    /// out, a level at a time.
+    #[test]
+    fn tab_nests_a_quote() {
+        let h = editor("");
+        rich::load_markdown(h, "T\n> one\n> two\nafter");
+        let md = |h| rich::to_markdown(h, true);
+        for want in ["# T\n> one\n> > two\nafter", "# T\n> one\n> > > two\nafter"] {
+            caret(h, "two");
+            assert!(block_tab(h, false));
+            assert_eq!(md(h), want);
+        }
+        for want in ["# T\n> one\n> > two\nafter", "# T\n> one\n> two\nafter", "# T\n> one\n> two\nafter"] {
+            caret(h, "two");
+            assert!(block_tab(h, true));
+            assert_eq!(md(h), want);
+        }
+        // Under a list item it goes in under the item, and back out.
+        let h = editor("");
+        rich::load_markdown(h, "T\n- item\n\n> quoted");
+        let before = md(h);
+        caret(h, "quoted");
+        assert!(block_tab(h, false));
+        assert!(md(h).contains("  > quoted"), "{}", md(h));
+        caret(h, "quoted");
+        assert!(block_tab(h, true));
+        assert_eq!(md(h), before);
     }
 
     /// In code: Tab and Shift+Tab move every selected line, a "- " stays code, and so
