@@ -218,6 +218,9 @@ pub struct Note {
     /// character's line were scrolled out of view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<[i32; 3]>,
+    /// Fields from a newer version of the app, kept as they are so a save doesn't lose them.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -278,6 +281,9 @@ pub struct Settings {
     /// AI assistants may use the notes through MCP (off until turned on).
     #[serde(default)]
     pub mcp: bool,
+    /// Settings from a newer version of the app, kept as they are.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_note_size() -> u8 {
@@ -318,12 +324,16 @@ impl Default for Settings {
             export_dir: String::new(),
             keep_open: false,
             mcp: false,
+            extra: serde_json::Map::new(),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Data {
+    /// The form of the file (`FORMAT`). One from a newer version is read, but not written.
+    #[serde(default)]
+    pub version: u32,
     #[serde(default)]
     pub next_id: u64,
     #[serde(default)]
@@ -337,7 +347,16 @@ pub struct Data {
     /// (`PICTURE_SIZES`).
     #[serde(default)]
     pub picture_sizes: u32,
+    /// Anything else a newer version of the app wrote, kept as it is.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
+
+/// The form notes.json is written in. A file of a later form comes from a newer version
+/// of the app, which may mean something by it this one can't keep: it's read, and the
+/// session doesn't write it. Fields this version doesn't know are kept in every form
+/// (`extra`), so a file only a little newer survives a save whole.
+pub const FORMAT: u32 = 1;
 
 /// The form the notes' light text is written in. 1: pictures and files on a line of their
 /// own are links (`![name](attachment:name)`), so previews can show them. Raised when a
@@ -544,8 +563,11 @@ impl Store {
                     s.read_whole = true;
                     s.disk = Some(Seen { len: bytes.len() as u64, modified, print: Fingerprint::of(&bytes) });
                     log::info(&format!("loaded {} notes ({} KB)", d.notes.len(), bytes.len().div_ceil(1024)));
-                    // A copy of the last good file from the previous session.
-                    s.back_up(&dir, Some(&bytes), d.notes.len(), true);
+                    // A copy of the last good file from the previous session (one from a
+                    // newer version is left to its own backups).
+                    if d.version <= FORMAT {
+                        s.back_up(&dir, Some(&bytes), d.notes.len(), true);
+                    }
                     s.d = d;
                 }
                 Err(e) => {
@@ -592,6 +614,10 @@ impl Store {
                 s.open_backup(&dir);
                 s.notices.push(Notice::Locked);
             }
+        }
+        if s.d.version > FORMAT && !s.frozen {
+            log::error(&format!("the notes are in a newer form ({}) than this version writes ({FORMAT}), so they won't be written this session", s.d.version));
+            s.frozen = true;
         }
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
         s.d.next_id = s.d.next_id.max(max);
@@ -675,6 +701,7 @@ impl Store {
             return Err(std::io::Error::other("notes.json couldn't be read at start, so it isn't written this session"));
         }
         self.set_aside_others()?;
+        self.d.version = FORMAT;
         let tmp = tmp_of(&self.path);
         let written = write_synced(&tmp, &self.d).and_then(|print| rename_patiently(&tmp, &self.path).map(|()| print));
         let print = match written {
@@ -747,12 +774,15 @@ impl Store {
 
     /// A fingerprint of everything in the notes but where the user is in them (window
     /// rectangles, carets, scroll positions, the last note): what has to reach the disk
-    /// at once. Cheap: a few fields a note, never the text.
+    /// at once. The text goes through the quick `Fingerprint` (a fraction of a
+    /// millisecond for megabytes of notes), so an edit that leaves a note as long as it
+    /// was still counts as one.
     fn content_stamp(&self) -> u64 {
         let mut h = std::hash::DefaultHasher::new();
         (self.d.next_id, self.d.light_text).hash(&mut h);
         for n in &self.d.notes {
-            (n.id, n.color, n.archived, n.pinned, n.off_deck, n.created, n.updated, n.order, n.text.len(), n.rtf.len()).hash(&mut h);
+            let (text, rtf) = (Fingerprint::of(n.text.as_bytes()), Fingerprint::of(n.rtf.as_bytes()));
+            (n.id, n.color, n.archived, n.pinned, n.off_deck, n.created, n.updated, n.order, text, rtf).hash(&mut h);
         }
         let mut settings = self.d.settings.clone();
         settings.last_note = None;
@@ -1408,6 +1438,12 @@ mod tests {
         assert!(!s.only_view_changed());
         s.d.settings.theme = 2;
         s.save().unwrap();
+        // An edit that leaves the note as long as it was is content too.
+        let before = s.note(id).unwrap().text.clone();
+        s.note_mut(id).unwrap().text = before.replace("charger", "chargeR");
+        assert!(!s.only_view_changed(), "same length, other text");
+        s.note_mut(id).unwrap().text = before;
+        assert!(s.only_view_changed());
         // The backup goes with a save once it's due, from the same bytes.
         assert!(!dir.join("notes.backup.json").exists());
         s.backup_at = None;
@@ -1612,6 +1648,36 @@ mod tests {
         std::fs::write(dir.join("notes.json.tmp"), "half").unwrap();
         drop(Store::load(dir.clone()));
         assert!(!dir.join("notes.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file from a newer version keeps what this one doesn't know through a save, and
+    /// one of a newer form isn't written at all.
+    #[test]
+    fn newer_files_keep_what_this_version_doesnt_know() {
+        let dir = folder("newer");
+        let file = r#"{"version":1,"next_id":2,"notes":[{"id":2,"text":"a","tags":["work"],"rect":[1,2,300,400]}],"settings":{"theme":2,"accent":"teal"},"sync":{"peer":"x"}}"#;
+        std::fs::write(dir.join("notes.json"), file).unwrap();
+        let mut s = Store::load(dir.clone());
+        assert!(s.whole());
+        s.note_mut(2).unwrap().text = "b".into();
+        s.save().unwrap();
+        let back: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("notes.json")).unwrap()).unwrap();
+        assert_eq!(back["version"], FORMAT);
+        assert_eq!(back["notes"][0]["tags"][0], "work");
+        assert_eq!(back["notes"][0]["text"], "b");
+        assert_eq!(back["notes"][0]["rect"][2], 300);
+        assert_eq!(back["settings"]["accent"], "teal");
+        assert_eq!(back["settings"]["theme"], 2);
+        assert_eq!(back["sync"]["peer"], "x");
+        // A later form: read, never written.
+        let later = file.replace(r#""version":1"#, &format!(r#""version":{}"#, FORMAT + 1));
+        std::fs::write(dir.join("notes.json"), &later).unwrap();
+        let mut s = Store::load(dir.clone());
+        assert_eq!(s.d.notes.len(), 1);
+        assert!(!s.whole());
+        assert!(s.save().is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("notes.json")).unwrap(), later);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
