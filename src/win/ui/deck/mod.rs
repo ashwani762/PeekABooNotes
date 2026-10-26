@@ -599,6 +599,23 @@ fn show_ring(d: &mut Deck) {
 /// Ctrl+Alt+K: the deck takes the keys, fanned out with the focus ring on its top card.
 /// Pressed again while the deck has them, it gives them back. A hidden deck (by the user,
 /// or for a full-screen app) comes out for as long as it has them, and hides again after.
+/// A note in front of everything is being closed or archived: once Windows has decided
+/// who comes next, if that's the desktop or the deck, the keys go back to the window the
+/// deck took them from (when it did).
+pub fn pass_on_later() {
+    if let Some(h) = with(|d| d.hwnd) {
+        unsafe { PostMessageW(h, WM_PASS_ON, 1, 0) };
+    }
+}
+
+/// Whether `h` is the desktop (Explorer's window behind the icons).
+fn is_desktop(h: HWND) -> bool {
+    let mut buf = [0u16; 16];
+    let n = unsafe { GetClassNameW(h, buf.as_mut_ptr(), buf.len() as i32) }.max(0) as usize;
+    let class = String::from_utf16_lossy(&buf[..n]);
+    class == "Progman" || class == "WorkerW" || h == unsafe { GetShellWindow() }
+}
+
 pub fn take_keys() {
     let Some((hwnd, has)) = with(|d| (d.hwnd, d.kbd.is_some())) else { return };
     if has {
@@ -1047,10 +1064,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             None
         }
         WM_PASS_ON => {
-            let back = PASS_TO.replace(0) as HWND;
             unsafe {
-                if GetForegroundWindow() == hwnd && with(|d| d.kbd.is_none()) == Some(true) {
-                    let to = if !back.is_null() && back != hwnd && IsWindow(back) != 0 && IsWindowVisible(back) != 0 { back } else { GetShellWindow() };
+                let front = GetForegroundWindow();
+                // wp 1: a note in front was closed or archived (`pass_on_later`), and
+                // Windows may have given the keys to the desktop rather than to the deck.
+                let stray = front == hwnd || (wp == 1 && (front.is_null() || is_desktop(front)));
+                if stray && with(|d| d.kbd.is_none()) == Some(true) {
+                    let back = PASS_TO.replace(0) as HWND;
+                    let to = if !back.is_null() && back != hwnd && IsWindow(back) != 0 && IsWindowVisible(back) != 0 {
+                        back
+                    } else if front == hwnd {
+                        GetShellWindow()
+                    } else {
+                        null_mut()
+                    };
                     if !to.is_null() {
                         SetForegroundWindow(to);
                     }

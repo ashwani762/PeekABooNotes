@@ -657,6 +657,9 @@ pub fn discard(h: HWND) {
     if let Some(st) = state(h) {
         st.discard = true;
     }
+    if unsafe { GetForegroundWindow() } == h {
+        crate::win::ui::deck::pass_on_later();
+    }
     unsafe { DestroyWindow(h) };
 }
 
@@ -1121,6 +1124,9 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             WM_CLOSE => {
                 flush(h);
                 fly_home(h);
+                if GetForegroundWindow() == h {
+                    crate::win::ui::deck::pass_on_later();
+                }
                 DestroyWindow(h);
                 return 0;
             }
