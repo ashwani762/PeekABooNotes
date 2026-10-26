@@ -55,6 +55,27 @@ pub(super) fn refresh_light_text() {
     save();
 }
 
+/// Notes stored before pictures kept their own size (`store::PICTURE_SIZES`): their
+/// pictures narrower than their pixels make them were narrowed to fit a note, so they get
+/// that size back, once, without touching when the notes were edited.
+pub(super) fn widen_stored_pictures() {
+    let changed = store_mut(|s| {
+        if s.d.picture_sizes >= crate::common::store::PICTURE_SIZES {
+            return false;
+        }
+        s.d.picture_sizes = crate::common::store::PICTURE_SIZES;
+        for n in s.d.notes.iter_mut().filter(|n| n.rtf.contains("{\\pict")) {
+            if let Some(rtf) = rich::widen_stored_pictures(&n.rtf) {
+                n.rtf = rtf;
+            }
+        }
+        true
+    });
+    if changed {
+        save();
+    }
+}
+
 pub fn rtf_to_markdown(rtf: &str) -> String {
     let w = ui(|u| u.worker);
     rich::set_rtf(w, rtf);

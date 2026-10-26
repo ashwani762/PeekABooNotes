@@ -500,6 +500,7 @@ pub fn run() -> i32 {
             u.worker = worker;
         });
         refresh_light_text();
+        widen_stored_pictures();
 
         note::register();
         deck::create();
