@@ -540,19 +540,28 @@ pub(super) fn caret_off_box(e: HWND, left: bool) {
 /// After RichEdit's own undo or redo, which selects what it put back: a selection holding a
 /// checklist box (a tick undone or redone a step at a time) is let go, the caret after it.
 /// Selected, the box's glyph showed beside its circle as a block of the selection's colour,
-/// and the circle sat in a halo of it.
+/// and the circle sat in a halo of it. So is one starting right after a box, the space
+/// between it and the text in it (a tick redone, whose last step struck the item through):
+/// the caret goes after the box.
 pub(super) fn selection_off_boxes(e: HWND) {
     let (a, b) = rich::sel(e);
     if a == b {
         return;
     }
     let (a, b) = (a.min(b).max(0) as usize, a.max(b).max(0) as usize);
-    let from = a.saturating_sub(1);
+    let from = a.saturating_sub(3);
     let t = rich::raw_text(e, from, b);
-    let boxed = (a..b).any(|i| t.get(i - from).copied().is_some_and(is_task) && (i == 0 || t.get(i - 1 - from) == Some(&rich::CR)));
-    if boxed {
+    let at = |i: usize| t.get(i.wrapping_sub(from)).copied();
+    let box_at = |i: usize| at(i).is_some_and(is_task) && (i == 0 || at(i - 1) == Some(rich::CR));
+    if (a..b).any(box_at) {
         rich::set_sel(e, b as i32, b as i32);
         caret_off_box(e, false);
+        return;
+    }
+    // The box just before the selection, which has the space after it.
+    if a > 0 && box_at(a - 1) {
+        let gap = if at(a) == Some(b' ' as u16) { 2 } else { 1 };
+        rich::set_sel(e, (a - 1 + gap) as i32, (a - 1 + gap) as i32);
     }
 }
 
@@ -1136,6 +1145,26 @@ mod tests {
             assert_eq!(rich::text(h)[cp as usize], rich::CHECKED, "redo ticks again");
             assert!(struck(h));
         }
+        // RichEdit's own undo and redo (the group forgotten meanwhile) select what they put
+        // back: the caret goes after the box instead, with nothing selected.
+        rich::forget_groups();
+        const EM_UNDO: u32 = 0x00C7;
+        rich::send(h, EM_UNDO, 0, 0);
+        selection_off_boxes(h);
+        assert_eq!(rich::text(h)[cp as usize], rich::BOX);
+        assert_eq!(rich::sel(h), (cp + 2, cp + 2), "after undo");
+        rich::send(h, rich::EM_REDO, 0, 0);
+        assert_eq!(rich::text(h)[cp as usize], rich::CHECKED);
+        // (It selected the item's text, from just after the box.)
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (cp + 2, cp + 2), "after redo");
+        // Text selected elsewhere in an item stays selected.
+        rich::set_sel(h, cp + 3, cp + 5);
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (cp + 3, cp + 5));
+        rich::set_sel(h, cp + 2, cp + 6);
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (cp + 2, cp + 6));
     }
 
     /// An assistant's change (or a version put back) in an open note: one Ctrl+Z takes it
