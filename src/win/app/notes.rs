@@ -33,9 +33,9 @@ pub fn rtf_to_text(rtf: &str) -> String {
     })
 }
 
-/// Notes saved before previews showed pictures and files have only their names in their
-/// light text: bring it up to date from their rich text, once, without touching when
-/// they were edited.
+/// Notes whose light text an older version wrote (pictures and files as bare names,
+/// checklists in quotes as "> ☐"): bring it up to date from their rich text, once,
+/// without touching when they were edited.
 pub(super) fn refresh_light_text() {
     let stale: Vec<(u64, String)> = store_mut(|s| {
         let ids = s.d.stale_light_text();

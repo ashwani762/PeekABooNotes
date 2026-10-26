@@ -369,25 +369,34 @@ pub struct Data {
 pub const FORMAT: u32 = 1;
 
 /// The form the notes' light text is written in. 1: pictures and files on a line of their
-/// own are links (`![name](attachment:name)`), so previews can show them. Raised when a
-/// change needs older notes' text rebuilt from their RTF, which then happens once.
-pub const LIGHT_TEXT: u32 = 1;
+/// own are links (`![name](attachment:name)`), so previews can show them. 2: a checklist
+/// item in a quote is `> [ ] task` (it was `> ☐ task` or `> - [ ]`), as an import of the
+/// note's export writes it. Raised when a change needs older notes' text rebuilt from
+/// their RTF, which then happens once.
+pub const LIGHT_TEXT: u32 = 2;
 
 /// The form pictures' sizes are stored in. 1: a picture keeps its own size (as made, or as
 /// the user dragged it to), never the narrower one a narrow note showed it at; before, it
 /// was stored as last shown and widened back to its pixels' size whenever there was room.
 pub const PICTURE_SIZES: u32 = 1;
 
+/// Light text as an import compares it: Markdown keeps no spaces at a line's end, and a
+/// link saved before brackets were escaped says "Lisbon%20(2).jpg" where an import writes
+/// "Lisbon%20%282%29.jpg".
+fn import_form(text: &str) -> String {
+    let lines: Vec<String> = text.lines().map(|l| l.trim_end().replace("%28", "(").replace("%29", ")")).collect();
+    lines.join("\n").trim_end().to_string()
+}
+
 impl Data {
-    /// The notes whose light text predates `LIGHT_TEXT` and has to be rebuilt: those with
-    /// an attachment, whose links an older form left out. None once that's been done,
-    /// since a link inside a sentence never gets the line form, and its note would
-    /// otherwise look out of date at every start.
+    /// The notes whose light text predates `LIGHT_TEXT` and has to be rebuilt: any note
+    /// with rich text, since form 2 changed lists in quotes, which any note can have. None
+    /// once that's been done, so it happens once, not at every start.
     pub fn stale_light_text(&self) -> Vec<u64> {
         if self.light_text >= LIGHT_TEXT {
             return Vec::new();
         }
-        self.notes.iter().filter(|n| n.rtf.contains(crate::common::attach::SCHEME) && !n.text.contains("](attachment:")).map(|n| n.id).collect()
+        self.notes.iter().filter(|n| !n.rtf.is_empty()).map(|n| n.id).collect()
     }
 }
 
@@ -852,8 +861,8 @@ impl Store {
     /// Whether a note here says `text` already, title and every line (whatever its colour,
     /// pins or dates): an import of notes exported from here leaves such a file out.
     pub fn says(&self, text: &str) -> bool {
-        let t = text.trim_end();
-        !t.is_empty() && self.d.notes.iter().any(|n| n.text.trim_end() == t)
+        let t = import_form(text);
+        !t.is_empty() && self.d.notes.iter().any(|n| import_form(&n.text) == t)
     }
 
     pub fn remove(&mut self, id: u64) -> Option<(usize, Note)> {
@@ -1379,7 +1388,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(d.stale_light_text(), [1, 2]);
+        assert_eq!(d.stale_light_text(), [1, 2, 3, 4]);
         // What refresh_light_text does: rebuild them (note 2 comes out the same) and mark it done.
         d.notes[0].text = "Trip\n[plan.pdf](attachment:plan.pdf)".into();
         d.light_text = LIGHT_TEXT;
@@ -1624,6 +1633,12 @@ mod tests {
         assert!(!s.says("Lisbon
 - [ ] tram 28
 ![Lisbon.jpg](attachment:Lisbon%20(2).jpg)"), "another picture");
+        assert!(s.says("Groceries
+- milk"), "a space at a line's end is the same: Markdown can't keep it");
+        s.create("Lisbon
+![Lisbon (2).jpg](attachment:Lisbon%20(2).jpg)", "");
+        assert!(s.says("Lisbon
+![Lisbon (2).jpg](attachment:Lisbon%20%282%29.jpg)"), "a link from before brackets were escaped is the same");
         assert!(!s.says("groceries
 - milk"));
         assert!(!s.says("") && !s.says("
