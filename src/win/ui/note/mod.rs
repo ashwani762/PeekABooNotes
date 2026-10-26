@@ -584,6 +584,20 @@ pub fn flush(h: HWND) {
         }
         return;
     }
+    let text = app::rtf_to_text(&rtf);
+    // The same text, written another way (an edit undone or typed and taken back, colours
+    // the theme gave a note made elsewhere): kept so, but not an edit. No version (it would
+    // be the text as it is), and the note keeps its edited time and place in the order.
+    if app::store(|s| s.note(id).is_some_and(|n| n.text == text)) {
+        app::store_mut(|s| {
+            if let Some(n) = s.note_mut(id) {
+                n.rtf = rtf;
+                n.view = view;
+            }
+        });
+        app::save();
+        return;
+    }
     // The first change since the window opened, or since the note was left alone for a
     // while (a note kept open for days gets a version for each stretch of work): keep it
     // as it was (see `versions`).
@@ -591,7 +605,6 @@ pub fn flush(h: HWND) {
         versions::keep_for_edit(id);
     }
     st.edited_at = Some(std::time::Instant::now());
-    let text = app::rtf_to_text(&rtf);
     let title = title_of(&text);
     app::store_mut(|s| {
         if let Some(n) = s.note_mut(id) {
@@ -614,6 +627,12 @@ pub fn flush(h: HWND) {
 pub fn restore_version(id: u64, v: &versions::Version) {
     for h in [app::ui(|u| u.notes.get(&id).copied()), crate::win::ui::allnotes::editor_for(id)].into_iter().flatten() {
         flush(h);
+    }
+    // The note reads that way already: nothing to put back, no version of it to keep, and
+    // it isn't edited.
+    let (rtf, text) = app::store(|s| s.note(id).map(|n| (n.rtf.clone(), n.text.clone()))).unwrap_or_default();
+    if (if rtf.is_empty() { text } else { app::rtf_to_markdown(&rtf) }) == v.md {
+        return;
     }
     versions::keep(id);
     let rtf = app::markdown_to_rtf(&v.md);
