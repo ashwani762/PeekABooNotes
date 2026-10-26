@@ -267,6 +267,93 @@ fn tip(e: HWND, t: &rich::Span, link: &Link, cp: i32) -> (RECT, String) {
     (anchor, shown)
 }
 
+/// A picked picture: (editor, the selection, the picture's character).
+type Picked = (isize, (i32, i32), i32);
+
+thread_local! {
+    /// An attachment selected by a click on it: (editor, the selection, its picture's
+    /// character, when it's a picture). RichEdit draws a selected picture as its colour
+    /// negative, so while it's selected that way the selection is hidden and a frame is
+    /// drawn round the picture instead, until the selection changes.
+    static PICKED: std::cell::Cell<Option<Picked>> = const { std::cell::Cell::new(None) };
+}
+
+/// The picture picked in `e`, no longer kept.
+fn take_picked(e: HWND) -> Option<Picked> {
+    PICKED.with(|p| p.get().filter(|p| p.0 == e as isize).inspect(|_| p.set(None)))
+}
+
+/// Select `a..b`, an attachment's line, as a click on it does.
+fn pick(e: HWND, a: i32, b: i32) {
+    unpick(e);
+    rich::set_sel(e, a, b);
+    let Some(i) = rich::raw_text(e, a.max(0) as usize, b.max(0) as usize).iter().position(|&c| c == 0xFFFC) else { return };
+    rich::send(e, rich::EM_HIDESELECTION, 1, 0);
+    PICKED.with(|p| p.set(Some((e as isize, (a, b), a + i as i32))));
+    frame_picture(e, a + i as i32, true);
+}
+
+/// The picture picked in `e` (if any) is no longer: its selection shows as RichEdit draws
+/// it, and the frame goes.
+fn unpick(e: HWND) {
+    if let Some((_, _, obj)) = take_picked(e) {
+        rich::send(e, rich::EM_HIDESELECTION, 0, 0);
+        frame_picture(e, obj, false);
+    }
+}
+
+/// After message `msg` to `e` (which `drew` or not): a picked picture's frame goes on again
+/// over what RichEdit drew, or, the selection having moved on, it's let go.
+fn picked_after(e: HWND, msg: u32, drew: bool) {
+    let Some((_, at, obj)) = PICKED.with(|p| p.get()).filter(|p| p.0 == e as isize) else { return };
+    const EM_SETSEL: u32 = 0x00B1;
+    const EM_EXSETSEL: u32 = 0x0437;
+    if !drew && !matches!(msg, WM_KEYDOWN | WM_CHAR | WM_LBUTTONDOWN | WM_RBUTTONDOWN | EM_SETSEL | EM_EXSETSEL | WM_KILLFOCUS) {
+        return;
+    }
+    if rich::sel(e) != at {
+        unpick(e);
+    } else if drew {
+        frame_picture(e, obj, true);
+    }
+}
+
+/// Draw the frame round the picture at character `obj` in `e` (`on`), or have RichEdit
+/// draw the picture again without it.
+fn frame_picture(e: HWND, obj: i32, on: bool) {
+    let (p0, p1) = (rich::pos_from_char(e, obj), rich::pos_from_char(e, obj + 1));
+    if p1.y != p0.y || p1.x <= p0.x {
+        return;
+    }
+    // A picture sits on its line's baseline: that's its bottom edge.
+    let bottom = rich::baseline_at(e, obj).filter(|&y| y > p0.y).unwrap_or(p0.y + (p1.x - p0.x));
+    let r = RECT { left: p0.x, top: p0.y, right: p1.x, bottom };
+    unsafe {
+        if !on {
+            InvalidateRect(e, &r, 0);
+            return;
+        }
+        use windows_sys::Win32::Graphics::Gdi::*;
+        let mut rc: RECT = std::mem::zeroed();
+        GetClientRect(e, &mut rc);
+        let w = (2.0 * scale(e)).round().max(1.0) as i32;
+        let dc = GetDC(e);
+        // RichEdit's DC is its parent's (CS_PARENTDC): keep to the editor.
+        IntersectClipRect(dc, rc.left, rc.top, rc.right, rc.bottom);
+        let brush = CreateSolidBrush(GetSysColor(COLOR_HIGHLIGHT));
+        for edge in [
+            RECT { left: r.left, top: r.top, right: r.right, bottom: r.top + w },
+            RECT { left: r.left, top: r.bottom - w, right: r.right, bottom: r.bottom },
+            RECT { left: r.left, top: r.top, right: r.left + w, bottom: r.bottom },
+            RECT { left: r.right - w, top: r.top, right: r.right, bottom: r.bottom },
+        ] {
+            FillRect(dc, &edge, brush);
+        }
+        DeleteObject(brush);
+        ReleaseDC(e, dc);
+    }
+}
+
 /// `rich::item_shown` for character `cp`, which `t` holds the paragraph of.
 fn item_shown_in(t: &rich::Span, cp: usize) -> (usize, usize) {
     let (a, b) = rich::item_shown(&t.t, cp - t.from);
@@ -502,7 +589,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             {
                 // Select it, as Explorer does with a file: it can be cut, copied or deleted.
                 let (start, _) = item_shown_in(&rich::paras_around(e, cp as usize, cp as usize), cp as usize);
-                rich::set_sel(e, start as i32, b);
+                pick(e, start as i32, b);
             }
             return 0;
         }
@@ -541,6 +628,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             }
         }
         WM_NCDESTROY => unsafe {
+            take_picked(e);
             crate::win::editor::checks::forget(e);
             crate::win::editor::fade::forget(e);
             rich::forget_block_colors(e);
@@ -639,6 +727,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         }
         super::scrollbar::sync(h);
     }
+    picked_after(e, msg, drew);
     r
 }
 
@@ -665,4 +754,44 @@ fn key_drew(msg: u32, vk: u16, before: (usize, (i32, i32), i32), after: (usize, 
     }
     let caret = |s: (i32, i32)| s.0 == s.1;
     !(moved && before.0 == after.0 && before.2 == after.2 && caret(before.1) && caret(after.1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, ES_MULTILINE, WS_POPUP};
+
+    /// A picture picked by a click is selected with RichEdit's highlight hidden (it drew
+    /// the picture as its colour negative), and once the selection moves on the highlight
+    /// is RichEdit's again.
+    #[test]
+    fn a_picked_picture_is_framed_not_inverted() {
+        let e = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(e);
+        rich::insert_text(e, "T\r\rafter");
+        rich::set_sel(e, 2, 2);
+        let link = "{\\field{\\*\\fldinst{HYPERLINK \"attachment:p.png\"}}{\\fldrslt{\\u8203?}}}";
+        rich::insert_rtf(e, &format!("{{\\rtf1 {}{link}}}", rich::test_picture(48, 24, 720, 360)));
+        let t = rich::text(e);
+        let obj = t.iter().position(|&c| c == 0xFFFC).unwrap() as i32;
+        let end = rich::para_end(&t, obj);
+        pick(e, obj, end);
+        assert_eq!(rich::sel(e), (obj, end));
+        assert_eq!(PICKED.with(|p| p.get()), Some((e as isize, (obj, end), obj)));
+        // Drawn again, with the selection where it was: still picked.
+        picked_after(e, WM_PAINT, true);
+        assert!(PICKED.with(|p| p.get()).is_some());
+        // The caret goes elsewhere: let go.
+        rich::set_sel(e, 0, 0);
+        picked_after(e, 0x0437, false);
+        assert_eq!(PICKED.with(|p| p.get()), None);
+        // A line without a picture (a file's chip) is just selected.
+        pick(e, 0, 1);
+        assert_eq!(PICKED.with(|p| p.get()), None);
+        unsafe { DestroyWindow(e) };
+    }
 }
