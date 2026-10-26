@@ -129,7 +129,34 @@ pub(super) fn placement(id: u64) -> RECT {
     let gap = (8.0 * s) as i32;
     let x = if left { ex + gap } else { ex - w - gap };
     let y = (cy - (60.0 * s) as i32).clamp(work.top + gap, (work.bottom - h - gap).max(work.top));
-    RECT { left: x, top: y, right: x + w, bottom: y + h }
+    // Not right on top of a note open there already (new notes made one after another).
+    let open: Vec<(i32, i32)> = ui(|u| u.notes.values().copied().collect::<Vec<_>>())
+        .into_iter()
+        .filter_map(|h| {
+            let mut r: RECT = unsafe { std::mem::zeroed() };
+            (unsafe { GetWindowRect(h, &mut r) } != 0).then_some((r.left, r.top))
+        })
+        .collect();
+    cascade(RECT { left: x, top: y, right: x + w, bottom: y + h }, &open, (24.0 * s) as i32, work, left)
+}
+
+/// Where a note first opening at `r` goes when an open note's corner (of `taken`) is there
+/// already: a step down and away from the deck (`left`: the deck is on the left), as often
+/// as it takes, while it stays in `work`; past that, where it was.
+fn cascade(r: RECT, taken: &[(i32, i32)], step: i32, work: RECT, left: bool) -> RECT {
+    let near = |x: i32, y: i32| taken.iter().any(|&(tx, ty)| (tx - x).abs() < step / 2 && (ty - y).abs() < step / 2);
+    let mut at = r;
+    for _ in 0..20 {
+        if !near(at.left, at.top) {
+            return at;
+        }
+        let dx = if left { step } else { -step };
+        at = RECT { left: at.left + dx, top: at.top + step, right: at.right + dx, bottom: at.bottom + step };
+        if at.bottom > work.bottom || at.left < work.left || at.right > work.right {
+            break;
+        }
+    }
+    r
 }
 
 /// Open a note, growing out of its card in the deck: the card fanned out, else its capsule
@@ -757,6 +784,24 @@ pub fn note_command(id: u64, cmd: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A new note's spot taken by an open note: a step down and away from the deck, again
+    /// for each one there, and back to the spot when the steps would leave the screen.
+    #[test]
+    fn new_notes_cascade() {
+        let work = RECT { left: 0, top: 0, right: 2000, bottom: 1000 };
+        let r = RECT { left: 1500, top: 100, right: 1820, bottom: 460 };
+        let at = |r: RECT| (r.left, r.top);
+        assert_eq!(at(cascade(r, &[], 24, work, false)), (1500, 100));
+        assert_eq!(at(cascade(r, &[(1503, 98)], 24, work, false)), (1476, 124));
+        assert_eq!(at(cascade(r, &[(1500, 100), (1476, 124)], 24, work, false)), (1452, 148));
+        // The deck on the left: away from it is to the right.
+        let l = RECT { left: 100, top: 100, right: 420, bottom: 460 };
+        assert_eq!(at(cascade(l, &[(100, 100)], 24, work, true)), (124, 124));
+        // No room further down: where it was.
+        let low = RECT { left: 1500, top: 630, right: 1820, bottom: 990 };
+        assert_eq!(at(cascade(low, &[(1500, 630)], 24, work, false)), (1500, 630));
+    }
 
     /// An import's toast says what was left out as notes here already, beside what came in.
     #[test]
