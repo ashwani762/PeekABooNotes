@@ -66,6 +66,8 @@ thread_local! {
     /// How deep `suspend_undo` calls are: TOM's suspend is a switch, not a count, so only
     /// the outermost one may turn recording back on.
     static SUSPENDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// How deep `still` calls are: only the outermost collects its edits as one undo step.
+    static COLLECTING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 fn suspend_undo(d: &Option<ITextDocument2>) {
@@ -124,12 +126,30 @@ pub fn bulk<R>(h: HWND, f: impl FnOnce() -> R) -> R {
 /// doesn't jump or flash. Unlike `bulk`, it stays undoable, and `undo_group` takes it
 /// back in one.
 pub fn still<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    still_as(h, true, f)
+}
+
+/// `still`, for `f` that undoes and redoes RichEdit's own steps (a picture's drag), which
+/// can't be done inside one step being collected (`collect` false).
+pub(super) fn still_as<R>(h: HWND, collect: bool, f: impl FnOnce() -> R) -> R {
     if BULK.with(|b| b.get()) > 0 {
         return f();
     }
     let before = text(h);
     let caret = sel(h);
+    // One step in RichEdit's own history too, however many lines it changes (a checklist
+    // toggled over forty lines was more steps than one Ctrl+Z took back). A `still` inside
+    // another is part of it.
+    let outer = COLLECTING.with(|c| c.replace(c.get() + 1)) == 0;
+    let d = if outer && collect { doc(h) } else { None };
+    if let Some(d) = &d {
+        let _ = unsafe { d.BeginEditCollection() };
+    }
     let r = held(h, f);
+    if let Some(d) = &d {
+        let _ = unsafe { d.EndEditCollection() };
+    }
+    COLLECTING.with(|c| c.set(c.get() - 1));
     let after = text(h);
     if after != before {
         LAST_GROUP.with(|g| *g.borrow_mut() = Some((h as isize, before, after, caret)));

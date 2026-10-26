@@ -1162,6 +1162,47 @@ mod tests {
         assert_eq!(rich::to_markdown(h, true), "# T\n| a |\n| --- |\n| x<br>y |");
     }
 
+    /// One Ctrl+Z takes back a change over many lines whole (a checklist toggled over 60,
+    /// Tab over 60 lines of code), and one Ctrl+Y brings it again.
+    #[test]
+    fn many_lines_undo_in_one() {
+        let lines: Vec<String> = (0..60).map(|i| format!("line {i}")).collect();
+        for code in [false, true] {
+            let h = editor(&format!("Title\r{}", lines.join("\r")));
+            rich::send(h, rich::EM_SETUNDOLIMIT, 110, 0);
+            if code {
+                rich::wrap(h, 6, rich::text(h).len() as i32, Block::Code);
+            }
+            rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+            let before = plain(h).replace('^', "");
+            let t = rich::text(h);
+            let end = t.iter().rposition(|&c| c == b'9' as u16).unwrap() as i32 + 1;
+            let start = if code { rich::cell_at(h, &t, end).unwrap().2 as i32 } else { 6 };
+            rich::set_sel(h, start, end);
+            if code {
+                assert!(block_tab(h, false));
+            } else {
+                rich::still(h, || toggle_task_lines(h));
+            }
+            let after = plain(h).replace('^', "");
+            assert_ne!(after, before);
+            assert!(rich::undo_group(h));
+            assert_eq!(plain(h).replace('^', ""), before, "code: {code}");
+            assert!(rich::redo_group(h));
+            assert_eq!(plain(h).replace('^', ""), after, "code: {code}");
+            // Restyling the blocks after typing is no step of its own.
+            const EM_UNDO: u32 = 0x00C7;
+            let n = rich::text(h).len() as i32;
+            rich::set_sel(h, n, n);
+            rich::replace_sel(h, " typed");
+            rich::style_blocks(h);
+            rich::set_block_colors(h, 0x202020, 0xEEEEEE, true);
+            rich::style_blocks(h);
+            assert_eq!(rich::send(h, EM_UNDO, 0, 0), 1);
+            assert_eq!(plain(h).replace('^', ""), after, "code: {code}");
+        }
+    }
+
     #[test]
     fn undo_after_restyle_and_save() {
         const EM_UNDO: u32 = 0x00C7;

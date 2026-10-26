@@ -221,7 +221,7 @@ pub fn picture_dragged(h: HWND, released: bool) -> bool {
     const EM_UNDO: u32 = 0x00C7;
     let mask = send(h, EM_GETEVENTMASK, 0, 0);
     send(h, EM_SETEVENTMASK, 0, 0);
-    still(h, || {
+    still_as(h, false, || {
         // RichEdit may have made the drag a step of its own. If one undo puts the old size
         // back (and nothing else), it has, and redoing it leaves the step for Ctrl+Z.
         // Otherwise that undo (of something else, or nothing) is redone, and the change
