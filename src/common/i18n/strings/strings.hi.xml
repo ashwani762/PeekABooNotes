@@ -383,7 +383,7 @@
     <string name="settings_mcp_footer">सहायक नोट्स को संग्रह में रख सकते हैं, पर कभी हटा नहीं सकते।</string>
     <string name="settings_group_developer">डेवलपर</string>
     <string name="settings_developer">डेवलपर मोड</string>
-    <string name="settings_developer_sub">जो अभी परखा जा रहा है उसे दिखाता है, जैसे दूसरी भाषाएँ</string>
+    <string name="settings_developer_sub">जो अभी परखा जा रहा है उसे दिखाता है</string>
     <plurals name="result_copied">
         <item quantity="one">कॉपी हो गया</item>
         <item quantity="other">कॉपी हो गया</item>

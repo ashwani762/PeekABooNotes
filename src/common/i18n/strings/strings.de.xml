@@ -383,7 +383,7 @@
     <string name="settings_mcp_footer">Assistenten können Notizen archivieren, aber nie löschen.</string>
     <string name="settings_group_developer">Entwickler</string>
     <string name="settings_developer">Entwicklermodus</string>
-    <string name="settings_developer_sub">Zeigt, was noch getestet wird, etwa andere Sprachen</string>
+    <string name="settings_developer_sub">Zeigt, was noch getestet wird</string>
     <plurals name="result_copied">
         <item quantity="one">Kopiert</item>
         <item quantity="other">Kopiert</item>

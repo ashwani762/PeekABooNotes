@@ -383,7 +383,7 @@
     <string name="settings_mcp_footer">Los asistentes pueden archivar notas, pero nunca eliminarlas.</string>
     <string name="settings_group_developer">Desarrollador</string>
     <string name="settings_developer">Modo de desarrollador</string>
-    <string name="settings_developer_sub">Muestra lo que aún se está probando, como otros idiomas</string>
+    <string name="settings_developer_sub">Muestra lo que aún se está probando</string>
     <plurals name="result_copied">
         <item quantity="one">Copiado</item>
         <item quantity="other">Copiado</item>

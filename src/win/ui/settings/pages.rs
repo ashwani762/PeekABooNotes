@@ -170,19 +170,19 @@ pub(super) fn page(i: usize, edit: &Edit) -> Vec<Group> {
                     ],
                     footer: Some(t!("settings_mcp_footer").into()),
                 },
-                // What's still being tested: languages other than English, while they're read
-                // through. The Language row only shows with developer mode on.
+                // Destructive, so on its own, below everything else people use.
+                Group {
+                    header: None,
+                    rows: vec![row_sub(Key::DeleteAll, t!("settings_delete_all"), t!("settings_delete_all_sub"), Ctl::Button(t!("button_delete_all")))],
+                    footer: None,
+                },
+                // Last, below Delete All: what's still being tested (languages other than English,
+                // while they're read through). The Language row only shows with developer mode on.
                 Group {
                     header: Some(t!("settings_group_developer")),
                     rows: std::iter::once(row_sub(Key::Developer, t!("settings_developer"), t!("settings_developer_sub"), Ctl::Toggle))
                         .chain(app::store(|s| s.d.settings.developer).then(|| row(Key::Language, t!("settings_language"), Ctl::Choice)))
                         .collect(),
-                    footer: None,
-                },
-                // Destructive, so on its own at the end.
-                Group {
-                    header: None,
-                    rows: vec![row_sub(Key::DeleteAll, t!("settings_delete_all"), t!("settings_delete_all_sub"), Ctl::Button(t!("button_delete_all")))],
                     footer: None,
                 },
             ]
