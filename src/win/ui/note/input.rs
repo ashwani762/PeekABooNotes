@@ -62,12 +62,16 @@ fn link_tip(e: HWND, x: i32, y: i32) {
     let anchor = crate::win::util::rect(l, p.y, (r - l).max(1), lh);
     // An attachment: its name, and what dragging does.
     if let Some(name) = crate::common::attach::name_of(&url) {
-        // Under what the line shows: a picture reaches down to where the next line starts.
+        // Under what the line shows. A picture sits on its line's baseline, so that's its
+        // bottom edge; where the next line starts can be further down (a gap, an empty
+        // line), which put the tip over the text below. A file's chip goes down to there.
         let anchor = if rich::item_link(e, &t, cp as usize).is_some() {
             let (s0, s1) = rich::item_shown(&t, cp as usize);
             let (q0, q1) = (rich::pos_from_char(e, s0 as i32), rich::pos_from_char(e, s1 as i32));
             let next = t[cp as usize..].iter().position(|&c| c == 13).map(|i| cp + i as i32 + 1).filter(|&n| (n as usize) < t.len());
-            let bottom = next.map_or(q0.y + lh, |n| rich::pos_from_char(e, n).y).min(q0.y + (600.0 * s) as i32);
+            let picture = t.get(s0) == Some(&0xFFFC);
+            let line_end = next.map_or(q0.y + lh, |n| rich::pos_from_char(e, n).y);
+            let bottom = if picture { rich::baseline_at(e, s0 as i32).filter(|&b| b > q0.y).unwrap_or(line_end) } else { line_end }.min(q0.y + (600.0 * s) as i32);
             crate::win::util::rect(q0.x, q0.y, (q1.x - q0.x).max(1), (bottom - q0.y).max(lh))
         } else {
             anchor
