@@ -202,6 +202,7 @@
     <string name="theme_dark">गहरी</string>
     <string name="settings_language">भाषा</string>
     <string name="language_follow_windows">Windows जैसी</string>
+    <string name="language_beta">%1$s (बीटा)</string>
     <string name="settings_group_motion">गति</string>
     <string name="settings_reduce_motion">गति कम करें</string>
     <string name="settings_reduce_motion_sub">फिसलने और उछलने की जगह धीरे से दिखें</string>

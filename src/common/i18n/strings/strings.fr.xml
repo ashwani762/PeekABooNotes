@@ -202,6 +202,7 @@
     <string name="theme_dark">Sombre</string>
     <string name="settings_language">Langue</string>
     <string name="language_follow_windows">Comme Windows</string>
+    <string name="language_beta">%1$s (bêta)</string>
     <string name="settings_group_motion">Mouvement</string>
     <string name="settings_reduce_motion">Réduire les animations</string>
     <string name="settings_reduce_motion_sub">Fondus au lieu de glissements et de rebonds</string>

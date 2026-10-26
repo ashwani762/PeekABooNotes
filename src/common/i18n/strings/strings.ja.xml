@@ -138,7 +138,7 @@
     <string name="row_archived">%1$s · アーカイブ済み</string>
     <string name="row_off_deck">%1$s · デッキになし</string>
     <string name="card_no_text">ほかにテキストはありません</string>
-    <string name="card_meta">編集 %1$s  ·  作成 %2$s</string>
+    <string name="card_meta">%1$sに編集  ·  %2$sに作成</string>
     <string name="button_open">開く</string>
     <string name="button_archive">アーカイブ</string>
     <string name="button_restore">戻す</string>
@@ -187,6 +187,7 @@
     <string name="theme_dark">ダーク</string>
     <string name="settings_language">言語</string>
     <string name="language_follow_windows">Windows と同じ</string>
+    <string name="language_beta">%1$s (ベータ版)</string>
     <string name="settings_group_motion">動き</string>
     <string name="settings_reduce_motion">動きを減らす</string>
     <string name="settings_reduce_motion_sub">スライドや弾む動きの代わりにフェードを使う</string>
@@ -236,7 +237,7 @@
     <string name="display_numbered">ディスプレイ %d</string>
     <string name="display_not_connected">%s (未接続)</string>
     <string name="settings_cards">デッキのカード数</string>
-    <string name="settings_cards_sub">画面に収まる分を表示し、残りは「すべてのメモ」から開けます</string>
+    <string name="settings_cards_sub">収まる分を表示、残りは「すべてのメモ」で</string>
     <string name="settings_new_notes">新規メモの位置</string>
     <string name="settings_new_notes_sub">「すべてのメモ」でドラッグして並べ替え</string>
     <string name="new_notes_top">上</string>

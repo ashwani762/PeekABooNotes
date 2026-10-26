@@ -202,6 +202,7 @@
     <string name="theme_dark">Dunkel</string>
     <string name="settings_language">Sprache</string>
     <string name="language_follow_windows">Wie Windows</string>
+    <string name="language_beta">%1$s (Beta)</string>
     <string name="settings_group_motion">Bewegung</string>
     <string name="settings_reduce_motion">Bewegung reduzieren</string>
     <string name="settings_reduce_motion_sub">Überblenden statt Gleiten und Federn</string>

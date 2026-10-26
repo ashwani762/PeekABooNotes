@@ -26,7 +26,7 @@
     <!-- Menus -->
     <string name="menu_new_note">Nueva nota</string>
     <string name="menu_all_notes">Todas las notas</string>
-    <string name="menu_archive">Archivo</string>
+    <string name="menu_archive">Archivadas</string>
     <string name="action_archive">Archivar</string>
     <string name="menu_reopen_last">Reabrir la última nota</string>
     <string name="menu_undo_delete">Deshacer eliminación</string>
@@ -40,7 +40,7 @@
     <string name="menu_open">Abrir</string>
     <string name="menu_keep_on_top">Siempre visible</string>
     <string name="menu_show_in_deck">Mostrar en el mazo</string>
-    <string name="menu_restore">Restaurar del archivo</string>
+    <string name="menu_restore">Desarchivar</string>
     <string name="menu_delete">Eliminar</string>
     <string name="menu_previous_note">Nota anterior</string>
     <string name="menu_previous_versions">Versiones anteriores</string>
@@ -110,10 +110,10 @@
 
     <!-- All Notes -->
     <string name="library_title_notes">Notas</string>
-    <string name="library_title_archive">Archivo</string>
+    <string name="library_title_archive">Archivadas</string>
     <string name="library_title_all">Todas las notas</string>
     <string name="segment_notes">Notas</string>
-    <string name="segment_archive">Archivo</string>
+    <string name="segment_archive">Archivadas</string>
     <string name="segment_all">Todas</string>
     <plurals name="notes_count">
         <item quantity="one">%d nota</item>
@@ -123,8 +123,8 @@
     <string name="empty_search_title">Sin resultados para «%1$s»</string>
     <string name="empty_search_body">Revisa la ortografía o prueba otra palabra.</string>
     <plurals name="empty_search_in_archive">
-        <item quantity="one">Ver 1 resultado en Archivo</item>
-        <item quantity="other">Ver %d resultados en Archivo</item>
+        <item quantity="one">Ver 1 resultado en Archivadas</item>
+        <item quantity="other">Ver %d resultados en Archivadas</item>
     </plurals>
     <plurals name="empty_search_in_notes">
         <item quantity="one">Ver 1 resultado en Notas</item>
@@ -202,6 +202,7 @@
     <string name="theme_dark">Oscuro</string>
     <string name="settings_language">Idioma</string>
     <string name="language_follow_windows">Igual que Windows</string>
+    <string name="language_beta">%1$s (beta)</string>
     <string name="settings_group_motion">Movimiento</string>
     <string name="settings_reduce_motion">Reducir movimiento</string>
     <string name="settings_reduce_motion_sub">Fundidos en lugar de deslizamientos y rebotes</string>
@@ -282,7 +283,7 @@
     <string name="shortcut_nest">Sangrar o quitar sangría</string>
     <string name="shortcut_prev_next">Nota anterior o siguiente</string>
     <string name="shortcut_next_color">Color siguiente</string>
-    <string name="shortcut_align">Alinear a la izquierda, al centro o a la derecha</string>
+    <string name="shortcut_align">Alinear a izquierda, centro o derecha</string>
     <string name="shortcut_quote">Cita</string>
     <string name="shortcut_code">Bloque de código</string>
     <string name="shortcut_table">Tabla</string>
@@ -329,7 +330,7 @@
     <string name="settings_notes_folder_portable">Carpeta de notas · Portátil</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">Hecha: mover al archivo</string>
+    <string name="tip_done">Hecha: archivar</string>
     <string name="tip_unpin">Quitar de siempre visible</string>
     <string name="tip_color">Cambiar color</string>
     <string name="color_yellow">Amarillo</string>

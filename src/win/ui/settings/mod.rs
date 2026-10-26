@@ -544,7 +544,9 @@ fn choose_language() {
     let langs = crate::common::i18n::languages();
     let mut items = vec![crate::win::ui::menu::check(1, t!("language_follow_windows"), "", current.is_empty()), crate::win::ui::menu::Item::Separator];
     for (i, l) in langs.iter().enumerate() {
-        items.push(crate::win::ui::menu::check(100 + i as u32, &l.name, "", l.tag.eq_ignore_ascii_case(&current)));
+        // Only English has been read through by people who speak it: the rest say "beta".
+        let name = if l.tag.eq_ignore_ascii_case("en") { l.name.clone() } else { t!("language_beta", l.name) };
+        items.push(crate::win::ui::menu::check(100 + i as u32, &name, "", l.tag.eq_ignore_ascii_case(&current)));
     }
     let tag = match pop_choice(Key::Language, items) {
         0 => return,

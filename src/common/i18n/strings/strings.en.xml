@@ -213,6 +213,8 @@
     <string name="theme_dark">Dark</string>
     <string name="settings_language">Language</string>
     <string name="language_follow_windows">Same as Windows</string>
+    <!-- A language in the picker that's still being checked: "Deutsch (beta)" -->
+    <string name="language_beta">%1$s (beta)</string>
     <string name="settings_group_motion">Motion</string>
     <string name="settings_reduce_motion">Reduce motion</string>
     <string name="settings_reduce_motion_sub">Fade instead of sliding and springing</string>

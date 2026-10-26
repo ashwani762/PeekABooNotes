@@ -312,4 +312,32 @@ mod tests {
         }
         i18n::init("en");
     }
+
+    /// Every row of keycaps on the Shortcuts page, in every language and at 100% and
+    /// 150%: its name fits beside its keys, never cut short ("Alinear a la izquierda, al
+    /// centro o a la dere…").
+    #[test]
+    fn shortcut_names_fit_beside_their_keys() {
+        use crate::common::i18n;
+        let mut cut = Vec::new();
+        for lang in i18n::languages() {
+            i18n::init(&lang.tag);
+            for s in [1.0f32, 1.5] {
+                let fonts = Fonts::new(s);
+                let row_w = (W - SIDE_W - 2.0 * PAD) * s;
+                for g in page(3, &Edit::default()) {
+                    for row in &g.rows {
+                        let Ctl::Keys(ks) = &row.ctl else { continue };
+                        let room = row_w - 2.0 * INSET * s - caps_width(&fonts, s, ks) - 12.0 * s;
+                        let need = fonts.label.measure(row.label).0 as f32;
+                        if need > room {
+                            cut.push(format!("{} at {s}: \"{}\" needs {need} px, has {room}", lang.tag, row.label));
+                        }
+                    }
+                }
+            }
+        }
+        i18n::init("en");
+        assert!(cut.is_empty(), "{cut:#?}");
+    }
 }

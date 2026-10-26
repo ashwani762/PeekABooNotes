@@ -459,7 +459,11 @@ fn key_name(k: &str) -> &str {
 
 /// Width of a row of keycaps as drawn (caps, "/" separators and the gaps between).
 pub(super) fn keys_width(w: &Win, ks: &[&str]) -> f32 {
-    let (s, f) = (w.s, &w.fonts);
+    caps_width(&w.fonts, w.s, ks)
+}
+
+/// `keys_width` in fonts `f` at scale `s`.
+pub(super) fn caps_width(f: &Fonts, s: f32, ks: &[&str]) -> f32 {
     let h = 22.0 * s;
     let caps: f32 = ks
         .iter()
