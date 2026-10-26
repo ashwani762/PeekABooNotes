@@ -830,10 +830,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return r.unwrap_or(HTCLIENT) as LRESULT;
             }
             WM_GETMINMAXINFO => {
-                // A fixed-size panel: the frame is there only for the shadow and corners.
+                // A fixed-size panel: the frame is there only for the shadow and corners. No
+                // taller (or wider) than its monitor's work area: the page scrolls instead.
                 let s = with(|w| w.s).unwrap_or(GetDpiForWindow(hwnd).max(96) as f32 / 96.0);
                 let mm = &mut *(lp as *mut MINMAXINFO);
-                let size = POINT { x: (W * s) as i32, y: (H * s) as i32 };
+                let (work, _) = crate::win::ui::screen::of(hwnd);
+                let size = POINT { x: ((W * s) as i32).min(work.right - work.left).max(1), y: ((H * s) as i32).min(work.bottom - work.top).max(1) };
                 mm.ptMinTrackSize = size;
                 mm.ptMaxTrackSize = size;
                 return 0;
