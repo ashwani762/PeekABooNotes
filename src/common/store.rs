@@ -923,6 +923,21 @@ mod tests {
         assert_eq!(hard_breaks(md), want);
     }
 
+    /// What a quote holds breaks as it would outside it, and code is left as it is, in a
+    /// quote or with its language on the fence.
+    #[test]
+    fn breaks_inside_quotes_and_code() {
+        let md = "> a\n> > b\n> c\n> ```rust\n> x\n> y\n> ```\nafter\n```py\none\ntwo\n```\nend";
+        let want = "> a\n> > b\n>\n> c\n> ```rust\n> x\n> y\n> ```\n\nafter\n```py\none\ntwo\n```\nend";
+        assert_eq!(hard_breaks(md), want);
+        // A longer fence holds a shorter one.
+        let md = "````\n```\nkept\n```\n````\nafter";
+        assert_eq!(hard_breaks(md), md);
+        assert_eq!(fence("```rust"), Some((3, "rust")));
+        assert_eq!(fence("```inline```"), None);
+        assert!(closes_fence("````", 3) && !closes_fence("```", 4) && !closes_fence("```js", 3));
+    }
+
     #[test]
     fn breaks_around_blocks() {
         let md = "Notes\n```\nlet a = 1;\nlet b = 2;\n```\n> one\n> two\nafter\n| A | B |\n| - | - |\n| 1 | 2 |\nend";

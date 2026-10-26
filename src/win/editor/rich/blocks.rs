@@ -468,8 +468,8 @@ pub fn code_tag(h: HWND, t: &[u16], a: usize, b: usize) -> Option<(usize, usize)
             let end = (r.GetEnd().ok()?.max(0) as usize).clamp(x + 1, b);
             (end, r.GetFont().ok()?.GetHidden().ok()? == tomTrue.0)
         };
-        for i in x..end {
-            if hidden && unmark(t[i]) == t[i] {
+        for (i, &c) in t.iter().enumerate().take(end).skip(x) {
+            if hidden && unmark(c) == c {
                 tag = Some(tag.map_or((i, i + 1), |(s, _)| (s, i + 1)));
             } else if tag.is_some() {
                 return tag;
@@ -756,6 +756,40 @@ mod tests {
     fn shape(h: HWND) -> Vec<(Block, usize, usize)> {
         let t = text(h);
         blocks(h, &t).into_iter().map(|(k, rs)| (k, rs.len(), cells(&t, rs[0]).len())).collect()
+    }
+
+    /// A quote or code block in a quote is a row nested in the quote's cell, and fills that
+    /// cell's text rather than the note's width, at any width the note is.
+    #[test]
+    fn nested_blocks_fit_their_cell() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;
+        let h = editor();
+        load_markdown(h, "T\n> outer\n> > inner\n> ```\n> code\n> ```");
+        assert_eq!(plain(h), "T/[/outer/[/inner|]//[/code|]/|]/");
+        for w in [400, 260, 600] {
+            unsafe { MoveWindow(h, 0, 0, w, 300, 0) };
+            style_blocks(h);
+            let t = text(h);
+            let all = rows(&t);
+            assert_eq!(all.len(), 3);
+            let (outer, ocells) = get(h, all[0]).unwrap();
+            let room = ocells[0].width - 2 * outer.margin;
+            for &r in &all[1..] {
+                assert!(r.end <= all[0].end, "nested in the quote");
+                let (p, cs) = get(h, r).unwrap();
+                let used = cs.iter().map(|c| c.width).sum::<i32>() + 2 * p.margin + p.indent;
+                assert!((room - used).abs() <= 2, "width {w}: {used} in {room}");
+            }
+            assert!(ocells[0].width + 2 * outer.margin <= column_twips(h) + 2);
+            // Drawn inside it: further in than the quote's own text.
+            let x = |w: &str| pos_from_char(h, plain(h).find(w).unwrap() as i32).x;
+            assert!(x("inner") > x("outer") && x("code") > x("outer"), "width {w}");
+        }
+        // Stored and opened again: the same rows.
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        assert_eq!(plain(h2), plain(h));
+        assert_eq!(shape(h2), vec![(Block::Quote, 1, 1), (Block::Quote, 1, 1), (Block::Code, 1, 1)]);
     }
 
     #[test]
