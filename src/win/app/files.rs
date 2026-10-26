@@ -170,6 +170,9 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
     let mut buf = vec![0u16; 65536];
     let filter: Vec<u16> = format!("{} (*.md, *.txt)\0*.md;*.markdown;*.txt\0{}\0*.*\0\0", t!("dialog_filter_text"), t!("dialog_filter_all")).encode_utf16().collect();
     let title = wide(t!("dialog_import_title"));
+    // Where the last import came from, as Export starts where it last went.
+    let last = store(|s| s.d.settings.import_dir.clone());
+    let start = wide(&last);
     let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
     ofn.lStructSize = size_of::<OPENFILENAMEW>() as u32;
     ofn.hwndOwner = owner;
@@ -177,6 +180,9 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
     ofn.lpstrFile = buf.as_mut_ptr();
     ofn.nMaxFile = buf.len() as u32;
     ofn.lpstrTitle = title.as_ptr();
+    if !last.is_empty() && std::path::Path::new(&last).is_dir() {
+        ofn.lpstrInitialDir = start.as_ptr();
+    }
     ofn.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
     if unsafe { GetOpenFileNameW(&mut ofn) } == 0 {
         // 0 is a plain cancel; anything else failed (such as too many files for the buffer).
@@ -192,6 +198,10 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
         [one] => vec![one.into()],
         [dir, names @ ..] => names.iter().map(|n| std::path::Path::new(dir).join(n)).collect(),
     };
+    if let Some(dir) = files[0].parent().map(|d| d.to_string_lossy().into_owned()).filter(|d| *d != last) {
+        store_mut(|s| s.d.settings.import_dir = dir);
+        save();
+    }
     let w = ui(|u| u.worker);
     let (mut added, mut here, mut empty, mut failed) = (Vec::new(), 0, 0, None);
     // One operation: a file the notes share is copied in once, and one the attachments

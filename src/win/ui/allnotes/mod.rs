@@ -1163,7 +1163,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     l.pressed = hit;
                     // A click hides the focus ring, and the keys go back to the list (or
                     // the segments, when they were clicked): never to a button out of sight.
-                    l.cues = false;
+                    // A row clicked with Ctrl or Shift, adding to the selection, is work the
+                    // keys share: the ring stays, on the row clicked.
+                    if !(matches!(hit, Hit::Row(_)) && (key_down(VK_CONTROL) || key_down(VK_SHIFT))) {
+                        l.cues = false;
+                    }
                     l.kbd = if matches!(hit, Hit::Segment(_)) { Focus::Segments } else { Focus::List };
                     match hit {
                         Hit::Search => {

@@ -275,6 +275,9 @@ pub struct Settings {
     /// Where the last export went; the folder picker starts there.
     #[serde(default)]
     pub export_dir: String,
+    /// The folder the last import came from; the file picker starts there.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub import_dir: String,
     /// Unpinned notes stay open when you click away (by default they fly back to the deck).
     #[serde(default)]
     pub keep_open: bool,
@@ -327,6 +330,7 @@ impl Default for Settings {
             last_note: None,
             reopen: Vec::new(),
             export_dir: String::new(),
+            import_dir: String::new(),
             keep_open: false,
             mcp: false,
             hotkeys: std::collections::BTreeMap::new(),

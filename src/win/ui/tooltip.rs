@@ -40,6 +40,9 @@ struct Tip {
     pending: bool,
     /// Brought up by keyboard focus, not the pointer: it shows wherever the pointer is.
     by_key: bool,
+    /// Beside the button rather than under it (one of a column of buttons, which it would
+    /// cover).
+    beside: bool,
     /// Clicked: stay away until the pointer moves to another button.
     muted: bool,
     shown: bool,
@@ -90,6 +93,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 keys: String::new(),
                 pending: false,
                 by_key: false,
+                beside: false,
                 muted: false,
                 shown: false,
                 hidden_at: None,
@@ -110,16 +114,22 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
 /// The pointer rests on a button of `owner` at `anchor` (client coordinates).
 /// Call it on every move over the button; repeats are free.
 pub fn hover(owner: HWND, anchor: RECT, label: &str, keys: &str) {
-    rest(owner, anchor, label, keys, false);
+    rest(owner, anchor, label, keys, false, false);
 }
 
 /// Keyboard focus reached a button of `owner` at `anchor`: its tooltip comes up as for
 /// the pointer, after the same wait.
 pub fn focus(owner: HWND, anchor: RECT, label: &str, keys: &str) {
-    rest(owner, anchor, label, keys, true);
+    rest(owner, anchor, label, keys, true, false);
 }
 
-fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) {
+/// `hover` or (`by_key`) `focus`, the tip beside the button, on whichever side has room:
+/// for a button in a column of them (the deck's foot), which a tip under it would cover.
+pub fn beside(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) {
+    rest(owner, anchor, label, keys, by_key, true);
+}
+
+fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool, beside: bool) {
     with(|t| {
         let same = t.owner == owner && t.label == label && t.keys == keys && (t.anchor.left, t.anchor.top) == (anchor.left, anchor.top);
         if same && (t.pending || t.shown || t.muted) {
@@ -130,6 +140,7 @@ fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) {
         t.label = label.to_string();
         t.keys = keys.to_string();
         t.by_key = by_key;
+        t.beside = beside;
         t.muted = false;
         let warm = t.shown || t.hidden_at.is_some_and(|h| h.elapsed().as_millis() < WARM_MS);
         if warm {
@@ -219,7 +230,12 @@ fn show(t: &mut Tip, swap: bool) {
     let mut x = (tl.x + br.x) / 2 - w / 2;
     let mut y = br.y + gap;
     t.above = y + h > work.bottom;
-    if t.above {
+    if t.beside {
+        // Level with the button, on the side with room (left of one at the right edge).
+        y = (tl.y + br.y) / 2 - h / 2;
+        x = if br.x + gap + w <= work.right { br.x + gap } else { tl.x - gap - w };
+        t.above = false;
+    } else if t.above {
         y = tl.y - gap - h;
     }
     x = x.clamp(work.left + gap, (work.right - gap - w).max(work.left));

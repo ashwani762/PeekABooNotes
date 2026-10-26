@@ -823,9 +823,9 @@ fn tip(d: &Deck, hit: Hit, by_key: bool) {
             return;
         }
     };
+    // Beside the button: under one, it would cover the other.
     match footer_rect(d, hit) {
-        Some(r) if by_key => tooltip::focus(d.hwnd, r, &label, &k),
-        Some(r) => tooltip::hover(d.hwnd, r, &label, &k),
+        Some(r) => tooltip::beside(d.hwnd, r, &label, &k, by_key),
         None => tooltip::leave(d.hwnd),
     }
 }
