@@ -165,7 +165,7 @@ pub(super) fn siblings_before(h: HWND, t: &[u16], ps: i32, level: i32) -> (usize
         if l == level {
             n += 1;
             // The topmost one, in the end: the list's first item, which has its start.
-            first = pf.numbering_start.max(1);
+            first = pf.numbering_start;
         }
     }
     (n, first)

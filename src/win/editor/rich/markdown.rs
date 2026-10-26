@@ -144,15 +144,13 @@ fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: 
     match num {
         n if is_bullet(n) => prefix.push_str("- "),
         PFN_ARABIC | PFN_LCLETTER | PFN_LCROMAN => {
-            // A list's first item has its own start (a list can start at 5).
-            if numbers[level] == 0 {
-                numbers[level] = pf.numbering_start.max(1) as usize - 1;
-            }
-            numbers[level] += 1;
+            // A list's first item has its own start (a list can start at 5, or at 0).
+            // (`numbers` holds one more than the number last written: 0 is no list yet.)
+            numbers[level] = if numbers[level] == 0 { pf.numbering_start as usize + 1 } else { numbers[level] + 1 };
             for n in numbers.iter_mut().skip(level + 1) {
                 *n = 0;
             }
-            prefix.push_str(&format!("{}. ", numbers[level]));
+            prefix.push_str(&format!("{}. ", numbers[level] - 1));
         }
         _ => *numbers = [0; MAX_LEVEL as usize + 1],
     }
@@ -765,7 +763,8 @@ fn parse_line(raw: &str) -> Line {
     } else {
         let d = l.chars().take_while(|c| c.is_ascii_digit()).count();
         match l[d..].strip_prefix(". ").or((&l[d..] == ".").then_some("")) {
-            Some(r) if d > 0 => (Kind::Number(l[..d].parse().unwrap_or(1)), r),
+            // (RichEdit counts up to 65535.)
+            Some(r) if d > 0 => (Kind::Number(l[..d].parse::<u32>().map_or(u16::MAX, |n| n.min(u16::MAX as u32) as u16)), r),
             _ => (Kind::Plain, raw),
         }
     };
@@ -826,7 +825,7 @@ fn format_line(h: HWND, pos: i32, line: &Line) {
         // first item has its own number (`5. item`), as in Markdown, where only the
         // first one counts.
         let (before, first) = siblings_before(h, &text(h), pos, *level);
-        let start = if before > 0 { first + before as u16 } else { n.max(1) };
+        let start = if before > 0 { first.saturating_add(before as u16) } else { n };
         if start != 1 {
             set_sel(h, pos, pos);
             let mut pf = ParaFormat2::new();
@@ -1474,6 +1473,15 @@ mod tests {
         // In a quote too.
         let md = "# T\n> \\>>> py\n>   \\- x\n> \\| a |\n> | --- |";
         cycle(md, md);
+    }
+
+    /// A list may start at 0 or at any number RichEdit counts to.
+    #[test]
+    fn lists_keep_their_start() {
+        for md in ["# T\n0. zero\n1. one", "# T\n99. a\n100. b", "# T\n65535. big", "# T\n0. a\n  1. sub\n1. b", "# T\n- x\n  5. sub"] {
+            cycle(md, md);
+        }
+        cycle("# T\n99999. bigger", "# T\n65535. bigger");
     }
 
     /// Spaces at the end of a line of code are its text, in a quote too.
