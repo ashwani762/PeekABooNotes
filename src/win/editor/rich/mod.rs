@@ -23,7 +23,7 @@ pub use format::*;
 pub use links::*;
 pub use lists::*;
 pub use markdown::*;
-pub use pictures::fit_picture_widths;
+pub use pictures::{fit_picture_widths, forget_pictures, picture_dragged, picture_pressed, widen_stored_pictures};
 pub use selectors::{has_selectors, hide_marks, marker_for, unmark, unmark_str};
 
 pub const CLASS: &str = "RICHEDIT50W";
@@ -275,7 +275,8 @@ pub fn get_rtf(h: HWND) -> String {
     let mut out: Vec<u8> = Vec::new();
     let mut es = EditStream { cookie: &mut out as *mut _ as usize, error: 0, callback: out_cb };
     send(h, EM_STREAMOUT, SF_RTF as usize, &mut es as *mut _ as isize);
-    String::from_utf8_lossy(&out).into_owned()
+    // Pictures narrowed to fit the note go out at their own size.
+    pictures::own_sizes(h, String::from_utf8_lossy(&out).into_owned())
 }
 
 pub fn set_rtf(h: HWND, rtf: &str) {
@@ -283,6 +284,7 @@ pub fn set_rtf(h: HWND, rtf: &str) {
     let mut cur = InCursor { data: rtf.as_bytes(), pos: 0 };
     let mut es = EditStream { cookie: &mut cur as *mut _ as usize, error: 0, callback: in_cb };
     send(h, EM_STREAMIN, SF_RTF as usize, &mut es as *mut _ as isize);
+    pictures::forget_pictures(h);
     hide_marks(h);
 }
 

@@ -338,6 +338,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             crate::win::editor::fade::forget(e);
             rich::forget_block_colors(e);
             rich::forget_doc(e);
+            rich::forget_pictures(e);
             RemoveWindowSubclass(e, Some(edit_proc), 1);
         },
         _ => {}
@@ -353,7 +354,16 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     } else {
         0
     };
+    // A press on a selected picture may be on a handle that resizes it.
+    if msg == WM_LBUTTONDOWN {
+        rich::picture_pressed(e);
+    }
     let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+    // Resized by its handles (RichEdit may do the whole drag inside the press): an edit,
+    // saved like typing.
+    if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONUP) && rich::picture_dragged(e, msg == WM_LBUTTONUP) {
+        mark_dirty(h);
+    }
     // Moved by a key or a click to in front of a checkbox: after it instead.
     let moved = matches!(wp as u16, VK_HOME | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_PRIOR | VK_NEXT | VK_END);
     if (msg == WM_KEYDOWN && moved && !key_down(VK_SHIFT)) || msg == WM_LBUTTONUP {

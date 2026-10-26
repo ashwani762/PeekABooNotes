@@ -189,12 +189,21 @@ pub struct Data {
     /// The form of light text (`LIGHT_TEXT`) the notes' `text` was last brought up to.
     #[serde(default)]
     pub light_text: u32,
+    /// The form pictures' sizes in the notes' RTF were last brought up to
+    /// (`PICTURE_SIZES`).
+    #[serde(default)]
+    pub picture_sizes: u32,
 }
 
 /// The form the notes' light text is written in. 1: pictures and files on a line of their
 /// own are links (`![name](attachment:name)`), so previews can show them. Raised when a
 /// change needs older notes' text rebuilt from their RTF, which then happens once.
 pub const LIGHT_TEXT: u32 = 1;
+
+/// The form pictures' sizes are stored in. 1: a picture keeps its own size (as made, or as
+/// the user dragged it to), never the narrower one a narrow note showed it at; before, it
+/// was stored as last shown and widened back to its pixels' size whenever there was room.
+pub const PICTURE_SIZES: u32 = 1;
 
 impl Data {
     /// The notes whose light text predates `LIGHT_TEXT` and has to be rebuilt: those with

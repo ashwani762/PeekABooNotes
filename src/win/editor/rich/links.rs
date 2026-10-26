@@ -178,6 +178,13 @@ thread_local! {
     static UNDONE_GROUP: std::cell::RefCell<Option<(Group, u32)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// A change that leaves the text as it was (a picture's new size) came after the last
+/// group: Ctrl+Z and Ctrl+Y are single steps again, not that group's.
+pub(super) fn end_group() {
+    LAST_GROUP.with(|g| g.borrow_mut().take());
+    UNDONE_GROUP.with(|g| g.borrow_mut().take());
+}
+
 /// Ctrl+Z straight after a change made through `still` (a quote, a table, a checkbox):
 /// undo all of its steps, back to the text before it, not just the last one. False when
 /// anything has changed since.
