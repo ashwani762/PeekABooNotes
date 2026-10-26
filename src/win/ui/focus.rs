@@ -43,6 +43,13 @@ pub fn ring(c: &mut Canvas, sh: &Shape, rgb: u32, alpha: f32, s: f32) {
     c.shape(&sh.inset(-(GAP + WIDTH) * s), rgb, alpha, 1.0, WIDTH * s);
 }
 
+/// The ring over other apps' windows (the deck): a band of `halo` a pixel wider on each
+/// side keeps it visible on any wallpaper, a blue one included.
+pub fn ring_haloed(c: &mut Canvas, sh: &Shape, rgb: u32, halo: u32, alpha: f32, s: f32) {
+    c.shape(&sh.inset(-(GAP + WIDTH + 1.0) * s), halo, alpha * 0.9, 1.0, (WIDTH + 2.0) * s);
+    ring(c, sh, rgb, alpha, s);
+}
+
 #[cfg(test)]
 mod tests {
     use super::step;

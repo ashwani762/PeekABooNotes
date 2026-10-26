@@ -77,6 +77,7 @@ enum Key {
     HideUnpinned,
     ShowDeck,
     Edge,
+    DeckDisplay,
     Cards,
     NewAt,
     Fullscreen,
@@ -344,6 +345,14 @@ fn value(w: &Win, k: Key) -> usize {
     })
 }
 
+/// A pop-up button's text: its setting's current choice.
+fn choice_label(k: Key) -> String {
+    match k {
+        Key::DeckDisplay => display_label(),
+        _ => language_label(),
+    }
+}
+
 /// The language button's text: the chosen language's own name, or "Same as Windows".
 fn language_label() -> String {
     let tag = app::store(|s| s.d.settings.language.clone());
@@ -353,19 +362,41 @@ fn language_label() -> String {
     crate::common::i18n::languages().into_iter().find(|l| l.tag.eq_ignore_ascii_case(&tag)).map(|l| l.name).unwrap_or(tag)
 }
 
-/// Pop up the languages under the pointer; choosing one switches the whole interface.
-fn choose_language() {
-    let current = app::store(|s| s.d.settings.language.clone());
-    let langs = crate::common::i18n::languages();
-    let mut items = vec![crate::win::ui::menu::check(1, t!("language_follow_windows"), "", current.is_empty()), crate::win::ui::menu::Item::Separator];
-    for (i, l) in langs.iter().enumerate() {
-        items.push(crate::win::ui::menu::check(100 + i as u32, &l.name, "", l.tag.eq_ignore_ascii_case(&current)));
+/// The deck display button's text: "Main display", the chosen display's name, or that
+/// it's not connected, which is why the deck is on the main display for now.
+fn display_label() -> String {
+    use crate::win::ui::displays;
+    let (id, name) = app::store(|s| (s.d.settings.deck_display.clone(), s.d.settings.deck_display_name.clone()));
+    if id.is_empty() {
+        return t!("display_main").to_string();
     }
-    // Drop the list from under the button, right-aligned to it, so it never covers it.
+    let list = displays::list();
+    match displays::index_of(&list, &id) {
+        Some(i) => list[i].name.clone(),
+        None => missing_label(&id, &name),
+    }
+}
+
+/// The display chosen for the deck isn't connected, so the deck is on the main one.
+fn display_away() -> bool {
+    let id = app::store(|s| s.d.settings.deck_display.clone());
+    !crate::win::ui::displays::connected(&id)
+}
+
+/// A chosen display that isn't connected: its name when it was chosen, or the model
+/// code in its device path.
+fn missing_label(id: &str, name: &str) -> String {
+    let name = if name.is_empty() { crate::win::ui::displays::short_id(id) } else { name };
+    t!("display_not_connected", name)
+}
+
+/// Drop choice `k`'s list from under its button, right-aligned to it, so it never
+/// covers it (at the pointer if the button can't be found). Returns the item chosen.
+fn pop_choice(k: Key, items: Vec<crate::win::ui::menu::Item>) -> u32 {
     let anchor = with(|w| {
         let groups = groups(w);
         let sh = place(w, &groups).into_iter().find_map(|it| match it {
-            Item::Row(pl) if matches!(pl.row.ctl, Ctl::Choice) => Some(choice_shape(w, &pl.r)),
+            Item::Row(pl) if pl.row.key == Some(k) && matches!(pl.row.ctl, Ctl::Choice) => Some(choice_shape(w, k, &pl.r)),
             _ => None,
         })?;
         let mut p = POINT { x: (sh.x + sh.w) as i32, y: (sh.y + sh.h + 4.0 * w.s) as i32 };
@@ -381,7 +412,53 @@ fn choose_language() {
             (p, false)
         }
     };
-    let tag = match crate::win::ui::menu::show_with(items, p, right, None) {
+    crate::win::ui::menu::show_with(items, p, right, None)
+}
+
+/// Pop up the displays; choosing one moves the deck there.
+fn choose_display() {
+    use crate::win::ui::{deck, displays, menu};
+    // Looked for afresh: the list is kept between display changes, and this is when
+    // it has to be right.
+    displays::forget();
+    let list = displays::list();
+    let (current, saved) = app::store(|s| (s.d.settings.deck_display.clone(), s.d.settings.deck_display_name.clone()));
+    let at = displays::index_of(&list, &current);
+    let mut items = vec![menu::check(1, t!("display_main"), "", current.is_empty()), menu::Item::Separator];
+    for (i, d) in list.iter().enumerate() {
+        items.push(menu::check(100 + i as u32, &d.name, "", at == Some(i)));
+    }
+    if !current.is_empty() && at.is_none() {
+        // Still the choice, greyed out: the deck goes back to it when it's connected.
+        items.push(menu::check(2, &missing_label(&current, &saved), "", true).enabled(false));
+    }
+    let (id, name) = match pop_choice(Key::DeckDisplay, items) {
+        1 => (String::new(), String::new()),
+        n if n >= 100 => match list.get((n - 100) as usize) {
+            Some(d) => (d.id.clone(), d.name.clone()),
+            None => return,
+        },
+        _ => return,
+    };
+    let (to, from) = (displays::geo_for(&id).0, deck::monitor_geo().0);
+    if (to.left, to.top, to.right, to.bottom) != (from.left, from.top, from.right, from.bottom) {
+        deck::arrive();
+    }
+    app::update_settings(|s| {
+        s.deck_display = id;
+        s.deck_display_name = name;
+    });
+}
+
+/// Pop up the languages under the button; choosing one switches the whole interface.
+fn choose_language() {
+    let current = app::store(|s| s.d.settings.language.clone());
+    let langs = crate::common::i18n::languages();
+    let mut items = vec![crate::win::ui::menu::check(1, t!("language_follow_windows"), "", current.is_empty()), crate::win::ui::menu::Item::Separator];
+    for (i, l) in langs.iter().enumerate() {
+        items.push(crate::win::ui::menu::check(100 + i as u32, &l.name, "", l.tag.eq_ignore_ascii_case(&current)));
+    }
+    let tag = match pop_choice(Key::Language, items) {
         0 => return,
         1 => String::new(),
         n => match langs.get((n - 100) as usize) {
@@ -436,6 +513,7 @@ fn show_text(hwnd: HWND, k: Key, ok: bool, text: String) {
 fn apply(hwnd: HWND, k: Key, v: usize) {
     match k {
         Key::Language => choose_language(),
+        Key::DeckDisplay => choose_display(),
         Key::Startup => app::set_startup(v == 1),
         Key::Theme => {
             app::update_settings(|s| s.theme = v as u8);
@@ -894,6 +972,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_SETTINGCHANGE => {
                 with(|w| w.startup = app::startup_enabled());
+            }
+            // The Deck page lists the displays, and shows the choice only with more
+            // than one: built again with the displays there are now.
+            WM_DISPLAYCHANGE => {
+                crate::win::ui::displays::forget();
+                refresh();
             }
             WM_DPICHANGED => {
                 with(|w| {

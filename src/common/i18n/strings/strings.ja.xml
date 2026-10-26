@@ -206,6 +206,12 @@
     <string name="settings_screen_edge">画面の端</string>
     <string name="edge_left">左</string>
     <string name="edge_right">右</string>
+    <string name="settings_deck_display">デッキを表示する画面</string>
+    <string name="settings_deck_display_away">再接続されるまで、デッキはメイン ディスプレイに表示されます</string>
+    <string name="display_main">メイン ディスプレイ</string>
+    <string name="display_builtin">内蔵ディスプレイ</string>
+    <string name="display_numbered">ディスプレイ %d</string>
+    <string name="display_not_connected">%s (未接続)</string>
     <string name="settings_cards">デッキのカード数</string>
     <string name="settings_cards_sub">画面に収まる分を表示し、残りは「すべてのメモ」から開けます</string>
     <string name="settings_new_notes">新規メモの位置</string>
@@ -244,6 +250,10 @@
     <string name="shortcut_table">表</string>
     <string name="shortcut_leave_text">メモの本文から移動</string>
     <string name="shortcut_undo_toast">アーカイブや削除を取り消す</string>
+    <string name="shortcut_deck_keys">デッキに移動</string>
+    <string name="shortcut_deck_move">カード間を移動</string>
+    <string name="shortcut_deck_menu">カードのメニュー</string>
+    <string name="shortcut_deck_leave">前のウィンドウに戻る</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">メモのフォルダ</string>

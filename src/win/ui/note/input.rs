@@ -11,10 +11,21 @@ thread_local! {
     static PRESS: std::cell::RefCell<Option<(POINT, std::path::PathBuf, String)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Editor `e`'s DPI scale: the monitor its note is on.
+fn scale(e: HWND) -> f32 {
+    unsafe { GetDpiForWindow(e) }.max(96) as f32 / 96.0
+}
+
+/// About one body line's height in editor `e`, in pixels (the body size is in twips, 15
+/// to a pixel at 96 DPI).
+fn line_h(e: HWND) -> i32 {
+    (rich::body_size() as f32 / 15.0 * 1.45 * scale(e)) as i32
+}
+
 /// The link under the pointer: (start, end, address, the character pointed at). A
 /// picture counts as its attachment's link.
 fn link_under(e: HWND, x: i32, y: i32) -> Option<(i32, i32, String, i32)> {
-    let lh = (rich::body_size() as f32 / 15.0 * 1.45) as i32;
+    let lh = line_h(e);
     let t = rich::text(e);
     let cp = rich::char_from_pos(e, x, y);
     let over = |c: i32| {
@@ -35,7 +46,7 @@ fn link_under(e: HWND, x: i32, y: i32) -> Option<(i32, i32, String, i32)> {
 /// Over a link, a tooltip shows where it goes.
 fn link_tip(e: HWND, x: i32, y: i32) {
     use crate::win::ui::tooltip;
-    let lh = (rich::body_size() as f32 / 15.0 * 1.45) as i32;
+    let (s, lh) = (scale(e), line_h(e));
     let Some((a, b, url, cp)) = link_under(e, x, y) else {
         tooltip::leave(e);
         return;
@@ -46,7 +57,8 @@ fn link_tip(e: HWND, x: i32, y: i32) {
     let p0 = rich::pos_from_char(e, from);
     let pe = rich::pos_from_char(e, b);
     let p = rich::pos_from_char(e, cp);
-    let (l, r) = if p0.y == pe.y { (p0.x, pe.x) } else { (p.x - 20, p.x + 20) };
+    let half = (20.0 * s) as i32;
+    let (l, r) = if p0.y == pe.y { (p0.x, pe.x) } else { (p.x - half, p.x + half) };
     let anchor = crate::win::util::rect(l, p.y, (r - l).max(1), lh);
     // An attachment: its name, and what dragging does.
     if let Some(name) = crate::common::attach::name_of(&url) {
@@ -55,7 +67,7 @@ fn link_tip(e: HWND, x: i32, y: i32) {
             let (s0, s1) = rich::item_shown(&t, cp as usize);
             let (q0, q1) = (rich::pos_from_char(e, s0 as i32), rich::pos_from_char(e, s1 as i32));
             let next = t[cp as usize..].iter().position(|&c| c == 13).map(|i| cp + i as i32 + 1).filter(|&n| (n as usize) < t.len());
-            let bottom = next.map_or(q0.y + lh, |n| rich::pos_from_char(e, n).y).min(q0.y + 600);
+            let bottom = next.map_or(q0.y + lh, |n| rich::pos_from_char(e, n).y).min(q0.y + (600.0 * s) as i32);
             crate::win::util::rect(q0.x, q0.y, (q1.x - q0.x).max(1), (bottom - q0.y).max(lh))
         } else {
             anchor
@@ -78,7 +90,7 @@ fn text_menu(h: HWND, e: HWND, mut p: POINT) {
         let (a, _) = rich::sel(e);
         p = rich::pos_from_char(e, a);
         unsafe { ClientToScreen(e, &mut p) };
-        p.y += 20;
+        p.y += (20.0 * scale(e)) as i32;
     }
     let cmd = app::popup(app::edit_menu(e), p.x, p.y, h);
     if cmd != 0 {
@@ -140,6 +152,13 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     return 0;
                 }
                 if vk == VK_BACK && !ctrl && revert_auto(h, e) {
+                    st.swallow = true;
+                    return 0;
+                }
+                // A tab character has no place in the title, and a note window has nothing
+                // else for Tab to move on to (in All Notes it leaves the note, see
+                // `allnotes::pre_translate`).
+                if vk == VK_TAB && !ctrl && rich::sel_in_title(e) {
                     st.swallow = true;
                     return 0;
                 }
@@ -247,6 +266,8 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             let (a, b) = rich::sel(e);
             if a == b || cp < a.min(b) || cp > a.max(b) {
                 rich::set_sel(e, cp, cp);
+                // On a checklist circle, after the box, as a left click leaves it.
+                caret_off_box(e, false);
             }
             unsafe { SetFocus(e) };
             return 0;

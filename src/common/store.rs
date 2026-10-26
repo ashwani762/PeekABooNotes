@@ -84,6 +84,14 @@ pub struct Settings {
     pub deck_hidden: bool,
     #[serde(default)]
     pub over_fullscreen: bool,
+    /// The display the deck is on: its monitor's device path, which stays the same when
+    /// Windows renumbers its displays; empty is the main display.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub deck_display: String,
+    /// That display's name when it was chosen, to say which one is missing while it's
+    /// not connected.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub deck_display_name: String,
     /// Vertical centre of the deck as a fraction of the work area height.
     #[serde(default = "default_pos")]
     pub deck_pos: f32,
@@ -150,6 +158,8 @@ impl Default for Settings {
             edge_left: false,
             deck_hidden: false,
             over_fullscreen: false,
+            deck_display: String::new(),
+            deck_display_name: String::new(),
             deck_pos: default_pos(),
             theme: 0,
             reduce_motion: false,
@@ -205,6 +215,9 @@ pub struct Store {
     /// notes.json was there but couldn't be read (or put aside): this session never
     /// writes it, so whatever is in it survives for the next start to try again.
     frozen: bool,
+    /// notes.json was read and understood at start: these are all the notes there are,
+    /// not the backup's or none. Only then may anything be judged unused by every note.
+    pub read_whole: bool,
     /// The notes' content (see `content_stamp`) as the file last got it.
     saved_stamp: Option<u64>,
     /// Saves since the backup was last refreshed, and when that was.
@@ -234,13 +247,15 @@ fn rename_patiently(from: &std::path::Path, to: &std::path::Path) -> std::io::Re
     }
 }
 
-/// Write `bytes` to `path` and see them onto the disk before returning: a power cut right
-/// after the rename then can't leave an empty notes.json.
-fn write_synced(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Write `d` to `path` as JSON and see it onto the disk before returning: a power cut
+/// right after the rename then can't leave an empty notes.json. It goes out through a
+/// small buffer, so a save never holds a second copy of all the notes in memory.
+fn write_synced(path: &std::path::Path, d: &Data) -> std::io::Result<()> {
     use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(bytes)?;
-    f.sync_all()
+    let mut w = std::io::BufWriter::with_capacity(64 * 1024, std::fs::File::create(path)?);
+    serde_json::to_writer_pretty(&mut w, d).map_err(std::io::Error::other)?;
+    w.flush()?;
+    w.into_inner().map_err(std::io::IntoInnerError::into_error)?.sync_all()
 }
 
 impl Store {
@@ -248,9 +263,11 @@ impl Store {
         let path = dir.join("notes.json");
         let backup = dir.join("notes.backup.json");
         let mut frozen = false;
+        let mut read_whole = false;
         let d = match read_patiently(&path) {
             Ok(bytes) => match serde_json::from_slice::<Data>(&bytes) {
                 Ok(d) => {
+                    read_whole = true;
                     log::info(&format!("loaded {} notes ({} KB)", d.notes.len(), bytes.len().div_ceil(1024)));
                     // A copy of the last good file from the previous session.
                     if let Err(e) = std::fs::write(dir.join("notes.backup.json"), &bytes) {
@@ -287,7 +304,7 @@ impl Store {
                 from_backup(&backup)
             }
         };
-        let mut s = Store { path, d, frozen, saved_stamp: None, saves_since_backup: 0, backup_at: Some(Instant::now()) };
+        let mut s = Store { path, d, frozen, read_whole, saved_stamp: None, saves_since_backup: 0, backup_at: Some(Instant::now()) };
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
         s.d.next_id = s.d.next_id.max(max);
         // Early builds stored the deck at 42% height; the deck is now centred by default.
@@ -316,16 +333,15 @@ impl Store {
         if self.frozen {
             return Err(std::io::Error::other("notes.json couldn't be read at start, so it isn't written this session"));
         }
-        let json = serde_json::to_vec_pretty(&self.d).map_err(std::io::Error::other)?;
         let tmp = self.path.with_extension("json.tmp");
-        write_synced(&tmp, &json)?;
+        write_synced(&tmp, &self.d)?;
         rename_patiently(&tmp, &self.path)?;
         self.saved_stamp = Some(self.content_stamp());
         self.saves_since_backup += 1;
         if self.saves_since_backup >= BACKUP_EVERY || self.backup_at.is_none_or(|t| t.elapsed() >= BACKUP_AGE) {
-            // The same bytes, so the backup is always a file that parsed.
-            match std::fs::write(self.path.with_file_name("notes.backup.json"), &json) {
-                Ok(()) => {
+            // A copy of the file just written, so the backup is always one that was whole.
+            match std::fs::copy(&self.path, self.path.with_file_name("notes.backup.json")) {
+                Ok(_) => {
                     self.saves_since_backup = 0;
                     self.backup_at = Some(Instant::now());
                 }
@@ -366,9 +382,15 @@ impl Store {
 
     /// Active (not archived) notes in deck order.
     pub fn active_ids(&self) -> Vec<u64> {
+        self.active_notes().into_iter().map(|n| n.id).collect()
+    }
+
+    /// Active notes in deck order, themselves rather than their ids (looking each id up
+    /// again would go through every note once per note).
+    pub fn active_notes(&self) -> Vec<&Note> {
         let mut v: Vec<&Note> = self.d.notes.iter().filter(|n| !n.archived).collect();
         v.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
-        v.into_iter().map(|n| n.id).collect()
+        v
     }
 
     pub fn create(&mut self, text: &str, rtf: &str) -> u64 {
@@ -875,6 +897,22 @@ mod tests {
         // And so after the next load.
         let d: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert!(d.stale_light_text().is_empty());
+    }
+
+    #[test]
+    fn deck_display_defaults_to_the_main_one() {
+        // Settings saved before the deck could go on another display.
+        let d: Data = serde_json::from_str(r#"{"settings":{"edge_left":true,"deck_pos":0.3,"language":"de"}}"#).unwrap();
+        assert!(d.settings.edge_left && d.settings.language == "de");
+        assert!(d.settings.deck_display.is_empty() && d.settings.deck_display_name.is_empty());
+        // Left out while it's the main display, so such files stay as they were.
+        assert!(!serde_json::to_string(&d).unwrap().contains("deck_display"));
+        let mut d = d;
+        d.settings.deck_display = r"\\?\DISPLAY#DEL40F4#5&1&UID4352#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}".into();
+        d.settings.deck_display_name = "DELL U2720Q".into();
+        let back: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert_eq!(back.settings.deck_display, d.settings.deck_display);
+        assert_eq!(back.settings.deck_display_name, "DELL U2720Q");
     }
 
 

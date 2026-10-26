@@ -101,6 +101,10 @@ const PFNS_PERIOD: u16 = 0x0200;
 const ECOOP_OR: usize = 2;
 const ECO_AUTOVSCROLL: isize = 0x0040;
 const ECO_SELECTIONBAR: isize = 0x0100_0000;
+/// How far the selection bar insets the text on the left, in DIPs: RichEdit makes it 225
+/// HIMETRIC wide (8 px at 96 DPI) and scales it with the window's DPI. Nothing insets the
+/// right side, so a window wanting even margins adds this on its right.
+pub const SELECTION_BAR: f32 = 225.0 * 96.0 / 2540.0;
 const TO_ADVANCEDTYPOGRAPHY: usize = 1;
 const CF_UNICODETEXT: usize = 13;
 /// The text as RichEdit holds it: a table keeps its row and cell marks (by default they
@@ -346,6 +350,12 @@ pub fn sel(h: HWND) -> (i32, i32) {
     (a as i32, b as i32)
 }
 
+/// Whether the selection is all inside the first paragraph, the note's title.
+pub fn sel_in_title(h: HWND) -> bool {
+    let (a, b) = sel(h);
+    !range_text(h, 0, a.max(b)).contains(&CR)
+}
+
 pub fn set_sel(h: HWND, a: i32, b: i32) {
     send(h, EM_SETSEL, a as usize, b as isize);
 }
@@ -378,10 +388,36 @@ pub fn insert_text(h: HWND, s: &str) {
 }
 
 /// Typing and pasting stop at the note limit, or where the note already is when it was
-/// saved longer (it keeps all of that, and just can't grow).
+/// saved longer (it keeps all of that, and just can't grow). The limit is on what the
+/// note shows: RichEdit counts every character it holds, so what it holds out of sight
+/// is let through on top. That changes as links and tables come and go, so this is asked
+/// again after each burst of edits.
 pub fn limit_length(h: HWND) {
-    let n = (text(h).len()).max(crate::common::store::MAX_NOTE_CHARS);
-    send(h, EM_EXLIMITTEXT, 0, n.min(i32::MAX as usize) as isize);
+    limit_length_of(h, &text(h));
+}
+
+/// `limit_length`, with the editor's text already in hand.
+pub fn limit_length_of(h: HWND, t: &[u16]) {
+    send(h, EM_EXLIMITTEXT, 0, length_limit(t).min(i32::MAX as usize) as isize);
+}
+
+/// The most characters RichEdit may hold, given what it holds now (`t`).
+fn length_limit(t: &[u16]) -> usize {
+    t.len().max(crate::common::store::MAX_NOTE_CHARS + hidden_len(t))
+}
+
+/// How many characters of `t` (the editor's text) never show: named links' hidden
+/// `HYPERLINK "url"` instructions, and the marks (each with its paragraph mark) that
+/// start and end a table row.
+pub fn hidden_len(t: &[u16]) -> usize {
+    let links: usize = instructions(t, 0, t.len()).iter().map(|(at, name, _)| name - at).sum();
+    let mut rows = 0;
+    for (i, &c) in t.iter().enumerate() {
+        if c == ROW_START || c == ROW_END {
+            rows += if t.get(i + 1) == Some(&CR) { 2 } else { 1 };
+        }
+    }
+    links + rows
 }
 
 pub fn char_from_pos(h: HWND, x: i32, y: i32) -> i32 {

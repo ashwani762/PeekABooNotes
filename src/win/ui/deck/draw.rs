@@ -4,6 +4,7 @@
 //! Painting the deck: the pill, the cards and their spines, the + and "+N" buttons.
 
 use super::*;
+use crate::win::ui::focus;
 
 pub(super) fn font(d: &mut Deck, face: u8, px: f32, weight: i32) -> Font {
     let s = d.geo.s;
@@ -48,6 +49,7 @@ pub(super) fn render(d: &mut Deck) {
     }
     let dark = app::dark();
     let mat = theme::chrome(dark);
+    let ring = ring_hit(d);
     let mut c = d.canvas.take().unwrap();
     c.clear(0);
     // Keep the tab column hoverable (alpha 1 is invisible but hit-testable).
@@ -85,6 +87,12 @@ pub(super) fn render(d: &mut Deck) {
     for i in order {
         draw_card(d, &mut c, i, ww, wy as f32, dark);
     }
+    // The focus ring, over the cards so the one shingled below never covers its edge. It
+    // comes in with the card's spine as the deck fans out.
+    if let Some(Hit::Tab(i)) = ring {
+        let cp = pose(d, i, ww, wy as f32);
+        focus::ring_haloed(&mut c, &cp.shape, theme::FOCUS, mat.fill, clamp01((cp.reveal - 0.55) / 0.45), s);
+    }
 
     // "+N" tile and the plus button.
     let ea = clamp01(d.extras.value);
@@ -103,6 +111,9 @@ pub(super) fn render(d: &mut Deck) {
             if hot > 0.01 {
                 c.shape(&sh, if dark { 0xFFFFFF } else { 0x000000 }, 0.06 * hot * ea, 1.0, 0.0);
             }
+            if ring == Some(Hit::More) {
+                focus::ring_haloed(&mut c, &sh, theme::FOCUS, mat.fill, ea, s);
+            }
             let f = font(d, 0, 11.0, FW_SEMIBOLD as i32);
             let r = rect(sh.x as i32, sh.y as i32, sh.w as i32, sh.h as i32);
             c.text(&t!("deck_more", g.more), &f, r, mat.text, ea, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -119,6 +130,9 @@ pub(super) fn render(d: &mut Deck) {
         let (lw, lt) = (11.0 * s, 1.8 * s);
         c.rrect(cx - lw / 2.0, cy - lt / 2.0, lw, lt, lt / 2.0, ink, ea);
         c.rrect(cx - lt / 2.0, cy - lw / 2.0, lt, lw, lt / 2.0, ink, ea);
+        if ring == Some(Hit::Plus) {
+            focus::ring_haloed(&mut c, &sh, theme::FOCUS, mat.fill, ea, s);
+        }
     }
 
     c.present(d.hwnd, wx, wy);

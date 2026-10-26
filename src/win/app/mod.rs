@@ -88,6 +88,7 @@ const CMD_ARCHIVE: u32 = 3;
 const CMD_REOPEN: u32 = 4;
 const CMD_TOGGLE_DECK: u32 = 5;
 const CMD_SWAP_EDGE: u32 = 6;
+const CMD_DECK_KEYS: u32 = 7;
 const CMD_UNDO: u32 = 14;
 const CMD_QUIT: u32 = 15;
 const CMD_SETTINGS: u32 = 16;
@@ -266,13 +267,16 @@ fn tray_icon(op: u32) {
     }
 }
 
-const HOTKEYS: [(u32, u8); 6] = [
+/// Ctrl+Alt and a letter. The deck's keys are on K rather than D: Ctrl+Alt+D is
+/// Magnifier's docked view, likely in use by the very people who want the deck by keyboard.
+const HOTKEYS: [(u32, u8); 7] = [
     (CMD_NEW, b'N'),
     (CMD_ALL, b'A'),
     (CMD_ARCHIVE, b'L'),
     (CMD_REOPEN, b'O'),
     (CMD_TOGGLE_DECK, b'H'),
     (CMD_SWAP_EDGE, b'E'),
+    (CMD_DECK_KEYS, b'K'),
 ];
 
 pub fn quit() {
@@ -308,7 +312,7 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
         WM_HOTKEY => command(wp as u32),
         WM_TRAY => match (lp & 0xFFFF) as u32 {
             WM_LBUTTONUP => show_all_notes(false),
-            WM_RBUTTONUP | WM_CONTEXTMENU => tray_menu(),
+            WM_RBUTTONUP | WM_CONTEXTMENU => tray_menu(None),
             _ => {}
         },
         WM_ACTIVATE_OTHER => show_all_notes(false),
@@ -319,9 +323,14 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
         WM_SETTINGCHANGE => {
             apply_motion();
             apply_theme();
+            // The work area may have changed (the taskbar moved or hides itself).
+            crate::win::ui::displays::forget();
             deck::refresh();
         }
-        WM_DISPLAYCHANGE => deck::refresh(),
+        WM_DISPLAYCHANGE => {
+            crate::win::ui::displays::forget();
+            deck::refresh();
+        }
         WM_TIMER if wp == T_TRIM => {
             unsafe { KillTimer(h, T_TRIM) };
             trim_memory();
@@ -502,6 +511,7 @@ pub fn run() -> i32 {
 
         reopen_at_start();
         share::cleanup();
+        sweep_attachments();
         upgrade_startup();
         // Assistants (MCP) talk to us through a pipe, when allowed in Settings.
         mcp::init(main);

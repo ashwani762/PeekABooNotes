@@ -41,23 +41,29 @@ pub(super) fn compute_geo(n_items: usize) -> Geo {
     g
 }
 
+/// A card's title and preview, as the store has the note now.
+pub(super) fn tab_texts(id: u64) -> (String, String) {
+    app::store(|s| s.note(id).map(|n| (without_objects(title_of(&n.text)), without_objects(body_of(&n.text))))).unwrap_or_default()
+}
+
 /// Rebuild the tab list from the store, keeping the springs of tabs that still exist.
 pub(super) fn sync(d: &mut Deck) {
-    let rows: Vec<(u64, String, String, u8)> = app::store(|s| {
-        s.active_ids().iter().filter_map(|id| s.note(*id)).filter(|n| !n.off_deck).map(|n| (n.id, without_objects(title_of(&n.text)), without_objects(body_of(&n.text)), n.color)).collect()
-    });
+    let rows: Vec<(u64, u8)> = app::store(|s| s.active_notes().into_iter().filter(|n| !n.off_deck).map(|n| (n.id, n.color)).collect());
     let open: Vec<u64> = app::ui(|u| u.notes.keys().copied().collect());
     let in_deck = rows.iter().filter(|r| !open.contains(&r.0)).count();
+    let before = stops(d);
     let mut g = compute_geo(in_deck);
     let mut old: HashMap<u64, Tab> = d.tabs.drain(..).map(|t| (t.id, t)).collect();
     let mut slot = 0usize;
-    for (id, title, body, color) in rows.into_iter() {
+    for (id, color) in rows.into_iter() {
         let is_open = open.contains(&id);
         // Only cards in the deck count toward its size: open notes take no slot (they
         // keep a hollow capsule in the pill), so they must never crowd real cards out.
         if !is_open && slot >= g.n {
             continue;
         }
+        // Titles and previews only for the cards there are, not for every note.
+        let (title, body) = tab_texts(id);
         let i = slot;
         let mut t = old.remove(&id).unwrap_or_else(|| {
             let mut t = Tab::new(id, g.slot_y(i));
@@ -98,6 +104,19 @@ pub(super) fn sync(d: &mut Deck) {
     g.ch = (g.pill_h() + 36.0 * g.s).round() as i32;
     g.cy = (g.centre - g.ch / 2).clamp(g.work.top, (g.work.bottom - g.ch).max(g.work.top));
     d.geo = g;
+    // The deck has the keys: a card that left takes the ring with it to its neighbour,
+    // and places may have moved under the one that stayed.
+    if let Some(at) = d.kbd.as_ref().map(|k| k.at) {
+        let to = super::keys::refocus(&before, &stops(d), at);
+        if let Some(k) = d.kbd.as_mut() {
+            k.at = to;
+        }
+        if to == at {
+            d.hover = ring_hit(d).unwrap_or(Hit::None);
+        } else {
+            show_ring(d);
+        }
+    }
     if d.font_scale != g.s {
         d.fonts.clear();
         d.font_scale = g.s;
@@ -144,10 +163,13 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         d.previewing = false;
     }
     let reopening = open && d.tabs.iter().any(|t| t.reveal.value > 0.05);
+    // With Reduce Motion the springs land at once, and so does the whole cascade: no card
+    // waits its turn.
+    let together = instant || reopening || anim::reduced();
     for t in d.tabs.iter_mut() {
         let i = t.slot;
         t.reveal_goal = if open && !t.open { 1.0 } else { 0.0 };
-        t.delay = if instant || reopening {
+        t.delay = if together {
             0.0
         } else if open {
             i as f32 * motion::STAGGER_S
@@ -164,7 +186,7 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         }
     }
     d.extras_goal = if open { 1.0 } else { 0.0 };
-    d.extras_delay = if open && !instant && !reopening { n as f32 * motion::STAGGER_S } else { 0.0 };
+    d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S } else { 0.0 };
     d.pill.to(if open { 0.0 } else { 1.0 });
     if instant {
         d.extras.snap(d.extras_goal);

@@ -44,16 +44,15 @@ struct Book {
 }
 
 impl Book {
-    /// Keep `v` as note `id`'s newest version, unless it's the same as the newest already
-    /// there, or (`quiet`) that one was taken less than `QUIET` ago. True when kept.
+    /// Keep `v` as note `id`'s newest version, unless one already there is the same (a
+    /// version put back and then edited again would otherwise be listed twice), or
+    /// (`quiet`) the newest was taken less than `QUIET` ago. True when kept.
     fn add(&mut self, id: u64, v: Version, now: i64, quiet: bool) -> bool {
         if v.md.trim().is_empty() {
             return false;
         }
         let list = self.notes.entry(id).or_default();
-        if let Some(last) = list.last()
-            && (last.md == v.md || (quiet && now - last.taken < QUIET))
-        {
+        if list.iter().any(|x| x.md == v.md) || list.last().is_some_and(|last| quiet && now - last.taken < QUIET) {
             return false;
         }
         list.push(v);
@@ -167,6 +166,16 @@ mod tests {
         assert!(!b.add(1, v("  ", 300), 300, false));
         assert!(b.add(1, v("b", 400), 400, false));
         assert_eq!(b.notes[&1].len(), 2);
+    }
+
+    #[test]
+    fn a_version_put_back_isnt_kept_twice() {
+        let mut b = Book::default();
+        assert!(b.add(1, v("a", 100), 100, false));
+        assert!(b.add(1, v("b", 200), 200, false));
+        // "a" put back, then edited (or undone) an hour on: it's in the list already.
+        assert!(!b.add(1, v("a", 4000), 4000, true));
+        assert_eq!(b.notes[&1].iter().map(|v| v.md.as_str()).collect::<Vec<_>>(), ["a", "b"]);
     }
 
     #[test]

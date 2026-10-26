@@ -1150,4 +1150,40 @@ mod tests {
         round_trip("T\n4. a\n9. b", "T\n4. a\n5. b");
         round_trip("T\n> 2. quoted\n> 3. list", "T\n> 2. quoted\n> 3. list");
     }
+
+    /// A note's length limit counts what it shows: a named link's hidden address and a
+    /// table's row marks are let through on top.
+    #[test]
+    fn hidden_text_is_not_counted() {
+        let h = editor();
+        load_markdown(h, "T\nsee [docs](https://example.com/a/long/address) now\n| a | b |\n| --- | --- |\n| 1 | 2 |\nend");
+        let t = text(h);
+        let field = "HYPERLINK \"https://example.com/a/long/address\"".encode_utf16().count();
+        let rows = t.iter().filter(|&&c| c == ROW_START).count();
+        assert_eq!(rows, 2);
+        assert_eq!(hidden_len(&t), field + rows * 4);
+        assert_eq!(length_limit(&t), crate::common::store::MAX_NOTE_CHARS + field + rows * 4);
+        // Plain text hides nothing.
+        let h = editor();
+        load_markdown(h, "T\nplain words");
+        assert_eq!(hidden_len(&text(h)), 0);
+        // A note saved longer than the limit keeps what it has.
+        let long = vec![b'x' as u16; crate::common::store::MAX_NOTE_CHARS + 5];
+        assert_eq!(length_limit(&long), long.len());
+    }
+
+    /// Where Tab has no tab character to type: in the title, the first paragraph.
+    #[test]
+    fn the_title_is_the_first_paragraph() {
+        let h = editor();
+        load_markdown(h, "Title\nbody");
+        set_sel(h, 0, 0);
+        assert!(sel_in_title(h));
+        set_sel(h, 2, 5);
+        assert!(sel_in_title(h));
+        set_sel(h, 7, 7);
+        assert!(!sel_in_title(h));
+        set_sel(h, 2, 7);
+        assert!(!sel_in_title(h), "reaching into the body");
+    }
 }

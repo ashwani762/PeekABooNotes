@@ -218,6 +218,12 @@
     <string name="settings_screen_edge">Borde de la pantalla</string>
     <string name="edge_left">Izquierda</string>
     <string name="edge_right">Derecha</string>
+    <string name="settings_deck_display">Mostrar el mazo en</string>
+    <string name="settings_deck_display_away">Hasta que vuelva a conectarse, el mazo está en la pantalla principal</string>
+    <string name="display_main">Pantalla principal</string>
+    <string name="display_builtin">Pantalla integrada</string>
+    <string name="display_numbered">Pantalla %d</string>
+    <string name="display_not_connected">%s (sin conexión)</string>
     <string name="settings_cards">Tarjetas en el mazo</string>
     <string name="settings_cards_sub">Las que quepan en la pantalla; el resto, en Todas las notas</string>
     <string name="settings_new_notes">Notas nuevas</string>
@@ -256,6 +262,10 @@
     <string name="shortcut_table">Tabla</string>
     <string name="shortcut_leave_text">Salir del texto de la nota</string>
     <string name="shortcut_undo_toast">Deshacer un archivado o una eliminación</string>
+    <string name="shortcut_deck_keys">Ir al mazo</string>
+    <string name="shortcut_deck_move">Moverse entre tarjetas</string>
+    <string name="shortcut_deck_menu">Menú de la tarjeta</string>
+    <string name="shortcut_deck_leave">Volver a la ventana anterior</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Carpeta de notas</string>

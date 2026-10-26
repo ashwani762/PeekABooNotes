@@ -218,6 +218,12 @@
     <string name="settings_screen_edge">Bildschirmrand</string>
     <string name="edge_left">Links</string>
     <string name="edge_right">Rechts</string>
+    <string name="settings_deck_display">Stapel zeigen auf</string>
+    <string name="settings_deck_display_away">Bis der Bildschirm wieder verbunden ist, liegt der Stapel auf dem Hauptbildschirm</string>
+    <string name="display_main">Hauptbildschirm</string>
+    <string name="display_builtin">Integrierter Bildschirm</string>
+    <string name="display_numbered">Bildschirm %d</string>
+    <string name="display_not_connected">%s (nicht verbunden)</string>
     <string name="settings_cards">Karten im Stapel</string>
     <string name="settings_cards_sub">So viele, wie Platz haben; der Rest liegt in „Alle Notizen“</string>
     <string name="settings_new_notes">Neue Notizen</string>
@@ -256,6 +262,10 @@
     <string name="shortcut_table">Tabelle</string>
     <string name="shortcut_leave_text">Notiztext verlassen</string>
     <string name="shortcut_undo_toast">Archivieren oder Löschen widerrufen</string>
+    <string name="shortcut_deck_keys">Zum Stapel wechseln</string>
+    <string name="shortcut_deck_move">Zwischen Karten wechseln</string>
+    <string name="shortcut_deck_menu">Kartenmenü</string>
+    <string name="shortcut_deck_leave">Zurück zum vorigen Fenster</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notizordner</string>

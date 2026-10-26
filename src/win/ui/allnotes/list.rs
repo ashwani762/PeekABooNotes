@@ -4,6 +4,7 @@
 //! The note list: rows, ordering, selection, scrolling and drag-to-reorder.
 
 use super::*;
+use crate::common::store::Note;
 
 pub(super) fn set_mode(l: &mut Lib, mode: usize) {
     if l.mode != mode {
@@ -30,34 +31,7 @@ pub(super) fn rebuild(l: &mut Lib) {
                 2 => true,
                 _ => !n.archived,
             })
-            .filter_map(|n| {
-                let title = without_objects(title_of(&n.text));
-                let m = if searching {
-                    let rest = search_rest(&n.text);
-                    let m = q.score(&title, &rest)?;
-                    let snippet = m.body_at.map(|at| without_objects(crate::common::search::snippet(&rest, at, 80)));
-                    let marks = snippet.as_deref().map(|s| q.marks(s)).unwrap_or_default();
-                    (m.score, m.title, snippet, marks)
-                } else {
-                    (0, Vec::new(), None, Vec::new())
-                };
-                Some(Row {
-                    id: n.id,
-                    title,
-                    off_deck: n.off_deck,
-                    order: n.order,
-                    body: without_objects(body_of(&n.text)),
-                    time: relative_time(n.updated),
-                    created: n.created,
-                    updated: n.updated,
-                    color: n.color,
-                    archived: n.archived,
-                    score: m.0,
-                    hits: m.1,
-                    snippet: m.2,
-                    snippet_hits: m.3,
-                })
-            })
+            .filter_map(|n| row_of(n, &q, searching))
             .collect()
     });
     if searching && !editor_focused(l) {
@@ -99,6 +73,36 @@ pub(super) fn rebuild(l: &mut Lib) {
     }
     clamp_scroll(l);
     anim::wake(Client::List);
+}
+
+/// Note `n`'s row, or None when a search is on and it doesn't match.
+pub(super) fn row_of(n: &Note, q: &crate::common::search::Query, searching: bool) -> Option<Row> {
+    let title = without_objects(title_of(&n.text));
+    let m = if searching {
+        let rest = search_rest(&n.text);
+        let m = q.score(&title, &rest)?;
+        let snippet = m.body_at.map(|at| without_objects(crate::common::search::snippet(&rest, at, 80)));
+        let marks = snippet.as_deref().map(|s| q.marks(s)).unwrap_or_default();
+        (m.score, m.title, snippet, marks)
+    } else {
+        (0, Vec::new(), None, Vec::new())
+    };
+    Some(Row {
+        id: n.id,
+        title,
+        off_deck: n.off_deck,
+        order: n.order,
+        body: without_objects(body_of(&n.text)),
+        time: relative_time(n.updated),
+        created: n.created,
+        updated: n.updated,
+        color: n.color,
+        archived: n.archived,
+        score: m.0,
+        hits: m.1,
+        snippet: m.2,
+        snippet_hits: m.3,
+    })
 }
 
 pub(super) fn primary_index(l: &Lib) -> Option<usize> {

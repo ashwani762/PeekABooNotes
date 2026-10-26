@@ -1089,6 +1089,9 @@ fn on_key(o: &mut Open, vk: u16) {
             let row = o.menus[level].parent_row;
             close_after(o, level - 1);
             focus(o, level - 1, Target::Row(row));
+            // That row had the focus all along, so `focus` saw no change: drawn again, it
+            // turns from the soft "came from here" mark back to the full highlight.
+            draw(o, level - 1);
         }
         Step::Choose => {
             crate::win::ui::tooltip::mute();
