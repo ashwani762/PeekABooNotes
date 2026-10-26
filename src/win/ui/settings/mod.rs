@@ -404,7 +404,8 @@ fn missing_label(id: &str, name: &str) -> String {
 }
 
 /// Drop choice `k`'s list from under its button, right-aligned to it, so it never
-/// covers it (at the pointer if the button can't be found). Returns the item chosen.
+/// covers it (at the pointer if the button can't be found). Returns the item chosen; the
+/// keys come back to Settings after.
 fn pop_choice(k: Key, items: Vec<crate::win::ui::menu::Item>) -> u32 {
     let anchor = with(|w| {
         let groups = groups(w);
@@ -425,7 +426,7 @@ fn pop_choice(k: Key, items: Vec<crate::win::ui::menu::Item>) -> u32 {
             (p, false)
         }
     };
-    crate::win::ui::menu::show_with(items, p, right, None)
+    app::popup_aligned(items, p, right, hwnd())
 }
 
 /// Pop up the displays; choosing one moves the deck there.

@@ -103,6 +103,14 @@ pub fn popup(items: Vec<menu::Item>, x: i32, y: i32, owner: HWND) -> u32 {
     cmd
 }
 
+/// `popup`, right-aligned to `p` (opening leftwards) if `align_right`.
+pub fn popup_aligned(items: Vec<menu::Item>, p: POINT, align_right: bool, owner: HWND) -> u32 {
+    let prev = unsafe { GetForegroundWindow() };
+    let cmd = menu::show_with(items, p, align_right, None);
+    give_back(prev, owner);
+    cmd
+}
+
 /// After a menu: the keys go back to `owner` when it's showing, or else to `prev`, the
 /// window in front before the menu took them (unless that's our hidden main window).
 fn give_back(prev: HWND, owner: HWND) {
