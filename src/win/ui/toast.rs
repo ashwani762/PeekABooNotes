@@ -178,6 +178,9 @@ pub fn frame(dt: f32) -> bool {
         if !t.alive && !moving && t.rise.value <= 0.01 {
             unsafe { DestroyWindow(t.hwnd) };
             *slot = None;
+            // What it offered to undo (an archived note kept ready to come back) is gone
+            // too: memory can go back to Windows once nothing else is open.
+            crate::win::app::schedule_trim();
             return false;
         }
         render(t);
