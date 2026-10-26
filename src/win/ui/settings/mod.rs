@@ -88,6 +88,7 @@ enum Key {
     DeleteAll,
     Mcp,
     McpSetup,
+    Developer,
     /// A shortcut that works anywhere, by its place in `hotkey::ACTIONS`.
     Hotkey(usize),
     ResetKeys,
@@ -415,6 +416,7 @@ fn value(w: &Win, k: Key) -> usize {
             Key::ReduceMotion => st.reduce_motion as usize,
             Key::HideUnpinned => !st.keep_open as usize,
             Key::Mcp => st.mcp as usize,
+            Key::Developer => st.developer as usize,
             Key::ShowDeck => !st.deck_hidden as usize,
             Key::Edge => !st.edge_left as usize,
             Key::Cards => CARDS.iter().position(|&c| c == st.deck_max).unwrap_or(1),
@@ -795,6 +797,11 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         }
         Key::Hotkey(i) => record(i),
         Key::ResetKeys => app::reset_hotkeys(),
+        Key::Developer => {
+            app::update_settings(|s| s.developer = v == 1);
+            // Its language comes back (or English does), and the Language row shows or goes.
+            app::apply_language();
+        }
     }
 }
 

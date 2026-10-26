@@ -355,6 +355,9 @@
     <string name="result_not_installed">未インストール、設定をコピー</string>
     <string name="result_not_json">コメントがあるか JSON ではありません、設定をコピー</string>
     <string name="settings_mcp_footer">アシスタントはメモをアーカイブできますが、削除はできません。</string>
+    <string name="settings_group_developer">開発者</string>
+    <string name="settings_developer">開発者モード</string>
+    <string name="settings_developer_sub">他の言語など、まだテスト中のものを表示します</string>
     <plurals name="result_copied">
         <item quantity="other">コピーしました</item>
     </plurals>

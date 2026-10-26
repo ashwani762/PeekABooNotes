@@ -176,7 +176,7 @@ Ctrl+Alt is also AltGr, and on many keyboards AltGr and a letter types a charact
 
 ## Languages
 
-English, German, Spanish, French, Hindi and Japanese are built in. A new install starts in English; Settings › General › Language picks another or **Same as Windows** (Windows' preferred display languages: the exact tag, then the base language, then English). Dates and times are formatted by Windows for the chosen locale.
+English, German, Spanish, French, Hindi and Japanese are built in. The interface is in English unless **Developer mode** is on (Settings › Data › Developer, `developer` in `notes.json`, `Settings::ui_language`): only then does the Language row show there, and the language it picks (kept in `language` while developer mode is off) apply. It picks a built-in language or **Same as Windows** (Windows' preferred display languages: the exact tag, then the base language, then English). Dates and times are formatted by Windows for the chosen locale.
 
 Interface text lives in Android-style resource files, one per language: `src/common/i18n/strings/strings.<tag>.xml`.
 
@@ -194,7 +194,7 @@ Interface text lives in Android-style resource files, one per language: `src/com
 - **Placeholders:** `%s` and `%d` in order, or `%1$s` and `%2$d` by position.
 - **Plurals:** the CLDR categories (zero, one, two, few, many, other).
 - **Fallback:** English is the reference; any key a translation lacks falls back to it.
-- **Beta:** only English has been read through by people who speak it, so Settings' language picker marks the others "(beta)".
+- **Beta:** only English has been read through by people who speak it, so the other languages are behind developer mode, and its language picker marks them "(beta)".
 - Buttons and menu items never end in "…".
 
 **Adding a language**

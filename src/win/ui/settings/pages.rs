@@ -37,10 +37,7 @@ pub(super) fn page(i: usize, edit: &Edit) -> Vec<Group> {
             Group { header: None, rows: vec![row(Key::Startup, t!("settings_start_with_windows"), Ctl::Toggle)], footer: None },
             Group {
                 header: Some(t!("settings_group_appearance")),
-                rows: vec![
-                    row(Key::Theme, t!("settings_theme"), Ctl::Seg(vec![t!("theme_system"), t!("theme_light"), t!("theme_dark")])),
-                    row(Key::Language, t!("settings_language"), Ctl::Choice),
-                ],
+                rows: vec![row(Key::Theme, t!("settings_theme"), Ctl::Seg(vec![t!("theme_system"), t!("theme_light"), t!("theme_dark")]))],
                 footer: None,
             },
             Group {
@@ -172,6 +169,15 @@ pub(super) fn page(i: usize, edit: &Edit) -> Vec<Group> {
                         row_sub(Key::McpSetup, t!("settings_mcp_setup"), t!("settings_mcp_setup_sub"), Ctl::Button(t!("button_connect"))).disabled_if(!app::store(|s| s.d.settings.mcp)),
                     ],
                     footer: Some(t!("settings_mcp_footer").into()),
+                },
+                // What's still being tested: languages other than English, while they're read
+                // through. The Language row only shows with developer mode on.
+                Group {
+                    header: Some(t!("settings_group_developer")),
+                    rows: std::iter::once(row_sub(Key::Developer, t!("settings_developer"), t!("settings_developer_sub"), Ctl::Toggle))
+                        .chain(app::store(|s| s.d.settings.developer).then(|| row(Key::Language, t!("settings_language"), Ctl::Choice)))
+                        .collect(),
+                    footer: None,
                 },
                 // Destructive, so on its own at the end.
                 Group {

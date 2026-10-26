@@ -373,6 +373,9 @@
     <string name="result_not_installed">Non installée, configuration copiée</string>
     <string name="result_not_json">Contient des commentaires ou n'est pas du JSON, configuration copiée</string>
     <string name="settings_mcp_footer">Les assistants peuvent archiver des notes, jamais les supprimer.</string>
+    <string name="settings_group_developer">Développeur</string>
+    <string name="settings_developer">Mode développeur</string>
+    <string name="settings_developer_sub">Affiche ce qui est encore en test, comme les autres langues</string>
     <plurals name="result_copied">
         <item quantity="one">Copié</item>
         <item quantity="other">Copié</item>

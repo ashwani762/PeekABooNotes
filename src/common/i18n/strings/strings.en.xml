@@ -388,6 +388,9 @@
     <string name="result_not_installed">Not installed, setup copied</string>
     <string name="result_not_json">Has comments or isn't JSON, setup copied</string>
     <string name="settings_mcp_footer">Assistants can archive notes but never delete them.</string>
+    <string name="settings_group_developer">Developer</string>
+    <string name="settings_developer">Developer mode</string>
+    <string name="settings_developer_sub">Shows what is still being tested, such as other languages</string>
     <plurals name="result_copied">
         <item quantity="one">Copied</item>
         <item quantity="other">Copied</item>

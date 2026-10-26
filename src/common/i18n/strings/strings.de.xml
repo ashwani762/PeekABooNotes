@@ -373,6 +373,9 @@
     <string name="result_not_installed">Nicht installiert, Einrichtung kopiert</string>
     <string name="result_not_json">Enthält Kommentare oder ist kein JSON, Einrichtung kopiert</string>
     <string name="settings_mcp_footer">Assistenten können Notizen archivieren, aber nie löschen.</string>
+    <string name="settings_group_developer">Entwickler</string>
+    <string name="settings_developer">Entwicklermodus</string>
+    <string name="settings_developer_sub">Zeigt, was noch getestet wird, etwa andere Sprachen</string>
     <plurals name="result_copied">
         <item quantity="one">Kopiert</item>
         <item quantity="other">Kopiert</item>

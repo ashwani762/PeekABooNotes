@@ -478,7 +478,7 @@ pub fn run() -> i32 {
         // takes one of their ids, or it would show their versions as its own.
         let versioned = note::versions::max_id();
         store_mut(|s| s.d.next_id = s.d.next_id.max(versioned));
-        crate::common::i18n::init(&store(|s| s.d.settings.language.clone()));
+        crate::common::i18n::init(&store(|s| s.d.settings.ui_language().to_string()));
         log::info(&format!("language {}", crate::common::i18n::tag()));
         crate::win::crash::test_from_env();
         apply_motion();

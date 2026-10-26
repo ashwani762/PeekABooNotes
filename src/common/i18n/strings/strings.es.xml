@@ -373,6 +373,9 @@
     <string name="result_not_installed">No instalada, configuración copiada</string>
     <string name="result_not_json">Tiene comentarios o no es JSON, configuración copiada</string>
     <string name="settings_mcp_footer">Los asistentes pueden archivar notas, pero nunca eliminarlas.</string>
+    <string name="settings_group_developer">Desarrollador</string>
+    <string name="settings_developer">Modo de desarrollador</string>
+    <string name="settings_developer_sub">Muestra lo que aún se está probando, como otros idiomas</string>
     <plurals name="result_copied">
         <item quantity="one">Copiado</item>
         <item quantity="other">Copiado</item>

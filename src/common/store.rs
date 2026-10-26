@@ -284,6 +284,10 @@ pub struct Settings {
     /// AI assistants may use the notes through MCP (off until turned on).
     #[serde(default)]
     pub mcp: bool,
+    /// Developer mode: what's still being tested, such as languages other than English,
+    /// shows in Settings. Off, the interface is in English whatever `language` says.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub developer: bool,
     /// The shortcuts that work anywhere, where the user changed them: each one's name in
     /// `hotkey::ACTIONS` and its keys ("Win+Shift+N"), "" for one turned off. Empty, and
     /// left out of the file, while every shortcut has its default keys.
@@ -310,6 +314,13 @@ fn default_deck_max() -> u8 {
     8
 }
 
+impl Settings {
+    /// The interface language to use: the one chosen in developer mode, else English.
+    pub fn ui_language(&self) -> &str {
+        if self.developer { &self.language } else { "en" }
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -333,6 +344,7 @@ impl Default for Settings {
             import_dir: String::new(),
             keep_open: false,
             mcp: false,
+            developer: false,
             hotkeys: std::collections::BTreeMap::new(),
             extra: serde_json::Map::new(),
         }
@@ -1396,6 +1408,20 @@ mod tests {
         // And so after the next load.
         let d: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert!(d.stale_light_text().is_empty());
+    }
+
+    /// Other languages are behind developer mode: a German choice saved before shows in
+    /// English until it's turned on, and it's kept for then.
+    #[test]
+    fn english_unless_developer_mode() {
+        let d: Data = serde_json::from_str(r#"{"settings":{"language":"de"}}"#).unwrap();
+        assert!(!d.settings.developer && d.settings.ui_language() == "en");
+        assert!(!serde_json::to_string(&d).unwrap().contains("developer"), "left out while off");
+        let mut d = d;
+        d.settings.developer = true;
+        assert_eq!(d.settings.ui_language(), "de");
+        let d: Data = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert!(d.settings.developer);
     }
 
     #[test]

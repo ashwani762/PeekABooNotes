@@ -69,7 +69,7 @@ Turn it on in Settings and **ChatGPT, Claude, Gemini, Copilot, Cursor** and othe
 ## Made to feel at home
 
 - **Light and dark**, following Windows or your choice.
-- **Six languages**: English, German, Spanish, French, Hindi and Japanese (all but English in beta).
+- **In English.** German, Spanish, French, Hindi and Japanese are still being tested: turn on Developer mode in Settings › Data to try them.
 - **Fluid motion**: everything moves on springs, and Reduce Motion calms it down.
 
 <p align="center">
