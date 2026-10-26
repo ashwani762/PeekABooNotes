@@ -9,6 +9,7 @@ pub mod app;
 pub mod crash;
 pub mod editor;
 pub mod os;
+pub mod pipe;
 pub mod render;
 pub mod theme;
 pub mod ui;

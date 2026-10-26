@@ -16,18 +16,29 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-/// The app's pipe: one per Windows user (the app builds the same name).
-fn pipe_name() -> String {
-    format!(r"\\.\pipe\PeekABooNotes.mcp.{}", std::env::var("USERNAME").unwrap_or_default())
-}
+/// The app's pipe, its name and who serves it: the same code as the app's.
+#[path = "../win/pipe.rs"]
+mod pipe;
 
 struct Link {
     to: File,
     from: BufReader<File>,
 }
 
+/// What `open` says when the pipe's server isn't this user's PeekABoo Notes.
+const NOT_OURS: &str = "not this user's";
+
+/// The app's pipe, if its server runs as this user: the app can tell who's asking, but
+/// not act as them.
 fn open() -> io::Result<Link> {
-    let f = OpenOptions::new().read(true).write(true).open(pipe_name())?;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::SECURITY_IDENTIFICATION;
+    let name = pipe::pipe_name().ok_or_else(|| io::Error::other("couldn't tell who the user is"))?;
+    let f = OpenOptions::new().read(true).write(true).security_qos_flags(SECURITY_IDENTIFICATION).open(name)?;
+    if !pipe::served_by_me(f.as_raw_handle() as _) {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, NOT_OURS));
+    }
     Ok(Link { to: f.try_clone()?, from: BufReader::new(f) })
 }
 
@@ -40,6 +51,10 @@ fn connect(started: &mut bool) -> Result<Link, String> {
         let patience = if *started { Duration::from_secs(10) } else { Duration::from_millis(1500) };
         match open() {
             Ok(l) => return Ok(l),
+            // Someone else's program has the pipe: never talk to it.
+            Err(e) if e.raw_os_error().is_none() && e.kind() == io::ErrorKind::PermissionDenied => {
+                return Err("The pipe PeekABoo Notes uses is held by a program that isn't this user's PeekABoo Notes, so the bridge won't use it.".into());
+            }
             Err(e) => {
                 // 2: no such pipe (the app isn't running, or MCP is off); 231: all busy.
                 if e.raw_os_error() == Some(2) && !*started && !app_running() {

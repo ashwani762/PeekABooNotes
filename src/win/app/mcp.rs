@@ -17,12 +17,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree};
-use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
-use windows_sys::Win32::Security::{GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser};
-use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+use windows_sys::Win32::Foundation::{ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree};
+use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION};
 use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT};
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::*;
 use crate::common::mcp::{self, State, Status};
@@ -45,11 +44,6 @@ static CLIENTS_OPEN: Mutex<Vec<isize>> = Mutex::new(Vec::new());
 /// longer one is answered with an error, never held in memory whole.
 const MAX_LINE: usize = 4 << 20;
 
-/// The pipe's name: one per Windows user. (`peekaboo-mcp` builds the same name.)
-fn pipe_name() -> String {
-    format!(r"\\.\pipe\PeekABooNotes.mcp.{}", std::env::var("USERNAME").unwrap_or_default())
-}
-
 /// Settings > Data > "Allow assistants": off until the user turns it on.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static LISTENING: AtomicBool = AtomicBool::new(false);
@@ -68,9 +62,13 @@ pub fn set_enabled(on: bool) {
         listen();
         log::info("mcp: on");
     } else {
-        if LISTENING.load(Ordering::SeqCst) {
+        if LISTENING.load(Ordering::SeqCst)
+            && let Some(name) = crate::win::pipe::pipe_name()
+        {
+            use std::os::windows::fs::OpenOptionsExt;
             // The server waits for a connection: make one, so it sees it's off and stops.
-            let _ = std::fs::OpenOptions::new().read(true).write(true).open(pipe_name());
+            // As a client that can be identified but not acted as, whoever answers.
+            let _ = std::fs::OpenOptions::new().read(true).write(true).security_qos_flags(SECURITY_IDENTIFICATION).open(name);
         }
         // And the assistants connected now are let go.
         for &h in CLIENTS_OPEN.lock().unwrap_or_else(|e| e.into_inner()).iter() {
@@ -292,26 +290,35 @@ fn serve(main: isize) {
 }
 
 fn serve_while_on(main: isize) {
-    let name = wide(&pipe_name());
-    let sd = OwnerOnly::new();
+    // Named for the user's SID, and only for them (see `win::pipe`): without either, no
+    // pipe at all rather than one another user could reach.
+    let (Some(name), Some(sd)) = (crate::win::pipe::pipe_name(), OwnerOnly::new()) else {
+        log::warn("mcp: couldn't tell who the user is, so assistants can't connect");
+        return;
+    };
+    let name = wide(&name);
     let mut failures = 0;
+    // The first instance is made only if no one holds the name already (another user's
+    // program, waiting for assistants to talk to it instead); the rest follow it.
+    let mut first = true;
     loop {
-        let sa = SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.as_ref().map_or(std::ptr::null_mut(), |d| d.0), bInheritHandle: 0 };
+        let sa = SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: 0 };
         let h = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
-                PIPE_ACCESS_DUPLEX,
+                PIPE_ACCESS_DUPLEX | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 },
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,
                 0,
-                if sd.is_some() { &sa } else { std::ptr::null() },
+                &sa,
             )
         };
         if h == INVALID_HANDLE_VALUE {
-            // Taken for a moment (another program holding the name, a handle shortage):
-            // try again for a while rather than leave assistants off for the session.
+            // Taken (assistants from a moment ago still letting go, another program
+            // holding the name, a handle shortage): try again for a while rather than
+            // leave assistants off for the session.
             failures += 1;
             log::warn(&format!("mcp: couldn't open the pipe ({})", unsafe { GetLastError() }));
             if failures > 10 || !ENABLED.load(Ordering::SeqCst) {
@@ -321,6 +328,7 @@ fn serve_while_on(main: isize) {
             continue;
         }
         failures = 0;
+        first = false;
         let ok = unsafe { ConnectNamedPipe(h, std::ptr::null_mut()) } != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
         let file = unsafe { File::from_raw_handle(h as _) };
         if !ENABLED.load(Ordering::SeqCst) {
@@ -338,7 +346,7 @@ struct OwnerOnly(PSECURITY_DESCRIPTOR);
 
 impl OwnerOnly {
     fn new() -> Option<OwnerOnly> {
-        let sid = user_sid()?;
+        let sid = crate::win::pipe::user_sid()?;
         let sddl = wide(&format!("D:P(A;;GA;;;{sid})"));
         let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
         let ok = unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, std::ptr::null_mut()) } != 0;
@@ -349,32 +357,6 @@ impl OwnerOnly {
 impl Drop for OwnerOnly {
     fn drop(&mut self) {
         unsafe { LocalFree(self.0 as _) };
-    }
-}
-
-/// The running user's SID as text ("S-1-5-21-...").
-fn user_sid() -> Option<String> {
-    unsafe {
-        let mut token: HANDLE = std::ptr::null_mut();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
-            return None;
-        }
-        let mut buf = vec![0u8; 256];
-        let mut len = 0u32;
-        let got = GetTokenInformation(token, TokenUser, buf.as_mut_ptr() as _, buf.len() as u32, &mut len) != 0;
-        CloseHandle(token);
-        if !got {
-            return None;
-        }
-        let user = &*(buf.as_ptr() as *const TOKEN_USER);
-        let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
-        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 {
-            return None;
-        }
-        let n = (0..).take_while(|&i| *text.add(i) != 0).count();
-        let s = String::from_utf16_lossy(std::slice::from_raw_parts(text, n));
-        LocalFree(text as _);
-        Some(s)
     }
 }
 
