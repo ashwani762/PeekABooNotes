@@ -301,8 +301,11 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
     }
     let lf = font(d, 0, 10.5, FW_SEMIBOLD as i32);
     let reserve = if open { 16.0 * s } else { 0.0 };
-    // Quantise so a card growing/shrinking doesn't re-measure its label every frame.
-    let max_len = ((sh.h - 28.0 * s - reserve).max(10.0) as i32 / 8) * 8;
+    // Fitted to the card as it is once fanned out, so the label doesn't change as the card
+    // grows out of its capsule (the card's edge cuts it meanwhile). Quantised so a card
+    // being pulled out doesn't re-measure its label every frame.
+    let tall = lerp(g.tab_h, preview_height(d, i), cp.pull);
+    let max_len = ((tall - 28.0 * s - reserve).max(10.0) as i32 / 8) * 8;
     let (label, len, cell_h) = match &d.tabs[i].fitted {
         Some((m, l, len, ch)) if *m == max_len => (l.clone(), *len, *ch),
         _ => {

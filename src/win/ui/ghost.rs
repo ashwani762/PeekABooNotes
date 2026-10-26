@@ -215,10 +215,13 @@ fn render(g: &mut Ghost) {
         c.flush();
         match (g.kind, g.from_image.as_ref()) {
             (Kind::Open, Some(from)) => {
-                // From the deck card straight into the window, with no empty card between.
-                let k = clamp01((p - 0.05) / 0.55);
-                c.image(from, sh.x, sh.y, &sh, alpha * (1.0 - k));
-                c.image(img, sh.x, sh.y, &sh, alpha * k);
+                // From the deck card into the window: the card's words fade before the
+                // window's come, so the two never show at once, doubled a little apart
+                // (they're laid out differently), and the paper never stands empty for long.
+                let out = clamp01((p - 0.05) / 0.25);
+                let into = clamp01((p - 0.27) / 0.33);
+                c.image(from, sh.x, sh.y, &sh, alpha * (1.0 - out));
+                c.image(img, sh.x, sh.y, &sh, alpha * into);
             }
             _ => c.image(img, sh.x, sh.y, &sh, content),
         }

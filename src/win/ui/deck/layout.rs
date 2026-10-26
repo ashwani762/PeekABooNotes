@@ -326,9 +326,18 @@ pub(super) fn hit_test(d: &Deck, x: i32, y: i32) -> Hit {
     let g = &d.geo;
     let s = g.s;
     let (fx, fy) = (x as f32, y as f32);
-    // Topmost first: pulled-out cards, then tabs from the bottom of the stack up.
+    // Topmost first: pulled-out cards, then tabs from the bottom of the stack up. Along the
+    // edge, where the tabs are, a pulled-out card counts only across its own tab: past it,
+    // the pointer moving along the edge is on the next tab, under the card, which comes out
+    // in its place.
+    let along_edge = if g.left { fx < TAB_W * s } else { fx >= g.ew as f32 - TAB_W * s };
+    let first = |i: usize| {
+        let t = &d.tabs[i];
+        let own = fy >= t.y.value && fy < t.y.value + g.tab_h;
+        if along_edge && !own && t.pull.value > 0.0 { -1.0 } else { t.pull.value }
+    };
     let mut order: Vec<usize> = (0..d.tabs.len()).collect();
-    order.sort_by(|&a, &b| d.tabs[b].pull.value.partial_cmp(&d.tabs[a].pull.value).unwrap_or(std::cmp::Ordering::Equal).then(b.cmp(&a)));
+    order.sort_by(|&a, &b| first(b).partial_cmp(&first(a)).unwrap_or(std::cmp::Ordering::Equal).then(b.cmp(&a)));
     for i in order {
         if d.tabs[i].open || d.tabs[i].reveal.value < 0.3 {
             continue;
