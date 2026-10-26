@@ -37,14 +37,96 @@ pub fn free_name(dir: &Path, name: &str) -> String {
     (2..).map(|n| format!("{stem} ({n}){ext}")).find(|n| !dir.join(n).exists()).unwrap()
 }
 
-/// Copy `src` into the attachments folder; returns the name it got there.
-pub fn copy_in(src: &Path) -> std::io::Result<String> {
-    let dir = dir();
-    std::fs::create_dir_all(&dir)?;
+/// The largest file copied into a note: past this it's refused (a link to a disk image or a
+/// film shouldn't fill the notes' folder, or hold the app up while it copies).
+pub const MAX_FILE_BYTES: u64 = 100 << 20;
+
+/// Copy `src` into the attachments folder `dir`; returns the name it got there.
+fn copy_into(dir: &Path, src: &Path) -> std::io::Result<String> {
+    if std::fs::metadata(src)?.len() > MAX_FILE_BYTES {
+        return Err(std::io::Error::new(std::io::ErrorKind::FileTooLarge, "larger than a note takes"));
+    }
+    std::fs::create_dir_all(dir)?;
     let name = src.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
-    let name = free_name(&dir, &name);
+    let name = free_name(dir, &name);
     std::fs::copy(src, dir.join(&name))?;
     Ok(name)
+}
+
+/// The files copied in by one operation (a drop, an import, an assistant's note), so a file
+/// it names twice is copied once and both point at the one copy.
+#[derive(Default)]
+pub struct Copies(Vec<(PathBuf, String)>);
+
+impl Copies {
+    /// Copy `src` into the attachments folder, unless this operation copied it in already:
+    /// the name it got there.
+    pub fn copy_in(&mut self, src: &Path) -> std::io::Result<String> {
+        self.copy_into(&dir(), src)
+    }
+
+    fn copy_into(&mut self, dir: &Path, src: &Path) -> std::io::Result<String> {
+        let key = std::fs::canonicalize(src).unwrap_or_else(|_| src.to_path_buf());
+        if let Some((_, name)) = self.0.iter().find(|(p, _)| *p == key) {
+            return Ok(name.clone());
+        }
+        let name = copy_into(dir, src)?;
+        self.0.push((key, name.clone()));
+        Ok(name)
+    }
+}
+
+/// Whether the files at `a` and `b` hold the same bytes, read a piece at a time.
+pub fn same_content(a: &Path, b: &Path) -> bool {
+    use std::io::Read;
+    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else { return false };
+    if ma.len() != mb.len() {
+        return false;
+    }
+    let (Ok(mut fa), Ok(mut fb)) = (std::fs::File::open(a), std::fs::File::open(b)) else { return false };
+    let (mut ba, mut bb) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    loop {
+        let Ok(n) = fa.read(&mut ba) else { return false };
+        if n == 0 {
+            // Both at their ends (of the same length).
+            return fb.read(&mut bb[..1]).is_ok_and(|m| m == 0);
+        }
+        if fb.read_exact(&mut bb[..n]).is_err() || ba[..n] != bb[..n] {
+            return false;
+        }
+    }
+}
+
+/// The start-up sweep's files go into `attachments\.trash\<day>\` rather than away, and
+/// stay `TRASH_DAYS` there: a file another computer's notes still link (synced in, and
+/// not seen here yet) can still be brought back.
+pub const TRASH: &str = ".trash";
+pub const TRASH_DAYS: i64 = 30;
+
+/// Move file `name` in `dir` into the trash folder for `day` ("2026-10-26"), under a name
+/// not taken there.
+pub fn to_trash(dir: &Path, name: &str, day: &str) -> std::io::Result<()> {
+    let t = dir.join(TRASH).join(day);
+    std::fs::create_dir_all(&t)?;
+    let to = free_name(&t, name);
+    std::fs::rename(dir.join(name), t.join(to))
+}
+
+/// The trash's days (folders named "2026-10-26") more than `TRASH_DAYS` before `today`
+/// (days since 1970) go, with what's in them. Others (a day ahead of the clock, a folder
+/// by another name) stay. How many went.
+pub fn purge_trash(dir: &Path, today: i64) -> usize {
+    let Ok(days) = std::fs::read_dir(dir.join(TRASH)) else { return 0 };
+    let mut gone = 0;
+    for e in days.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let parts: Vec<i64> = name.split('-').filter_map(|p| p.parse().ok()).collect();
+        let [y, m, d] = parts[..] else { continue };
+        if today - crate::common::util::days_from_civil(y, m, d) > TRASH_DAYS && e.file_type().is_ok_and(|t| t.is_dir()) && std::fs::remove_dir_all(e.path()).is_ok() {
+            gone += 1;
+        }
+    }
+    gone
 }
 
 /// "attachment:Q3%20plan.pdf" for "Q3 plan.pdf": no spaces or quotes, which would end
@@ -342,6 +424,75 @@ mod tests {
         assert_eq!(local_file(&file_url(&dir.join("attachments").join("Q3 plan.txt")), Path::new("C:\\elsewhere")), Some(dir.join("attachments").join("Q3 plan.txt")));
         assert_eq!(local_file("https://example.com/a.txt", &dir), None);
         assert_eq!(local_file("attachments/missing.txt", &dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copies_are_capped_and_made_once() {
+        let dir = std::env::temp_dir().join(format!("peekaboo-attach-copies-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let into = dir.join("attachments");
+        std::fs::write(dir.join("src").join("chart.png"), "png").unwrap();
+        // Named twice by one note (by two spellings of its path): one copy.
+        let mut copies = Copies::default();
+        let a = copies.copy_into(&into, &dir.join("src").join("chart.png")).unwrap();
+        let b = copies.copy_into(&into, &dir.join("src").join("..").join("src").join("chart.png")).unwrap();
+        assert_eq!((a.as_str(), b.as_str()), ("chart.png", "chart.png"));
+        assert_eq!(std::fs::read_dir(&into).unwrap().count(), 1);
+        // A new operation copies it again, under a free name.
+        assert_eq!(Copies::default().copy_into(&into, &dir.join("src").join("chart.png")).unwrap(), "chart (2).png");
+        // Too big: refused before anything is read or made.
+        let big = dir.join("src").join("disk.img");
+        std::fs::File::create(&big).unwrap().set_len(MAX_FILE_BYTES + 1).unwrap();
+        assert_eq!(copy_into(&into, &big).unwrap_err().kind(), std::io::ErrorKind::FileTooLarge);
+        assert!(!into.join("disk.img").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_content_is_by_bytes() {
+        let dir = std::env::temp_dir().join(format!("peekaboo-attach-same-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let big: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
+        let mut other = big.clone();
+        other[150_000] ^= 1;
+        std::fs::write(dir.join("a"), &big).unwrap();
+        std::fs::write(dir.join("b"), &big).unwrap();
+        std::fs::write(dir.join("c"), &other).unwrap();
+        std::fs::write(dir.join("d"), &big[..1000]).unwrap();
+        assert!(same_content(&dir.join("a"), &dir.join("b")));
+        assert!(!same_content(&dir.join("a"), &dir.join("c")), "same size, different bytes");
+        assert!(!same_content(&dir.join("a"), &dir.join("d")));
+        assert!(!same_content(&dir.join("a"), &dir.join("missing")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_trash_keeps_a_month() {
+        let dir = std::env::temp_dir().join(format!("peekaboo-attach-trash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["a.png", "b.png"] {
+            std::fs::write(dir.join(f), f).unwrap();
+        }
+        to_trash(&dir, "a.png", "2026-09-01").unwrap();
+        std::fs::write(dir.join("a.png"), "again").unwrap();
+        to_trash(&dir, "a.png", "2026-09-01").unwrap();
+        to_trash(&dir, "b.png", "2026-10-20").unwrap();
+        assert!(!dir.join("a.png").exists() && !dir.join("b.png").exists());
+        let day = dir.join(TRASH).join("2026-09-01");
+        assert_eq!(std::fs::read_to_string(day.join("a.png")).unwrap(), "a.png");
+        assert_eq!(std::fs::read_to_string(day.join("a (2).png")).unwrap(), "again");
+        std::fs::create_dir_all(dir.join(TRASH).join("not a day")).unwrap();
+        let today = crate::common::util::days_from_civil(2026, 10, 26);
+        assert_eq!(purge_trash(&dir, today), 1);
+        assert!(!day.exists(), "past 30 days");
+        assert!(dir.join(TRASH).join("2026-10-20").join("b.png").exists());
+        assert!(dir.join(TRASH).join("not a day").exists());
+        // A clock gone back keeps a day "ahead" of it.
+        assert_eq!(purge_trash(&dir, crate::common::util::days_from_civil(2020, 1, 1)), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

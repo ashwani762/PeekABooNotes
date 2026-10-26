@@ -408,6 +408,13 @@ fn delete_attachments(gone: &[Note]) {
     if names.is_empty() {
         return;
     }
+    // Only these notes' own files, judged against all the notes there are: not when the
+    // notes are the backup's (or none, or not written this session), nor while notes set
+    // aside (unread, or another writer's) may come back linking them.
+    if !store(|s| s.whole()) || crate::common::store::others_kept(&data_dir()) {
+        log::info("attachments of deleted notes kept: the notes in use may not be all there are");
+        return;
+    }
     let Some(versions) = crate::win::ui::note::versions::markdown() else {
         log::warn("attachments kept: versions.json couldn't be read");
         return;
@@ -434,11 +441,13 @@ fn delete_attachments(gone: &[Note]) {
 /// At start: take out of the attachments folder the files no note links any more (left
 /// by a picture or file taken out of a note, or by notes deleted before files went with
 /// them). It errs on keeping a file: a note in the archive, one deleted with its Undo
-/// still showing, a saved version and what's on the clipboard all count as linking it;
-/// a file younger than a day, or than the notes' last save, stays; and nothing goes
-/// unless notes.json was read whole and versions.json can be read, or when it would take
-/// every file there. The notes' text is copied here, as it stands now; the folder is
-/// read and the files removed on a thread of its own, which ends when it's done.
+/// still showing, a saved version and what's on the clipboard (files copied in Explorer
+/// too) all count as linking it; a file younger than a day, or than the notes' last save,
+/// stays; and nothing goes unless notes.json was read whole (and is written this
+/// session), versions.json can be read and no notes set aside are beside it, or when it
+/// would take every file there. What goes is moved to `attachments\.trash\<day>\`, kept
+/// there 30 days (`attach::TRASH_DAYS`). The notes' text is copied here, as it stands now;
+/// the folder is read and the files moved on a thread of its own, which ends when it's done.
 pub(super) fn sweep_attachments() {
     use crate::common::attach;
     let dir = attach::dir();
@@ -447,14 +456,16 @@ pub(super) fn sweep_attachments() {
         return;
     }
     let Some((mut kept, path)) = store(|s| {
-        (s.read_whole && !s.d.notes.is_empty()).then(|| (s.d.notes.iter().flat_map(|n| [n.rtf.clone(), n.text.clone()]).collect::<Vec<String>>(), s.path.clone()))
+        (s.whole() && !s.d.notes.is_empty()).then(|| (s.d.notes.iter().flat_map(|n| [n.rtf.clone(), n.text.clone()]).collect::<Vec<String>>(), s.path.clone()))
     }) else {
         return;
     };
     kept.extend(ui(|u| u.pending.iter().flat_map(|(_, n)| [n.rtf.clone(), n.text.clone()]).collect::<Vec<_>>()));
-    // Cut out of a note in an earlier session, and not pasted back yet.
+    // Cut out of a note in an earlier session, and not pasted back yet; or copied in
+    // Explorer, as files, from the folder itself.
     kept.extend(crate::win::util::clipboard_rtf());
     kept.extend(crate::win::util::clipboard_text());
+    kept.extend(crate::win::util::clipboard_file_names().iter().map(|n| attach::url(n)));
     let spawned = std::thread::Builder::new().name("attachment sweep".into()).spawn(move || sweep_in(&dir, &path, kept));
     if spawned.is_err() {
         log::warn("attachments not swept: no thread for it");
@@ -466,11 +477,16 @@ pub(super) fn sweep_attachments() {
 fn sweep_in(dir: &std::path::Path, notes: &std::path::Path, mut kept: Vec<String>) {
     use crate::common::attach;
     use std::os::windows::fs::MetadataExt;
-    // Notes set aside unread at some start may come back, with the files they link.
+    let t = crate::os::local_now();
+    let gone = attach::purge_trash(dir, crate::common::util::local_day(&t));
+    if gone > 0 {
+        log::info(&format!("emptied {gone} days of swept attachments older than {} days", attach::TRASH_DAYS));
+    }
+    // Notes set aside unread at some start, or another writer's set aside before a save,
+    // may come back, with the files they link.
     let data = notes.parent().unwrap_or(dir);
-    let unread = std::fs::read_dir(data).map(|d| d.flatten().any(|e| e.file_name().to_string_lossy().starts_with("notes.unreadable-"))).unwrap_or(true);
-    if unread {
-        log::info("attachments not swept: an unreadable notes file is kept beside the notes");
+    if crate::common::store::others_kept(data) {
+        log::info("attachments not swept: notes set aside (unreadable, or another copy's) are kept beside the notes");
         return;
     }
     let Some(versions) = crate::win::ui::note::versions::markdown() else {
@@ -501,17 +517,18 @@ fn sweep_in(dir: &std::path::Path, notes: &std::path::Path, mut kept: Vec<String
     }
     let gone = attach::sweep(&old, in_folder, kept.iter().map(String::as_str));
     drop(kept);
+    let day = format!("{:04}-{:02}-{:02}", t.year, t.month, t.day);
     let (mut removed, mut failed) = (0, None);
     for name in &gone {
-        match std::fs::remove_file(dir.join(name)) {
+        match attach::to_trash(dir, name, &day) {
             Ok(()) => removed += 1,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => failed = Some(e.kind()),
         }
     }
     match failed {
-        Some(kind) => log::warn(&format!("swept {removed} attachments no note links; some couldn't be ({kind:?})")),
-        None if removed > 0 => log::info(&format!("swept {removed} attachments no note links")),
+        Some(kind) => log::warn(&format!("swept {removed} attachments no note links into the trash; some couldn't be ({kind:?})")),
+        None if removed > 0 => log::info(&format!("swept {removed} attachments no note links into the trash")),
         None => {}
     }
 }

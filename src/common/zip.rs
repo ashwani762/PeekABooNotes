@@ -26,8 +26,28 @@ const TABLE: [u32; 256] = {
     t
 };
 
+#[cfg(test)]
 fn crc32(data: &[u8]) -> u32 {
-    !data.iter().fold(!0u32, |c, &b| TABLE[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8))
+    !crc32_more(!0, data)
+}
+
+/// The running CRC (inverted, as `crc32` keeps it) carried over `data`.
+fn crc32_more(c: u32, data: &[u8]) -> u32 {
+    data.iter().fold(c, |c, &b| TABLE[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8))
+}
+
+/// The CRC of the file at `path`, read a piece at a time.
+fn crc32_of(path: &Path) -> io::Result<u32> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let (mut c, mut buf) = (!0u32, vec![0u8; 64 * 1024]);
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            return Ok(!c);
+        }
+        c = crc32_more(c, &buf[..n]);
+    }
 }
 
 /// MS-DOS time and date (two-second steps): local wall-clock time, as zip tools show it.
@@ -90,8 +110,10 @@ fn write_zip(files: &[(String, PathBuf)], count: u16, out: &Path) -> io::Result<
     let mut w = io::BufWriter::new(std::fs::File::create(out)?);
     let (mut central, mut offset) = (Vec::new(), 0u64);
     for (name, path) in files {
-        let data = std::fs::read(path)?;
-        let (n, crc, size) = (name.as_bytes(), crc32(&data), fits(data.len() as u64, "a file")?);
+        // Each file goes through a piece at a time (once for its CRC, once into the zip),
+        // and one too big for a zip is refused before it's read.
+        let size = fits(std::fs::metadata(path)?.len(), "a file")?;
+        let (n, crc) = (name.as_bytes(), crc32_of(path)?);
         let at = fits(offset, "the zip")?;
         if n.len() > u16::MAX as usize {
             return Err(io::Error::other("a file name is longer than a zip holds"));
@@ -112,14 +134,17 @@ fn write_zip(files: &[(String, PathBuf)], count: u16, out: &Path) -> io::Result<
         common(&mut local);
         local.extend(n);
         w.write_all(&local)?;
-        w.write_all(&data)?;
+        // Changed since it was measured: the entry would lie about it.
+        if io::copy(&mut std::fs::File::open(path)?, &mut w)? != size as u64 {
+            return Err(io::Error::other("a file changed while it was zipped"));
+        }
         central.extend(0x0201_4b50u32.to_le_bytes());
         central.extend(20u16.to_le_bytes());
         common(&mut central);
         central.extend([0u8; 10]); // comment length, disk, internal and external attributes
         central.extend(at.to_le_bytes());
         central.extend(n);
-        offset += (local.len() + data.len()) as u64;
+        offset += local.len() as u64 + size as u64;
     }
     let (directory, directory_at) = (fits(central.len() as u64, "the zip's directory")?, fits(offset, "the zip")?);
     w.write_all(&central)?;
@@ -154,6 +179,11 @@ mod tests {
         let z = std::fs::read(&out).unwrap();
         let u16_at = |i: usize| u16::from_le_bytes([z[i], z[i + 1]]);
         let u32_at = |i: usize| u32::from_le_bytes([z[i], z[i + 1], z[i + 2], z[i + 3]]);
+        assert_eq!(crc32_of(&src.join("attachments").join("a.txt")).unwrap(), crc32(b"hello"));
+        // The second entry's data follows its header whole.
+        let second_local = 30 + u16_at(26) as usize + u32_at(18) as usize;
+        let data_at = second_local + 30 + u16_at(second_local + 26) as usize;
+        assert_eq!(&z[data_at..data_at + 5], b"hello");
         // The first entry, in name order, and the directory at the end.
         assert_eq!(u32_at(0), 0x0403_4b50);
         assert_eq!(&z[30..30 + u16_at(26) as usize], "Café.md".as_bytes());
