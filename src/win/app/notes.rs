@@ -323,10 +323,11 @@ pub fn delete(ids: Vec<u64>) {
 }
 
 /// Delete every note, archived ones too, once the user has said yes. The usual Undo toast
-/// follows, so even a confirmed slip can be taken back.
-pub fn delete_all(owner: HWND) {
+/// follows, so even a confirmed slip can be taken back. The question drops from `at`
+/// (under the button, when the keyboard pressed it), else at the pointer.
+pub fn delete_all(owner: HWND, at: Option<POINT>) {
     let ids: Vec<u64> = store(|s| s.d.notes.iter().map(|n| n.id).collect());
-    if !ids.is_empty() && confirm_delete_all(owner, ids.len()) {
+    if !ids.is_empty() && confirm_delete_all(owner, ids.len(), at) {
         delete(ids);
     }
 }
@@ -334,12 +335,12 @@ pub fn delete_all(owner: HWND) {
 /// "Delete All 25 Notes" or Cancel, in a menu at the pointer (on the button that asked):
 /// themed like the rest of the app, and nothing is chosen until one is clicked, so Enter
 /// or Esc never deletes anything.
-fn confirm_delete_all(owner: HWND, n: usize) -> bool {
+fn confirm_delete_all(owner: HWND, n: usize, at: Option<POINT>) -> bool {
     use crate::win::ui::menu::{Item, action, danger};
     const ID_DELETE: u32 = 1;
     // Cancel first, under the pointer: a click that lands a little low still deletes nothing.
     let items = vec![action(2, t!("button_cancel"), "", ""), Item::Separator, danger(ID_DELETE, &tn!("menu_delete_all_notes", n), "", IC_DELETE)];
-    let p = super::menus::cursor();
+    let p = at.unwrap_or_else(super::menus::cursor);
     popup(items, p.x, p.y, owner) == ID_DELETE
 }
 

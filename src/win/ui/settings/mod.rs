@@ -555,7 +555,7 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         Key::Folder => app::open_notes_folder(),
         Key::Import => show_result(hwnd, k, app::import(hwnd), "result_imported"),
         Key::Export => show_result(hwnd, k, app::export_all(hwnd), "result_exported"),
-        Key::DeleteAll => app::delete_all(hwnd),
+        Key::DeleteAll => app::delete_all(hwnd, with(|w| menu_anchor(w, k)).flatten()),
         Key::Mcp => {
             app::update_settings(|s| s.mcp = v == 1);
             app::set_mcp_enabled(v == 1);
