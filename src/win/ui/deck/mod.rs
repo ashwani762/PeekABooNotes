@@ -902,6 +902,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let hit = hit_test(d, x, y);
             if hit != d.hover {
                 d.hover = hit;
+                // While the deck has the keys, the ring goes where the pointer lights, so
+                // Enter opens what's shown.
+                let stop = match hit {
+                    Hit::Tab(i) => Some(Stop::Card(d.tabs[i].id)),
+                    Hit::More => Some(Stop::More),
+                    Hit::Plus => Some(Stop::Plus),
+                    Hit::None => None,
+                };
+                if let (Some(k), Some(stop)) = (d.kbd.as_mut(), stop) {
+                    k.at = Some(stop);
+                }
                 unsafe { KillTimer(hwnd, T_PREVIEW) };
                 match hit {
                     Hit::Tab(i) if d.previewing => begin_preview(d, i), // scrub between cards instantly
