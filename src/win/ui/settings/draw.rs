@@ -199,9 +199,17 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
                 let x = lx + f.label.measure(&label).0 + (16.0 * s) as i32;
                 let room = lx + lw - x;
                 if room > (24.0 * s) as i32 {
-                    let fitted = f.sub.fit(hint, room);
-                    let hw = f.sub.measure(&fitted).0;
-                    c.line_ct(&fitted, &f.sub, lx + lw - hw, mid + f.sub.cap / 2, hw + 2, None, p.sub, DT_LEFT);
+                    let (hw, line) = f.sub.measure(hint);
+                    if hw <= room {
+                        c.line_ct(hint, &f.sub, lx + lw - hw, mid + f.sub.cap / 2, hw + 2, None, p.sub, DT_LEFT);
+                    } else {
+                        // Too long for one line ("Hold two of Ctrl, Alt, Shift and Win with
+                        // the key" was cut short): two, inside the row's height, which never
+                        // changes; past those, cut short.
+                        let h = f.sub.wrapped_height(hint, room).min(2 * line).min(r.bottom - r.top);
+                        let box_ = rect(lx + lw - room, mid - h / 2, room, h);
+                        c.text_ct(hint, &f.sub, box_, Some(box_), p.sub, DT_RIGHT | DT_WORDBREAK | DT_END_ELLIPSIS);
+                    }
                 }
             }
         }
