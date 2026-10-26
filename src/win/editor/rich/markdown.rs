@@ -196,13 +196,19 @@ fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: 
     } else {
         visible(t, body_start, end)
     };
-    // Plain text that only looks like a list or heading ("- not a list", typed and
-    // reverted with Backspace) is escaped, so it comes back as text; so is a list item's
-    // text that would read as a quote under it (`- \> text`), or a bullet's that would read
-    // as a checkbox (`- \[ ] text`).
-    let looks_plain = prefix.is_empty() && !title && crate::common::store::looks_like_marker(&visible(t, body_start, end));
+    // Plain text that only looks like a list, heading or quote ("- not a list", typed and
+    // reverted with Backspace, "  - indented", ">>> print") is escaped, so it comes back as
+    // text, past any spaces it starts with; so is a table's first row that only looks like
+    // one (`\| a | b |` over `| --- |`), a list item's text that would read as a quote under
+    // it (`- \> text`), and a bullet's that would read as a checkbox (`- \[ ] text`).
+    let looks_plain = prefix.is_empty() && !title && {
+        let v = visible(t, body_start, end);
+        crate::common::store::needs_escape(&v) || (v.trim_start().starts_with('|') && t.get(end) == Some(&CR) && separator(&visible(t, end + 1, para_end(t, end as i32 + 1) as usize)).is_some())
+    };
     let looks_item = inline && num != 0 && !task && (body.starts_with('>') || (is_bullet(num) && reads_as_box(&body)));
-    if looks_plain || looks_item {
+    if looks_plain {
+        body.insert(body.len() - body.trim_start().len(), '\\');
+    } else if looks_item {
         body.insert(0, '\\');
     }
     match align {
@@ -719,8 +725,13 @@ fn parse_line(raw: &str) -> Line {
     // Two spaces (or a tab) per nesting level, as `to_markdown` writes them.
     let indent: usize = raw[..raw.len() - l.len()].chars().map(|c| if c == '\t' { 2 } else { 1 }).sum();
     let hashes = l.chars().take_while(|&c| c == '#').count();
-    let (k, rest) = if let Some(r) = crate::common::store::unescaped(l) {
-        (Kind::Plain, r)
+    // Text written escaped, with the spaces before it (`  \- not a list`).
+    let escaped = crate::common::store::unescaped(l).map(|r| format!("{}{r}", &raw[..raw.len() - l.len()]));
+    let (k, rest) = if let Some(r) = &escaped {
+        (Kind::Plain, r.as_str())
+    } else if ["-", "*", "•"].contains(&l) {
+        // An empty item (its marker's space taken off with the line's end).
+        (Kind::Bullet, "")
     } else if let Some(r) = task_rest(l, false) {
         (Kind::Task(false), r)
     } else if let Some(r) = task_rest(l, true) {
@@ -731,7 +742,7 @@ fn parse_line(raw: &str) -> Line {
         (Kind::Bullet, r)
     } else {
         let d = l.chars().take_while(|c| c.is_ascii_digit()).count();
-        match l[d..].strip_prefix(". ") {
+        match l[d..].strip_prefix(". ").or((&l[d..] == ".").then_some("")) {
             Some(r) if d > 0 => (Kind::Number(l[..d].parse().unwrap_or(1)), r),
             _ => (Kind::Plain, raw),
         }
@@ -1409,6 +1420,59 @@ mod tests {
         assert_eq!(typed_cycle("T\r__init__"), "# T\n\\_\\_init\\_\\_");
         // A `<br>` typed in a table cell stays text there.
         cycle("# T\n| a \\<br> b | c<br>d |\n| --- | --- |", "# T\n| a \\<br> b | c<br>d |\n| --- | --- |");
+    }
+
+    /// Plain lines that start as Markdown's quotes, lists or tables would (after spaces too,
+    /// or after a backslash that's text) stay plain lines with that text.
+    #[test]
+    fn plain_lines_that_look_like_markdown() {
+        for text in [
+            "T\r>>> print(1)",
+            "T\r>.< sigh",
+            "T\r>",
+            "T\r  - indented dash",
+            "T\r   1. indented number",
+            "T\r\t* tabbed star",
+            "T\r| a | b |\r| --- | --- |",
+            "T\r| a |\r| --- |\r| b |",
+            "T\r| not a table |\rtext",
+            "T\r\\> backslash first",
+            "T\r\\- backslash dash",
+            "T\r\\\\- two backslashes",
+            "T\r  \\- spaces and a backslash",
+            "T\r\\| backslash pipe",
+            "T\r-",
+            "T\r2.",
+            "T\r[ ]",
+        ] {
+            typed_cycle(text);
+        }
+        assert_eq!(typed_cycle("T\r  - x\r| a |\r| --- |"), "# T\n  \\- x\n\\| a |\n| --- |");
+        // In a quote too.
+        let md = "# T\n> \\>>> py\n>   \\- x\n> \\| a |\n> | --- |";
+        cycle(md, md);
+    }
+
+    /// An empty list item comes back as one, not as a stray marker.
+    #[test]
+    fn empty_items_stay_items() {
+        for (md, want) in [
+            ("# T\n- a\n- \n- b", "# T\n- a\n- \n- b"),
+            ("# T\n1. a\n2. \n3. b", "# T\n1. a\n2. \n3. b"),
+            ("# T\n- a\n  - \n- b", "# T\n- a\n  - \n- b"),
+            ("# T\n> - a\n> - \n> - b", "# T\n> - a\n> -\n> - b"),
+            ("# T\n- a\n- ", "# T\n- a\n-"),
+            ("# T\n1. a\n2.", "# T\n1. a\n2."),
+        ] {
+            cycle(md, want);
+        }
+        let h = editor();
+        load_markdown(h, "T\n- a\n-\n- b");
+        let t = text(h);
+        set_sel(h, 4, 4);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        assert_eq!((String::from_utf16_lossy(&t).as_str(), pf.numbering), ("T\ra\r\rb", PFN_BULLET));
     }
 
     /// Text after a list goes out with the blank line Markdown needs there, and comes back

@@ -872,14 +872,22 @@ pub const MAX_NOTE_CHARS: usize = 100_000;
 
 /// Whether `s` starts the way a list item, checklist item, heading, quote or code fence is
 /// written in Markdown, so that plain text starting so has to be written escaped ("\- not
-/// a list").
+/// a list"). An empty item's marker alone ("-", "2.") is one, and so is any `>`
+/// (">>> print", which import reads as quotes).
 pub fn looks_like_marker(s: &str) -> bool {
     let hashes = s.chars().take_while(|&c| c == '#').count();
     let digits = s.chars().take_while(|c| c.is_ascii_digit()).count();
-    ["- ", "* ", "+ ", "• ", "[ ] ", "[x] ", "[X] ", "> ", "```"].iter().any(|m| s.starts_with(m))
-        || s == ">"
+    ["- ", "* ", "+ ", "• ", "[ ] ", "[x] ", "[X] ", ">", "```"].iter().any(|m| s.starts_with(m))
+        || ["-", "*", "+", "•", "[ ]", "[x]", "[X]"].contains(&s)
         || ((1..=6).contains(&hashes) && s[hashes..].starts_with(' '))
-        || (digits > 0 && s[digits..].starts_with(". "))
+        || (digits > 0 && (s[digits..].starts_with(". ") || &s[digits..] == "."))
+}
+
+/// Whether a plain line `s` has to be written escaped to come back as the text it is: it
+/// starts as a marker would, after any spaces ("  - not a list"), or as an escaped line
+/// does ("\- " typed out).
+pub fn needs_escape(s: &str) -> bool {
+    looks_like_marker(s.trim_start()) || unescaped(s).is_some()
 }
 
 /// A code block's opening or closing line.
@@ -982,7 +990,7 @@ pub fn hard_breaks(md: &str) -> String {
 /// Whether `l` is a list or checklist item, as `hard_breaks` tells one.
 pub fn list_line(l: &str) -> bool {
     let t = l.trim_start();
-    looks_like_marker(t) && !t.starts_with('#') && quoted(t).is_none() && !t.starts_with("```")
+    looks_like_marker(t) && !t.starts_with('#') && !t.starts_with('>') && !t.starts_with("```")
 }
 
 /// Whether `l` is a line of plain text, as `hard_breaks` tells one: not empty, a list item,
@@ -1001,6 +1009,9 @@ fn breaks(lines: &[&str]) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
     // The backticks of the code block the lines are in.
     let mut code: Option<usize> = None;
+    // Whether the line is a table's row: under a header and its separator. A line that only
+    // looks like one is text.
+    let mut table = false;
     let mut i = 0;
     while i < lines.len() {
         let l = lines[i];
@@ -1016,9 +1027,11 @@ fn breaks(lines: &[&str]) -> Vec<String> {
         if let Some((ticks, _)) = fence(l) {
             out.push(l.to_string());
             code = Some(ticks);
+            table = false;
             i += 1;
             continue;
         }
+        table = row(l) && (table || table_starts(lines[i..].iter().copied()));
         // A quote's lines (as far in as its first) are taken together, broken as what they
         // hold, and put back in the quote.
         let (end, mut piece) = if quote(l) {
@@ -1037,7 +1050,7 @@ fn breaks(lines: &[&str]) -> Vec<String> {
                 if let Some(p) = piece.last_mut() {
                     p.push_str("  ");
                 }
-            } else if ((item(last) || quote(last) || row(last)) && plain(next)) || (plain(last) && table_starts(lines[end..].iter().copied())) {
+            } else if ((item(last) || quote(last) || table) && plain(next)) || (plain(last) && table_starts(lines[end..].iter().copied())) {
                 piece.push(String::new());
             }
         }
@@ -1047,9 +1060,10 @@ fn breaks(lines: &[&str]) -> Vec<String> {
     out
 }
 
-/// A line written escaped because its text only looks like a marker: that text.
+/// A line written escaped because its text only looks like a marker (or a table's first
+/// row, `\| a | b |`): that text, with any spaces it starts with.
 pub fn unescaped(line: &str) -> Option<&str> {
-    line.trim_start().strip_prefix('\\').filter(|r| looks_like_marker(r))
+    line.trim_start().strip_prefix('\\').filter(|r| needs_escape(r) || r.trim_start().starts_with('|'))
 }
 
 /// A picture or file on a line of its own, as a note's light text has it
@@ -1221,7 +1235,7 @@ pub fn pretty_line(l: &str) -> String {
     let pretty = if let Some(r) = unescaped(t) {
         // Text that only looks like a quote or a fence stays escaped, or the preview
         // would draw it as one (`ui::draw_body` shows it unescaped).
-        if quoted(r).is_some() || r.starts_with("```") { t.to_string() } else { r.to_string() }
+        if quoted(r).is_some() || r.starts_with("```") || r.trim_start().starts_with('|') { t.to_string() } else { r.to_string() }
     } else if let Some(r) = t.strip_prefix("[ ] ") {
         format!("○  {r}")
     } else if let Some(r) = t.strip_prefix("[x] ") {
@@ -1426,7 +1440,7 @@ mod tests {
         assert_eq!(table_align("| --- | :---: | ---: |"), Some(vec![Align::Left, Align::Center, Align::Right]));
         assert_eq!(table_align("| a | --- |"), None);
         assert_eq!(table_cells("| a \\| b | c"), Some(vec![" a \\| b ", " c"]));
-        assert!(looks_like_marker("> a") && looks_like_marker("```js") && !looks_like_marker(">a"));
+        assert!(looks_like_marker("> a") && looks_like_marker("```js") && looks_like_marker(">a"));
     }
 
     #[test]
