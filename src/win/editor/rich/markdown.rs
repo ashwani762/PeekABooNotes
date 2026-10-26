@@ -274,7 +274,9 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
                 i = name;
             }
             code.extend_from_slice(&t[i..b]);
-            let lines: Vec<String> = code.split(|&c| c == CR).map(|l| unmark_str(l).replace('\u{B}', "\n")).collect();
+            // An empty block is its two fences: in the editor it's one empty line, as a block
+            // with nothing in it is, and both come in as that.
+            let lines: Vec<String> = if code.is_empty() { Vec::new() } else { code.split(|&c| c == CR).map(|l| unmark_str(l).replace('\u{B}', "\n")).collect() };
             // A fence longer than any run of backticks starting a line of the code, so none
             // of them ends it early. (The light text keeps to three, as previews read it.)
             let most = lines.iter().flat_map(|l| l.split('\n')).map(|l| l.trim_start().bytes().take_while(|&c| c == b'`').count()).max().unwrap_or(0);
@@ -1346,7 +1348,7 @@ mod tests {
         for md in [
             "# T\n```rust\nfn main() {}\n```",
             "# T\n```\nplain\n```",
-            "# T\n```c++\n\n```",
+            "# T\n```c++\n```",
             "# T\n```md\n\u{2764}\u{FE0F} love\n```",
             // A fence that can hold one.
             "# T\n````md\n```\ninner\n```\n````",
@@ -1372,6 +1374,52 @@ mod tests {
         set_sel(h, start as i32, start as i32);
         replace_sel(h, "y");
         assert_eq!(to_markdown(h, true), "# T\n```js\nyx\n```");
+    }
+
+    /// An empty code block goes out as its two fences, whether it came in so or with an
+    /// empty line between them: in the editor both are one empty line, and a round trip
+    /// leaves it empty. With a language, in a quote, and in the light text alike.
+    #[test]
+    fn empty_code_blocks_stay_empty() {
+        for (md, want) in [
+            ("T\n```js\n```", "# T\n```js\n```"),
+            ("T\n```js\n\n```", "# T\n```js\n```"),
+            ("T\n```\n\n```\nafter", "# T\n```\n```\nafter"),
+            ("T\n> ```rust\n>\n> ```\n> after", "# T\n> ```rust\n> ```\n> after"),
+            ("T\n> ```rust\n> ```", "# T\n> ```rust\n> ```"),
+            ("T\n- item\n  > ```\n  >\n  > ```", "# T\n- item\n  > ```\n  > ```"),
+            // Two empty lines are two.
+            ("T\n```sh\n\n\n```", "# T\n```sh\n\n\n```"),
+        ] {
+            cycle(md, want);
+        }
+        // Both ways in are the same note, its language kept hidden in it.
+        let (a, b) = (editor(), editor());
+        load_markdown(a, "T\n```js\n```\nafter");
+        load_markdown(b, "T\n```js\n\n```\nafter");
+        assert_eq!(text(a), text(b));
+        assert_eq!(get_rtf(a), get_rtf(b));
+        let t = text(a);
+        let (_, _, ca, cb) = cell_at(a, &t, find(&t, "js")).unwrap();
+        assert_eq!(code_tag(a, &t, ca, cb).map(|(s, e)| String::from_utf16_lossy(&t[s..e])), Some("js".into()));
+        assert_eq!(past_tag(a, &t, ca, cb), cb, "nothing past the language");
+        // The light text has the fences alone, without the language.
+        assert_eq!(to_markdown(a, false), "T\n```\n```\nafter");
+        let h = editor();
+        load_markdown(h, "T\n> ```js\n>\n> ```");
+        assert_eq!(to_markdown(h, false), "T\n> ```\n> ```");
+        // Typed into and emptied again, it's empty again.
+        let h = editor();
+        load_markdown(h, "T\n```js\n```");
+        let t = text(h);
+        let (_, _, ca, cb) = cell_at(h, &t, find(&t, "js")).unwrap();
+        let at = past_tag(h, &t, ca, cb) as i32;
+        set_sel(h, at, at);
+        replace_sel(h, "x");
+        assert_eq!(to_markdown(h, true), "# T\n```js\nx\n```");
+        set_sel(h, at, at + 1);
+        replace_sel(h, "");
+        assert_eq!(to_markdown(h, true), "# T\n```js\n```");
     }
 
     /// Empty lines next to blocks come back as many as they were, from the editor and

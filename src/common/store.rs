@@ -1405,6 +1405,7 @@ mod tests {
         assert_eq!(title_of("| Name | Qty | Note |\n| --- | :---: | ---: |\n| Tea | 2 | green |"), "Name \u{b7} Qty \u{b7} Note");
         assert_eq!(title_of("|  |  |\n| - | - |\n| Tea | 2<br>cups |"), "Tea \u{b7} 2 cups");
         assert_eq!(title_of("```\n\n```\nReal title"), "Real title");
+        assert_eq!(title_of("```\n```\nReal title"), "Real title");
         assert_eq!(title_of("| not | a table\nafter"), "| not | a table");
         assert_eq!(title_of("\\> not a quote"), "> not a quote");
     }
