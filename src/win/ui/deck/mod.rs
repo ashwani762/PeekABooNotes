@@ -41,6 +41,8 @@ mod layout;
 mod draw;
 mod keys;
 mod fullscreen;
+#[cfg(test)]
+mod probe;
 use layout::*;
 use draw::*;
 use keys::{Move, Stop};
@@ -96,6 +98,8 @@ struct Tab {
     pull: Spring, // 0 = tucked, 1 = pulled out (preview)
     /// Cached spine label layout: (max length, fitted text, text length, cell height).
     fitted: Option<(i32, String, i32, i32)>,
+    /// The spine label drawn (see `draw::label_sprite`), let go with `fitted`.
+    sprites: Vec<Sprite>,
     /// The preview body's laid-out height at the current scale and typography, measured
     /// the first time the card is pulled out (see `begin_preview`).
     body_h: Option<f32>,
@@ -119,9 +123,16 @@ impl Tab {
             press: Spring::unit(1.0, motion::SNAPPY),
             pull: Spring::unit(0.0, motion::DEFAULT),
             fitted: None,
+            sprites: Vec::new(),
             body_h: None,
             slot: 0,
         }
+    }
+
+    /// The label's text, size or font changed: measure and draw it again.
+    fn relabel(&mut self) {
+        self.fitted = None;
+        self.sprites.clear();
     }
 
     fn springs(&mut self) -> [&mut Spring; 6] {
@@ -209,8 +220,8 @@ struct Deck {
     fonts: HashMap<(u8, i32, i32, u8), Font>,
     font_scale: f32,
     canvas: Option<Canvas>,
-    /// The hovered tab whose spine label is too long scrolls: (note, since).
-    marquee: Option<(u64, std::time::Instant)>,
+    /// The hovered tab whose spine label is too long scrolls.
+    marquee: Option<Marquee>,
     /// A label scrolled in the last frame, so the frame clock keeps running.
     marquee_live: bool,
     /// The deck has the keys (Ctrl+Alt+K) until Esc, or until they go elsewhere.
@@ -234,9 +245,20 @@ thread_local! {
     static PASS_TO: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
 }
 
-/// Let the label fonts go (with no window open): each keeps DirectWrite state alive.
+/// Let the label fonts go (with no window open): each keeps DirectWrite state alive. The
+/// labels drawn go too.
 pub fn trim() {
-    with(|d| d.fonts.clear());
+    with(|d| {
+        d.fonts.clear();
+        for t in d.tabs.iter_mut() {
+            t.sprites = Vec::new();
+        }
+    });
+}
+
+/// Whether the deck is folded and still: its fonts aren't wanted for now.
+pub fn resting() -> bool {
+    with(|d| !d.open && !d.wide).unwrap_or(true)
 }
 
 fn with<R>(f: impl FnOnce(&mut Deck) -> R) -> Option<R> {
@@ -366,7 +388,7 @@ pub fn note_edited(id: u64) {
         }
         let label = title.to_uppercase();
         if label != t.label {
-            t.fitted = None;
+            t.relabel();
         }
         t.label = label;
         t.title = title;
@@ -381,16 +403,40 @@ pub fn note_edited(id: u64) {
 }
 
 pub fn frame(dt: f32) -> bool {
-    with(|d| {
-        let moving = step(d, dt);
-        if !d.open && !moving && d.wide {
-            d.wide = false; // fully folded: shrink back to the small pill window
+    let (more, folded) = with(|d| {
+        let (moving, folded, draw) = advance(d, dt);
+        if draw {
+            render(d);
         }
-        d.marquee_live = false;
-        render(d);
-        moving || d.marquee_live
+        (moving || d.marquee_live, folded)
     })
-    .unwrap_or(false)
+    .unwrap_or((false, false));
+    if folded {
+        // What the cards' text took (Direct2D, fonts, layouts) goes back to Windows once
+        // the deck has rested folded for a moment, as it does when a window closes.
+        app::schedule_trim();
+    }
+    more
+}
+
+/// One frame's motion: (still moving, just folded, anything to draw).
+fn advance(d: &mut Deck, dt: f32) -> (bool, bool, bool) {
+    let moving = step(d, dt);
+    let folded = !d.open && !moving && d.wide;
+    if folded {
+        d.wide = false; // fully folded: shrink back to the small pill window
+    }
+    // Nothing moves but a scrolling label, and it hasn't come a pixel further: the frame
+    // would be the last one again (it moves 34 px a second, and rests at its ends).
+    if !moving
+        && let Some(m) = d.marquee.as_ref()
+        && let (at, true) = m.now(d.geo.s)
+        && at == m.drawn
+    {
+        return (false, folded, false);
+    }
+    d.marquee_live = false;
+    (moving, folded, true)
 }
 
 fn update_visibility(d: &mut Deck) {

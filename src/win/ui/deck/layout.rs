@@ -8,6 +8,11 @@ use super::*;
 pub(super) fn compute_geo(n_items: usize) -> Geo {
     let (left, pos, max_tabs) = app::store(|s| (s.d.settings.edge_left, s.d.settings.deck_pos, s.d.settings.deck_max.clamp(3, 16) as usize));
     let (work, s) = monitor_geo();
+    geo_for(n_items, left, pos, max_tabs, work, s)
+}
+
+/// The deck's geometry for `n_items` cards on the edge of `work` at scale `s`.
+pub(super) fn geo_for(n_items: usize, left: bool, pos: f32, max_tabs: usize, work: RECT, s: f32) -> Geo {
     let wh = (work.bottom - work.top) as f32;
     let mut g = Geo { s, left, work, ..Default::default() };
     let gap = -6.0 * s; // shingled: each card tucks slightly under the next
@@ -79,7 +84,7 @@ pub(super) fn sync(d: &mut Deck) {
         }
         let label = title.to_uppercase();
         if label != t.label {
-            t.fitted = None;
+            t.relabel();
         }
         t.label = label;
         t.title = title;
@@ -121,7 +126,7 @@ pub(super) fn sync(d: &mut Deck) {
         d.fonts.clear();
         d.font_scale = g.s;
         for t in d.tabs.iter_mut() {
-            t.fitted = None;
+            t.relabel();
         }
     }
     // Text, scale or typography may have changed: measure again when next pulled out,

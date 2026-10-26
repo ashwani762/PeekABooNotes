@@ -661,6 +661,93 @@ impl Canvas {
 }
 
 impl Canvas {
+    /// `img` over the canvas at `alpha`, turned `angle` radians (clockwise) about its point
+    /// `from`, which lands at `to`; nothing outside `clip`. Turned, it's sampled between
+    /// pixels (bilinear); unturned, it goes on whole pixels as it is, so text stays crisp.
+    /// For text drawn once and moved about (a card's label as the card moves and leans):
+    /// a few thousand pixels, where drawing the text again costs a Direct2D pass.
+    #[allow(clippy::too_many_arguments)]
+    pub fn over_turned(&mut self, img: &Image, from: (f32, f32), to: (f32, f32), angle: f32, clip: RECT, alpha: f32) {
+        if alpha <= 0.002 || img.w <= 0 || img.h <= 0 {
+            return;
+        }
+        unsafe { GdiFlush() };
+        let k = (alpha.min(1.0) * 255.0).round() as u32;
+        let (cw, chh) = (self.w, self.h);
+        let (iw, ih) = (img.w, img.h);
+        let put = |px: &mut [u32], i: usize, s: u32| {
+            let s = if k < 255 {
+                let f = |sh: u32| ((((s >> sh) & 0xFF) * k + 127) / 255) << sh;
+                f(24) | f(16) | f(8) | f(0)
+            } else {
+                s
+            };
+            let sa = s >> 24;
+            if sa == 0 {
+                return;
+            }
+            let d = px[i];
+            let inv = 255 - sa;
+            let c = |sh: u32| -> u32 { (((s >> sh) & 0xFF) + (((d >> sh) & 0xFF) * inv + 127) / 255).min(255) << sh };
+            px[i] = c(24) | c(16) | c(8) | c(0);
+        };
+        if angle.abs() < 1e-4 {
+            let (dx, dy) = ((to.0 - from.0).round() as i32, (to.1 - from.1).round() as i32);
+            let (x0, y0) = (dx.max(clip.left).max(0), dy.max(clip.top).max(0));
+            let (x1, y1) = ((dx + iw).min(clip.right).min(cw), (dy + ih).min(clip.bottom).min(chh));
+            let px = self.px();
+            for y in y0..y1 {
+                let (row, src) = ((y * cw) as usize, ((y - dy) * iw) as usize);
+                for x in x0..x1 {
+                    put(px, row + x as usize, img.px[src + (x - dx) as usize]);
+                }
+            }
+            return;
+        }
+        let (sn, cs) = angle.sin_cos();
+        // Where the picture's corners land, for the rows and columns to visit.
+        let (mut bx0, mut by0, mut bx1, mut by1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y) in [(0.0, 0.0), (iw as f32, 0.0), (0.0, ih as f32), (iw as f32, ih as f32)] {
+            let (dx, dy) = (x - from.0, y - from.1);
+            let (fx, fy) = (to.0 + dx * cs - dy * sn, to.1 + dx * sn + dy * cs);
+            bx0 = bx0.min(fx);
+            by0 = by0.min(fy);
+            bx1 = bx1.max(fx);
+            by1 = by1.max(fy);
+        }
+        let x0 = (bx0.floor() as i32).max(clip.left).max(0);
+        let y0 = (by0.floor() as i32).max(clip.top).max(0);
+        let x1 = (bx1.ceil() as i32 + 1).min(clip.right).min(cw);
+        let y1 = (by1.ceil() as i32 + 1).min(clip.bottom).min(chh);
+        let at = |x: i32, y: i32| -> u32 { if x < 0 || y < 0 || x >= iw || y >= ih { 0 } else { img.px[(y * iw + x) as usize] } };
+        let px = self.px();
+        for y in y0..y1 {
+            let row = (y * cw) as usize;
+            for x in x0..x1 {
+                // Back from the canvas into the picture: the pixel's centre, turned back.
+                let (dx, dy) = (x as f32 + 0.5 - to.0, y as f32 + 0.5 - to.1);
+                let (sx, sy) = (from.0 + dx * cs + dy * sn - 0.5, from.1 - dx * sn + dy * cs - 0.5);
+                let (fx, fy) = (sx.floor(), sy.floor());
+                let (ix, iy) = (fx as i32, fy as i32);
+                if ix < -1 || iy < -1 || ix >= iw || iy >= ih {
+                    continue;
+                }
+                let (wx, wy) = (((sx - fx) * 256.0) as u32, ((sy - fy) * 256.0) as u32);
+                let (p00, p10, p01, p11) = (at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1));
+                if (p00 | p10 | p01 | p11) == 0 {
+                    continue;
+                }
+                let mix = |sh: u32| -> u32 {
+                    let c = |p: u32| (p >> sh) & 0xFF;
+                    let top = c(p00) * (256 - wx) + c(p10) * wx;
+                    let bottom = c(p01) * (256 - wx) + c(p11) * wx;
+                    ((top * (256 - wy) + bottom * wy + (1 << 15)) >> 16).min(255) << sh
+                };
+                put(px, row + x as usize, mix(24) | mix(16) | mix(8) | mix(0));
+            }
+        }
+    }
+
     /// `img` over the canvas with its top-left at (`x`, `y`), as text is put down (both
     /// premultiplied): text drawn on a clear canvas and kept as a picture comes out exactly
     /// as if drawn here.
@@ -771,5 +858,43 @@ pub fn app_icon(size: i32) -> HICON {
         DeleteObject(mask);
         DeleteObject(color);
         icon
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A picture put down unturned lands on whole pixels exactly as it is; turned, it lands
+    /// where it's turned to, and fades as asked.
+    #[test]
+    fn pictures_put_down_turned() {
+        let mut px = vec![0u32; 6 * 10];
+        for y in 2..8 {
+            px[y * 6 + 2] = 0xFF20_4060;
+            px[y * 6 + 3] = 0x8010_2030;
+        }
+        let img = Image::from_pixels(6, 10, px);
+        let all = RECT { left: 0, top: 0, right: 40, bottom: 40 };
+        let mut a = Canvas::new(40, 40);
+        a.clear(0xFFFF_FFFF);
+        a.over(&img, 10, 12);
+        let mut b = Canvas::new(40, 40);
+        b.clear(0xFFFF_FFFF);
+        b.over_turned(&img, (1.0, 1.0), (11.2, 12.8), 0.0, all, 1.0);
+        assert_eq!(a.copy_out(all), b.copy_out(all));
+        // A quarter turn clockwise about the picture's top-left: its column 2 becomes the
+        // canvas's row 2 below the point it lands on, going left.
+        let mut c = Canvas::new(40, 40);
+        c.clear(0);
+        c.over_turned(&img, (0.0, 0.0), (20.0, 20.0), std::f32::consts::FRAC_PI_2, all, 1.0);
+        let at = |c: &mut Canvas, x: i32, y: i32| c.copy_out(RECT { left: x, top: y, right: x + 1, bottom: y + 1 })[0];
+        assert_eq!(at(&mut c, 20 - 5, 22) >> 24, 0xFF);
+        assert_eq!(at(&mut c, 20 - 1, 22), 0);
+        // Half faded, half the ink.
+        let mut d = Canvas::new(40, 40);
+        d.clear(0);
+        d.over_turned(&img, (0.0, 0.0), (10.0, 10.0), 0.0, all, 0.5);
+        assert_eq!(at(&mut d, 12, 12) >> 24, 0x80);
     }
 }

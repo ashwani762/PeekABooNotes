@@ -393,7 +393,8 @@ fn clear_worker() {
 }
 
 fn trim_memory() {
-    let busy = ui(|u| !u.notes.is_empty()) || !crate::win::ui::allnotes::hwnd().is_null() || !crate::win::ui::settings::hwnd().is_null();
+    // Fanned out, the deck would make it all again at once (it trims when it folds).
+    let busy = ui(|u| !u.notes.is_empty()) || !crate::win::ui::allnotes::hwnd().is_null() || !crate::win::ui::settings::hwnd().is_null() || !deck::resting();
     if busy {
         return;
     }
