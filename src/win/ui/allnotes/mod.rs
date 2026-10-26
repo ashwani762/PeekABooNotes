@@ -685,6 +685,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
     } else if msg.hwnd != hwnd && msg.hwnd != search {
         return false;
     }
+    // Any key here takes a tooltip away, the note's own (a picture's name) too: the list
+    // moving under it, or a search, leaves it standing for something no longer there.
+    crate::win::ui::tooltip::leave(hwnd);
     // The window's own drawn controls have the keys, not the search field.
     let own = msg.hwnd == hwnd;
     let mut repaint = false;

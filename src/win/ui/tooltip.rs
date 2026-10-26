@@ -143,12 +143,14 @@ fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) {
     });
 }
 
-/// The pointer left `owner`'s button (or the window).
+/// The pointer left `owner`'s button (or the window), or `owner` is going away. A tip
+/// for a window inside it (a note's text in All Notes) goes too: it would otherwise
+/// outlive its window, over whatever is there.
 pub fn leave(owner: HWND) {
     let live = TIP.with(|t| t.try_borrow().map(|t| t.is_some()).unwrap_or(false));
     if live {
         with(|t| {
-            if t.owner == owner {
+            if t.owner == owner || (!t.owner.is_null() && unsafe { IsChild(owner, t.owner) } != 0) {
                 t.owner = null_mut();
                 t.muted = false;
                 go_away(t);
