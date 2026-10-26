@@ -41,6 +41,7 @@
     <string name="menu_undo_delete">Undo Delete</string>
     <string name="menu_undo_archive">Undo Archive</string>
     <string name="menu_undo_restore">Undo Restore</string>
+    <string name="menu_undo_import">Undo Import</string>
     <string name="menu_show_deck">Show Deck</string>
     <string name="menu_move_deck">Move Deck to Other Edge</string>
     <string name="menu_settings">Settings</string>
@@ -110,6 +111,10 @@
         <item quantity="one">Note restored</item>
         <item quantity="other">%d notes restored</item>
     </plurals>
+    <plurals name="toast_imported">
+        <item quantity="one">Note imported</item>
+        <item quantity="other">%d notes imported</item>
+    </plurals>
     <string name="toast_undo">Undo</string>
 
     <!-- All Notes -->
@@ -161,6 +166,12 @@
         <item quantity="one">%d imported</item>
         <item quantity="other">%d imported</item>
     </plurals>
+    <plurals name="result_already_here">
+        <item quantity="one">%d already here</item>
+        <item quantity="other">%d already here</item>
+    </plurals>
+    <!-- Both results of an import: "3 imported, 2 already here" -->
+    <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">
         <item quantity="one">%d exported</item>
         <item quantity="other">%d exported</item>

@@ -301,6 +301,8 @@ pub enum Undo {
     Archived(Vec<(u64, i64)>),
     /// Notes restored from the archive.
     Restored(Vec<u64>),
+    /// Notes an import brought in. Each import is one of its own.
+    Imported(Vec<u64>),
 }
 
 impl crate::common::undo::Action for Undo {
@@ -330,6 +332,7 @@ impl Undo {
             Undo::Deleted(v) => tn!("toast_deleted", v.len()),
             Undo::Archived(v) => tn!("toast_archived", v.len()),
             Undo::Restored(v) => tn!("toast_restored", v.len()),
+            Undo::Imported(v) => tn!("toast_imported", v.len()),
         }
     }
 
@@ -339,6 +342,7 @@ impl Undo {
             Undo::Deleted(_) => t!("menu_undo_delete"),
             Undo::Archived(_) => t!("menu_undo_archive"),
             Undo::Restored(_) => t!("menu_undo_restore"),
+            Undo::Imported(_) => t!("menu_undo_import"),
         }
     }
 }
@@ -367,6 +371,11 @@ pub fn archive(ids: &[u64]) {
     }
     set_archived(ids, true);
     done(Undo::Archived(before));
+}
+
+/// Notes `ids` were just imported: the toast offers to take them out again.
+pub(super) fn imported(ids: Vec<u64>) {
+    done(Undo::Imported(ids));
 }
 
 /// Bring notes back from the archive, to their places in the deck, with the Undo toast,
@@ -421,7 +430,8 @@ pub fn can_undo() -> bool {
 /// The toast's Undo (its button, Ctrl+Z in All Notes, the tray menu): the newest action
 /// still in time is taken back, and the toast shows the one before it, if any. Notes
 /// deleted come back where they were, notes archived return to the deck where they were,
-/// and notes restored go back to the archive.
+/// notes restored go back to the archive, and notes imported go (for good, with the files
+/// they brought).
 pub fn undo() {
     let Some(a) = ui(|u| u.undo.pop()) else { return };
     show_undo();
@@ -452,6 +462,14 @@ pub fn undo() {
             let ids = v.iter().map(|(_, n)| n.id).collect();
             store_mut(|s| s.put_back(v));
             ids
+        }
+        Undo::Imported(v) => {
+            v.iter().for_each(|&id| put_away(id));
+            let gone: Vec<Note> = store_mut(|s| v.iter().filter_map(|id| s.remove(*id)).map(|(_, n)| n).collect());
+            save();
+            refresh();
+            gone_for_good(&gone);
+            return;
         }
     };
     save();
@@ -485,9 +503,14 @@ pub fn finalize_undo() {
 /// saved versions too, and then the files only they linked. An archive just stays.
 fn make_final(a: Undo) {
     let Undo::Deleted(v) = a else { return };
-    let gone: Vec<Note> = v.into_iter().map(|(_, n)| n).collect();
+    gone_for_good(&v.into_iter().map(|(_, n)| n).collect::<Vec<_>>());
+}
+
+/// Notes taken out of the store for good: their saved versions go, and then the files
+/// only they linked.
+fn gone_for_good(gone: &[Note]) {
     crate::win::ui::note::versions::forget(&gone.iter().map(|n| n.id).collect::<Vec<_>>());
-    delete_attachments(&gone);
+    delete_attachments(gone);
 }
 
 /// Take the attachments notes `gone` linked out of the folder, unless another note, a

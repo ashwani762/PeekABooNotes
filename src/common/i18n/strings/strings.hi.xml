@@ -31,6 +31,7 @@
     <string name="menu_undo_delete">हटाना पूर्ववत करें</string>
     <string name="menu_undo_archive">संग्रहित करना पूर्ववत करें</string>
     <string name="menu_undo_restore">वापस लाना पूर्ववत करें</string>
+    <string name="menu_undo_import">आयात पूर्ववत करें</string>
     <string name="menu_show_deck">डेक दिखाएँ</string>
     <string name="menu_move_deck">डेक को दूसरे किनारे पर ले जाएँ</string>
     <string name="menu_settings">सेटिंग्स</string>
@@ -100,6 +101,10 @@
         <item quantity="one">नोट वापस लाया गया</item>
         <item quantity="other">%d नोट वापस लाए गए</item>
     </plurals>
+    <plurals name="toast_imported">
+        <item quantity="one">नोट आयात हुआ</item>
+        <item quantity="other">%d नोट आयात हुए</item>
+    </plurals>
     <string name="toast_undo">पूर्ववत करें</string>
 
     <!-- All Notes -->
@@ -151,6 +156,11 @@
         <item quantity="one">%d आयात हुआ</item>
         <item quantity="other">%d आयात हुए</item>
     </plurals>
+    <plurals name="result_already_here">
+        <item quantity="one">%d पहले से है</item>
+        <item quantity="other">%d पहले से हैं</item>
+    </plurals>
+    <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">
         <item quantity="one">%d निर्यात हुआ</item>
         <item quantity="other">%d निर्यात हुए</item>

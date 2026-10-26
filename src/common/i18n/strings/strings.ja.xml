@@ -31,6 +31,7 @@
     <string name="menu_undo_delete">削除を取り消す</string>
     <string name="menu_undo_archive">アーカイブを取り消す</string>
     <string name="menu_undo_restore">復元を取り消す</string>
+    <string name="menu_undo_import">読み込みを取り消す</string>
     <string name="menu_show_deck">デッキを表示</string>
     <string name="menu_move_deck">デッキを反対の端へ移動</string>
     <string name="menu_settings">設定</string>
@@ -95,6 +96,9 @@
     <plurals name="toast_restored">
         <item quantity="other">%d 件のメモを戻しました</item>
     </plurals>
+    <plurals name="toast_imported">
+        <item quantity="other">%d 件のメモを読み込みました</item>
+    </plurals>
     <string name="toast_undo">取り消す</string>
 
     <!-- All Notes -->
@@ -140,6 +144,10 @@
     <plurals name="result_imported">
         <item quantity="other">%d 件読み込み</item>
     </plurals>
+    <plurals name="result_already_here">
+        <item quantity="other">%d 件は既にあります</item>
+    </plurals>
+    <string name="result_and">%1$s、%2$s</string>
     <plurals name="result_exported">
         <item quantity="other">%d 件書き出し</item>
     </plurals>

@@ -31,6 +31,7 @@
     <string name="menu_undo_delete">Deshacer eliminación</string>
     <string name="menu_undo_archive">Deshacer archivado</string>
     <string name="menu_undo_restore">Deshacer restauración</string>
+    <string name="menu_undo_import">Deshacer importación</string>
     <string name="menu_show_deck">Mostrar el mazo</string>
     <string name="menu_move_deck">Mover el mazo al otro borde</string>
     <string name="menu_settings">Ajustes</string>
@@ -100,6 +101,10 @@
         <item quantity="one">Nota restaurada</item>
         <item quantity="other">%d notas restauradas</item>
     </plurals>
+    <plurals name="toast_imported">
+        <item quantity="one">Nota importada</item>
+        <item quantity="other">%d notas importadas</item>
+    </plurals>
     <string name="toast_undo">Deshacer</string>
 
     <!-- All Notes -->
@@ -151,6 +156,11 @@
         <item quantity="one">%d importada</item>
         <item quantity="other">%d importadas</item>
     </plurals>
+    <plurals name="result_already_here">
+        <item quantity="one">%d ya estaba</item>
+        <item quantity="other">%d ya estaban</item>
+    </plurals>
+    <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">
         <item quantity="one">%d exportada</item>
         <item quantity="other">%d exportadas</item>

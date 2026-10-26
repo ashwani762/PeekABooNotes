@@ -31,6 +31,7 @@
     <string name="menu_undo_delete">Annuler la suppression</string>
     <string name="menu_undo_archive">Annuler l’archivage</string>
     <string name="menu_undo_restore">Annuler la restauration</string>
+    <string name="menu_undo_import">Annuler l’importation</string>
     <string name="menu_show_deck">Afficher la pile</string>
     <string name="menu_move_deck">Déplacer la pile sur l’autre bord</string>
     <string name="menu_settings">Réglages</string>
@@ -100,6 +101,10 @@
         <item quantity="one">Note restaurée</item>
         <item quantity="other">%d notes restaurées</item>
     </plurals>
+    <plurals name="toast_imported">
+        <item quantity="one">Note importée</item>
+        <item quantity="other">%d notes importées</item>
+    </plurals>
     <string name="toast_undo">Annuler</string>
 
     <!-- All Notes -->
@@ -151,6 +156,11 @@
         <item quantity="one">%d importée</item>
         <item quantity="other">%d importées</item>
     </plurals>
+    <plurals name="result_already_here">
+        <item quantity="one">%d déjà là</item>
+        <item quantity="other">%d déjà là</item>
+    </plurals>
+    <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">
         <item quantity="one">%d exportée</item>
         <item quantity="other">%d exportées</item>

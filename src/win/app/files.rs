@@ -157,7 +157,16 @@ fn pick_folder(owner: HWND, title: &str, start: &str) -> Option<std::path::PathB
 /// its front matter. Anything larger can't be a note.
 const MAX_IMPORT_BYTES: u64 = crate::common::store::MAX_NOTE_CHARS as u64 * 4 + 64 * 1024;
 
-pub fn import(owner: HWND) -> Outcome {
+/// What an import did: the notes it brought in, and the files it left out because a note
+/// here says the same already (notes exported from here, brought back).
+pub struct Imported {
+    pub added: usize,
+    pub here: usize,
+}
+
+/// Bring in the Markdown and text files the user picks, each as a note, with the Undo
+/// toast. `Err` when none of them could be.
+pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
     let mut buf = vec![0u16; 65536];
     let filter: Vec<u16> = format!("{} (*.md, *.txt)\0*.md;*.markdown;*.txt\0{}\0*.*\0\0", t!("dialog_filter_text"), t!("dialog_filter_all")).encode_utf16().collect();
     let title = wide(t!("dialog_import_title"));
@@ -184,7 +193,10 @@ pub fn import(owner: HWND) -> Outcome {
         [dir, names @ ..] => names.iter().map(|n| std::path::Path::new(dir).join(n)).collect(),
     };
     let w = ui(|u| u.worker);
-    let (mut added, mut empty, mut failed) = (0, 0, None);
+    let (mut added, mut here, mut empty, mut failed) = (Vec::new(), 0, 0, None);
+    // One operation: a file the notes share is copied in once, and one the attachments
+    // folder holds already (by name and bytes) is linked there.
+    let mut copies = crate::common::attach::Copies::reusing();
     let total = files.len();
     // The log says what went wrong and with what kind of file, never which file: its name
     // and folder are the user's.
@@ -218,28 +230,40 @@ pub fn import(owner: HWND) -> Outcome {
         // Only files beside the imported one (an export's attachments folder): a Markdown
         // file from elsewhere can't pull in whatever it names.
         let folder = f.parent().unwrap_or(std::path::Path::new("."));
-        crate::win::ui::note::adopt_files(w, folder, &crate::common::attach::Allowed { roots: vec![folder.to_path_buf()], except: Vec::new() });
-        let rtf = rich::get_rtf(w);
+        crate::win::ui::note::adopt_files_with(w, folder, &crate::common::attach::Allowed { roots: vec![folder.to_path_buf()], except: Vec::new() }, &mut copies);
         let plain = rich::to_markdown(w, false);
-        store_mut(|s| {
+        // The same as a note here (its pictures the same files too): not made twice.
+        if store(|s| s.says(&plain)) {
+            here += 1;
+            continue;
+        }
+        let rtf = rich::get_rtf(w);
+        added.push(store_mut(|s| {
             let id = s.create(&plain, &rtf);
             if let (Some(m), Some(n)) = (&meta, s.note_mut(id)) {
                 m.apply(n);
             }
-        });
-        added += 1;
+            id
+        }));
     }
-    let skipped = if empty > 0 { format!(", {empty} empty skipped") } else { String::new() };
+    let n = added.len();
+    let mut skipped = if here > 0 { format!(", {here} already there") } else { String::new() };
+    if empty > 0 {
+        skipped.push_str(&format!(", {empty} empty skipped"));
+    }
     match &failed {
-        Some(e) => log::warn(&format!("import: added {added} of {total} files{skipped}; last error: {e}")),
-        None => log::info(&format!("import: added {added} of {total} files{skipped}")),
+        Some(e) => log::warn(&format!("import: added {n} of {total} files{skipped}; last error: {e}")),
+        None => log::info(&format!("import: added {n} of {total} files{skipped}")),
     }
-    if added == 0 {
+    if n == 0 && here == 0 {
         return Some(Err(()));
     }
-    save();
-    refresh();
-    Some(Ok(added))
+    if n > 0 {
+        save();
+        refresh();
+        imported(added);
+    }
+    Some(Ok(Imported { added: n, here }))
 }
 
 /// The startup task declared in the MSIX manifest (`packaging/msix/AppxManifest.xml`).

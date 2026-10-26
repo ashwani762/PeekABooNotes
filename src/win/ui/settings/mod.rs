@@ -545,6 +545,19 @@ fn show_result(hwnd: HWND, k: Key, outcome: app::Outcome, plural: &str) {
     show_text(hwnd, k, r.is_ok(), text);
 }
 
+/// An import's outcome on its button: how many came in, and how many were left out as
+/// notes here already ("3 imported, 2 already here").
+fn show_imported(hwnd: HWND, outcome: Option<Result<app::Imported, ()>>) {
+    let Some(r) = outcome else { return };
+    let text = match &r {
+        Ok(app::Imported { added, here: 0 }) => tn!("result_imported", *added),
+        Ok(app::Imported { added: 0, here }) => tn!("result_already_here", *here),
+        Ok(app::Imported { added, here }) => t!("result_and", tn!("result_imported", *added), tn!("result_already_here", *here)),
+        Err(()) => t!("result_failed").to_string(),
+    };
+    show_text(hwnd, Key::Import, r.is_ok(), text);
+}
+
 /// Connect's outcome for assistant app `i`, from its own command (Claude Code's).
 const WM_CONNECTED: u32 = WM_APP + 31;
 
@@ -722,7 +735,7 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         Key::NewAt => app::update_settings(|s| s.new_on_top = v == 0),
         Key::Fullscreen => app::update_settings(|s| s.over_fullscreen = v == 1),
         Key::Folder => app::open_notes_folder(),
-        Key::Import => show_result(hwnd, k, app::import(hwnd), "result_imported"),
+        Key::Import => show_imported(hwnd, app::import(hwnd)),
         Key::Export => show_result(hwnd, k, app::export_all(hwnd), "result_exported"),
         Key::DeleteAll => app::delete_all(hwnd, with(|w| menu_anchor(w, k)).flatten()),
         Key::Mcp => {

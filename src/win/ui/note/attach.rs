@@ -315,8 +315,13 @@ pub(super) fn flush_pending(h: HWND) {
 /// in the attachments folder (`attachments/photo.png` from the data folder, as a saved
 /// version or an assistant reading a note has it) is that attachment again, not copied.
 pub fn adopt_files(e: HWND, base: &Path, allowed: &attach::Allowed) {
+    adopt_files_with(e, base, allowed, &mut attach::Copies::default());
+}
+
+/// `adopt_files`, with the files copied in so far by the operation it's part of (an
+/// import of several notes, which links a file they share once).
+pub fn adopt_files_with(e: HWND, base: &Path, allowed: &attach::Allowed, copies: &mut attach::Copies) {
     let t = rich::text(e);
-    let mut copies = attach::Copies::default();
     // From the end, so what's changed never moves what's still to do.
     for (at, name_at, link) in rich::instructions(&t, 0, t.len()).into_iter().rev() {
         let Some(file) = attach::local_file(&link, base) else { continue };
@@ -653,5 +658,45 @@ mod tests {
         }
         let _ = std::fs::remove_file(dir.join("kept pic.png"));
         let _ = std::fs::remove_file(dir.join("kept.pdf"));
+    }
+
+    /// Notes exported from here and imported again: their pictures are the files the
+    /// attachments folder has already (no "photo (2).png"), so the note reads as the one
+    /// here, word for word, and import can tell it's there.
+    #[test]
+    fn an_import_brought_back_reads_as_the_note_here() {
+        let out = std::env::temp_dir().join(format!("peekaboo-import-again-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(out.join(attach::EXPORT_DIR)).unwrap();
+        let pict = rich::test_picture(4, 3, 60, 45);
+        let hex = pict.rsplit(' ').next().unwrap().trim_end_matches('}');
+        let png: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+        std::fs::write(out.join(attach::EXPORT_DIR).join("import again.png"), &png).unwrap();
+        let md = format!("Lisbon
+- [ ] tram 28
+![import again.png]({})", attach::export_link("import again.png"));
+        let allowed = attach::Allowed { roots: vec![out.clone()], except: Vec::new() };
+        let import = |copies: &mut attach::Copies| {
+            let e = editor();
+            rich::load_markdown(e, &md);
+            adopt_files_with(e, &out, &allowed, copies);
+            let read = (links(e), rich::to_markdown(e, false));
+            unsafe { DestroyWindow(e) };
+            read
+        };
+        let dir = attach::dir();
+        let _ = std::fs::remove_file(dir.join("import again.png"));
+        let first = import(&mut attach::Copies::reusing());
+        assert_eq!(first.0, [attach::url("import again.png")]);
+        let files = || std::fs::read_dir(&dir).unwrap().count();
+        let before = files();
+        assert_eq!(import(&mut attach::Copies::reusing()), first, "the same note, the same picture");
+        assert_eq!(files(), before, "nothing copied");
+        // A drop (or anything that doesn't reuse) still gets a copy of its own.
+        assert_eq!(import(&mut attach::Copies::default()).0, [attach::url("import again (2).png")]);
+        for name in ["import again.png", "import again (2).png"] {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
+        let _ = std::fs::remove_dir_all(&out);
     }
 }

@@ -845,6 +845,13 @@ impl Store {
         id
     }
 
+    /// Whether a note here says `text` already, title and every line (whatever its colour,
+    /// pins or dates): an import of notes exported from here leaves such a file out.
+    pub fn says(&self, text: &str) -> bool {
+        let t = text.trim_end();
+        !t.is_empty() && self.d.notes.iter().any(|n| n.text.trim_end() == t)
+    }
+
     pub fn remove(&mut self, id: u64) -> Option<(usize, Note)> {
         let i = self.d.notes.iter().position(|n| n.id == id)?;
         let n = self.d.notes.remove(i);
@@ -1586,6 +1593,37 @@ mod tests {
         // Ids it doesn't have are passed over.
         s.reorder(&[99, 5, 4]);
         assert_eq!(s.active_ids(), [5, 1, 3, 2, 4]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A note an import would bring in again is one with the same title and text, archived
+    /// or not; one line more or less, or another title, is a note of its own.
+    #[test]
+    fn a_note_with_the_same_text_is_already_here() {
+        let dir = folder("says");
+        let mut s = Store::load(dir.clone());
+        s.create("Lisbon
+- [ ] tram 28
+![Lisbon.jpg](attachment:Lisbon.jpg)", "");
+        let id = s.create("Groceries
+- milk", "");
+        s.note_mut(id).unwrap().archived = true;
+        assert!(s.says("Lisbon
+- [ ] tram 28
+![Lisbon.jpg](attachment:Lisbon.jpg)"));
+        assert!(s.says("Groceries
+- milk
+"), "a line end more is the same");
+        assert!(!s.says("Groceries
+- milk
+- eggs"));
+        assert!(!s.says("Lisbon
+- [ ] tram 28
+![Lisbon.jpg](attachment:Lisbon%20(2).jpg)"), "another picture");
+        assert!(!s.says("groceries
+- milk"));
+        assert!(!s.says("") && !s.says("
+"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

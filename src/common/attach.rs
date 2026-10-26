@@ -56,9 +56,23 @@ fn copy_into(dir: &Path, src: &Path) -> std::io::Result<String> {
 /// The files copied in by one operation (a drop, an import, an assistant's note), so a file
 /// it names twice is copied once and both point at the one copy.
 #[derive(Default)]
-pub struct Copies(Vec<(PathBuf, String)>);
+pub struct Copies {
+    done: Vec<(PathBuf, String)>,
+    /// A file the folder holds already under the same name, with the same bytes, is taken
+    /// as it is rather than copied again (`reusing`).
+    reuse: bool,
+}
 
 impl Copies {
+    /// For an import, whose notes are saved as they come in: a file that's already in the
+    /// attachments folder, by its name and bytes (notes exported from here and brought
+    /// back), is linked there instead of copied in again as "photo (2).jpg". Not for a
+    /// drop into an open note, which links what it copies in only through what's saved
+    /// later: there, a file that a note deleted a moment ago links could go with it.
+    pub fn reusing() -> Copies {
+        Copies { done: Vec::new(), reuse: true }
+    }
+
     /// Copy `src` into the attachments folder, unless this operation copied it in already:
     /// the name it got there.
     pub fn copy_in(&mut self, src: &Path) -> std::io::Result<String> {
@@ -67,11 +81,15 @@ impl Copies {
 
     fn copy_into(&mut self, dir: &Path, src: &Path) -> std::io::Result<String> {
         let key = std::fs::canonicalize(src).unwrap_or_else(|_| src.to_path_buf());
-        if let Some((_, name)) = self.0.iter().find(|(p, _)| *p == key) {
+        if let Some((_, name)) = self.done.iter().find(|(p, _)| *p == key) {
             return Ok(name.clone());
         }
-        let name = copy_into(dir, src)?;
-        self.0.push((key, name.clone()));
+        let there = src.file_name().and_then(|n| n.to_str()).filter(|n| self.reuse && same_content(src, &dir.join(n))).map(str::to_string);
+        let name = match there {
+            Some(name) => name,
+            None => copy_into(dir, src)?,
+        };
+        self.done.push((key, name.clone()));
         Ok(name)
     }
 }
@@ -460,6 +478,13 @@ mod tests {
         assert_eq!(std::fs::read_dir(&into).unwrap().count(), 1);
         // A new operation copies it again, under a free name.
         assert_eq!(Copies::default().copy_into(&into, &dir.join("src").join("chart.png")).unwrap(), "chart (2).png");
+        // An import takes the one there, by its name and bytes; another file of the name
+        // is copied in beside it.
+        assert_eq!(Copies::reusing().copy_into(&into, &dir.join("src").join("chart.png")).unwrap(), "chart.png");
+        assert_eq!(std::fs::read_dir(&into).unwrap().count(), 2);
+        std::fs::create_dir_all(dir.join("other")).unwrap();
+        std::fs::write(dir.join("other").join("chart.png"), "another png").unwrap();
+        assert_eq!(Copies::reusing().copy_into(&into, &dir.join("other").join("chart.png")).unwrap(), "chart (3).png");
         // Too big: refused before anything is read or made.
         let big = dir.join("src").join("disk.img");
         std::fs::File::create(&big).unwrap().set_len(MAX_FILE_BYTES + 1).unwrap();

@@ -31,6 +31,7 @@
     <string name="menu_undo_delete">Löschen widerrufen</string>
     <string name="menu_undo_archive">Archivieren widerrufen</string>
     <string name="menu_undo_restore">Zurückholen widerrufen</string>
+    <string name="menu_undo_import">Import widerrufen</string>
     <string name="menu_show_deck">Stapel anzeigen</string>
     <string name="menu_move_deck">Stapel an den anderen Rand</string>
     <string name="menu_settings">Einstellungen</string>
@@ -100,6 +101,10 @@
         <item quantity="one">Notiz zurückgeholt</item>
         <item quantity="other">%d Notizen zurückgeholt</item>
     </plurals>
+    <plurals name="toast_imported">
+        <item quantity="one">Notiz importiert</item>
+        <item quantity="other">%d Notizen importiert</item>
+    </plurals>
     <string name="toast_undo">Widerrufen</string>
 
     <!-- All Notes -->
@@ -151,6 +156,11 @@
         <item quantity="one">%d importiert</item>
         <item quantity="other">%d importiert</item>
     </plurals>
+    <plurals name="result_already_here">
+        <item quantity="one">%d schon vorhanden</item>
+        <item quantity="other">%d schon vorhanden</item>
+    </plurals>
+    <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">
         <item quantity="one">%d exportiert</item>
         <item quantity="other">%d exportiert</item>
