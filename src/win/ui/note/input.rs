@@ -62,7 +62,56 @@ struct Under {
 /// A message other than the pointer's came to editor `e`'s window: what `Hover` knows may
 /// be out of date.
 pub(super) fn hover_forget() {
-    HOVER.with(|h| h.borrow_mut().take());
+    // Being worked out right now (its questions to RichEdit come back here): it's new.
+    HOVER.with(|h| {
+        if let Ok(mut h) = h.try_borrow_mut() {
+            h.take();
+        }
+    });
+}
+
+/// Messages that only ask RichEdit something (where a character is, how long the text is,
+/// what the selection or a format is): they change nothing under the pointer.
+fn asks_only(msg: u32) -> bool {
+    const WM_GETTEXT: u32 = 0x000D;
+    const WM_GETTEXTLENGTH: u32 = 0x000E;
+    const EM_GETSEL: u32 = 0x00B0;
+    const EM_GETLINECOUNT: u32 = 0x00BA;
+    const EM_LINEINDEX: u32 = 0x00BB;
+    const EM_LINELENGTH: u32 = 0x00C1;
+    const EM_POSFROMCHAR: u32 = 0x00D6;
+    const EM_CHARFROMPOS: u32 = 0x00D7;
+    const EM_EXGETSEL: u32 = 0x0434;
+    const EM_EXLINEFROMCHAR: u32 = 0x0436;
+    const EM_GETCHARFORMAT: u32 = 0x043A;
+    const EM_GETEVENTMASK: u32 = 0x043B;
+    const EM_GETOLEINTERFACE: u32 = 0x043C;
+    const EM_GETPARAFORMAT: u32 = 0x043D;
+    const EM_GETTEXTRANGE: u32 = 0x044B;
+    const EM_GETTEXTLENGTHEX: u32 = 0x045F;
+    const EM_GETTEXTEX: u32 = 0x045E;
+    const EM_GETSCROLLPOS: u32 = 0x04DD;
+    matches!(
+        msg,
+        WM_GETTEXT
+            | WM_GETTEXTLENGTH
+            | EM_GETSEL
+            | EM_GETLINECOUNT
+            | EM_LINEINDEX
+            | EM_LINELENGTH
+            | EM_POSFROMCHAR
+            | EM_CHARFROMPOS
+            | EM_EXGETSEL
+            | EM_EXLINEFROMCHAR
+            | EM_GETCHARFORMAT
+            | EM_GETEVENTMASK
+            | EM_GETOLEINTERFACE
+            | EM_GETPARAFORMAT
+            | EM_GETTEXTRANGE
+            | EM_GETTEXTLENGTHEX
+            | EM_GETTEXTEX
+            | EM_GETSCROLLPOS
+    )
 }
 
 /// Run `f` on what lies around the character under (`x`, `y`) in editor `e`. A move asks
@@ -230,8 +279,8 @@ fn text_menu(h: HWND, e: HWND, mut p: POINT) {
 
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
     let h = parent as HWND;
-    // Anything but the pointer moving may change what's under it.
-    if !matches!(msg, WM_MOUSEMOVE | WM_SETCURSOR | WM_NCHITTEST | WM_MOUSELEAVE) {
+    // Anything but the pointer moving, or a question, may change what's under it.
+    if !matches!(msg, WM_MOUSEMOVE | WM_SETCURSOR | WM_NCHITTEST | WM_MOUSELEAVE) && !asks_only(msg) {
         hover_forget();
     }
     match msg {
