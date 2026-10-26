@@ -807,13 +807,31 @@ pub fn capture(hwnd: HWND) -> Option<Image> {
         }
         RedrawWindow(hwnd, std::ptr::null(), null_mut(), RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         let dib = Dib::new(w, h);
-        if PrintWindow(hwnd, dib.dc, PW_CLIENTONLY | PW_RENDERFULLCONTENT) == 0 {
-            return None;
+        // A window just made can come back black, the compositor not having had it yet (a
+        // new note's card went yellow, brown, black on its way open): give it a frame, and
+        // if it's still black, there's no picture.
+        for tries in 0..2 {
+            if tries > 0 {
+                windows_sys::Win32::Graphics::Dwm::DwmFlush();
+            }
+            if PrintWindow(hwnd, dib.dc, PW_CLIENTONLY | PW_RENDERFULLCONTENT) == 0 {
+                return None;
+            }
+            GdiFlush();
+            let px = std::slice::from_raw_parts(dib.px, (w * h) as usize);
+            if !blank(px) {
+                return Some(Image { w, h, px: px.iter().map(|p| p | 0xFF00_0000).collect() });
+            }
         }
-        GdiFlush();
-        let px = std::slice::from_raw_parts(dib.px, (w * h) as usize).iter().map(|p| p | 0xFF00_0000).collect();
-        Some(Image { w, h, px })
+        None
     }
+}
+
+/// Whether a window's picture is a quarter or more pure black: what Windows gives where it
+/// hasn't had the window drawn yet. A note is paper, never black (nor is its text).
+fn blank(px: &[u32]) -> bool {
+    let seen = px.iter().step_by(7).count().max(1);
+    px.iter().step_by(7).filter(|p| *p & 0x00FF_FFFF == 0).count() * 4 >= seen
 }
 
 /// A GDI font for native controls (the search EDIT), ClearType quality.
@@ -864,6 +882,25 @@ pub fn app_icon(size: i32) -> HICON {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A window Windows hasn't drawn yet comes back black, and isn't used as its picture; a
+    /// note, paper with text and a dark picture in it, is.
+    #[test]
+    fn black_captures_are_left_out() {
+        let mut note = vec![0xFFF6_E7A6u32; 400 * 300];
+        for p in note.iter_mut().skip(4000).take(20_000) {
+            *p = 0xFF00_0000; // a dark picture, a sixth of the note
+        }
+        for p in note.iter_mut().step_by(5) {
+            *p = 0xFF1D_1D1F; // text
+        }
+        assert!(!blank(&note));
+        assert!(blank(&vec![0xFF00_0000u32; 400 * 300]));
+        // Painted only at the top (a header over a black body).
+        let mut half = vec![0xFF00_0000u32; 400 * 300];
+        half[..400 * 40].fill(0xFFF6_E7A6);
+        assert!(blank(&half));
+    }
 
     /// A picture put down unturned lands on whole pixels exactly as it is; turned, it lands
     /// where it's turned to, and fades as asked.
