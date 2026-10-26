@@ -362,6 +362,24 @@ pub fn set_sel(h: HWND, a: i32, b: i32) {
     send(h, EM_SETSEL, a as usize, b as isize);
 }
 
+/// Run `f`, which only reads `h` but moves its selection about to do it (Markdown out asks
+/// each paragraph and run through the selection), with the editor frozen (`bulk`): unfrozen,
+/// RichEdit lays out and draws at every move, which made a 100,000-character note's
+/// Markdown take 250 ms rather than 37. The selection and the view are as they were after.
+pub fn reading<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    let (a, b) = sel(h);
+    let y = scroll_y(h);
+    let r = bulk(h, || {
+        let r = f();
+        set_sel(h, a, b);
+        r
+    });
+    if scroll_y(h) != y {
+        set_scroll_y(h, y);
+    }
+    r
+}
+
 pub fn replace_sel(h: HWND, s: &str) {
     let w = crate::win::util::wide(&selectors::to_marks(s));
     send(h, EM_REPLACESEL, 1, w.as_ptr() as isize);

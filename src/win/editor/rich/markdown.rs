@@ -8,6 +8,10 @@ use super::*;
 /// Convert the editor's content (already loaded into `h`) to Markdown.
 /// With `inline` false only list/task markers are produced (cheap: one query per paragraph).
 pub fn to_markdown(h: HWND, inline: bool) -> String {
+    reading(h, || markdown_of(h, inline))
+}
+
+fn markdown_of(h: HWND, inline: bool) -> String {
     let t = text(h);
     let mut out = body_md(h, &t, 0, t.len(), inline);
     // Inline mode is for export: plain `-` lists in the light mode are what we store.

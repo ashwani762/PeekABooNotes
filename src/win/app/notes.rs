@@ -26,8 +26,11 @@ pub fn note_edited(id: u64) {
 /// Plain text + list markers for an RTF blob, via the hidden worker editor.
 pub fn rtf_to_text(rtf: &str) -> String {
     let w = ui(|u| u.worker);
-    rich::set_rtf(w, rtf);
-    rich::to_markdown(w, false)
+    // Frozen: read in and laid out once (see `rich::reading`).
+    rich::bulk(w, || {
+        rich::set_rtf(w, rtf);
+        rich::to_markdown(w, false)
+    })
 }
 
 /// Notes saved before previews showed pictures and files have only their names in their
@@ -78,8 +81,10 @@ pub(super) fn widen_stored_pictures() {
 
 pub fn rtf_to_markdown(rtf: &str) -> String {
     let w = ui(|u| u.worker);
-    rich::set_rtf(w, rtf);
-    rich::to_markdown(w, true)
+    rich::bulk(w, || {
+        rich::set_rtf(w, rtf);
+        rich::to_markdown(w, true)
+    })
 }
 /// Markdown (as `rtf_to_markdown` writes it) as a note's RTF: its pictures and files
 /// (`attachments/<name>` there) are the note's attachments again.
