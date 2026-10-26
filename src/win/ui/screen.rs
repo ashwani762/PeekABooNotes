@@ -62,6 +62,15 @@ fn info(mon: HMONITOR) -> (RECT, f32) {
     }
 }
 
+/// Where a card with a soft shadow `margin` wide all round (a menu, a tooltip) can go in
+/// `work`, shadow and all: so it never reaches onto the next monitor, nor over the deck at
+/// the screen's edge. (A work area narrower than that keeps its middle.)
+pub fn inset(work: RECT, margin: i32) -> RECT {
+    let mx = margin.min((work.right - work.left) / 2).max(0);
+    let my = margin.min((work.bottom - work.top) / 2).max(0);
+    RECT { left: work.left + mx, top: work.top + my, right: work.right - mx, bottom: work.bottom - my }
+}
+
 /// A `w` x `h` window centred in `work`, made smaller where the monitor is (a 960-wide
 /// All Notes on a small or very zoomed screen) so none of it starts off screen.
 pub fn centred(work: RECT, w: i32, h: i32) -> RECT {
@@ -102,6 +111,15 @@ mod tests {
         assert_eq!(tuple(centred(work, 1440, 930)), (1920, 0, 2944, 728));
         // One side too big, the other fits.
         assert_eq!(tuple(centred(work, 600, 930)), (2132, 0, 2732, 728));
+    }
+
+    #[test]
+    fn a_shadowed_card_keeps_its_shadow_on_its_monitor() {
+        // The monitor left of the primary, and the primary beside it.
+        assert_eq!(tuple(inset(r(-1920, 0, 0, 1040), 22)), (-1898, 22, -22, 1018));
+        assert_eq!(tuple(inset(r(0, 40, 2560, 1080), 26)), (26, 66, 2534, 1054));
+        // Too small to take the shadow off both sides: its middle.
+        assert_eq!(tuple(inset(r(0, 0, 30, 30), 26)), (15, 15, 15, 15));
     }
 
     #[test]

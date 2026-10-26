@@ -308,6 +308,8 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
     let fonts = fonts(s);
     let (w, h) = measure(&items, &fonts, s);
     let margin = (22.0 * s) as i32;
+    // The card and its shadow on the pointer's monitor.
+    let work = crate::win::ui::screen::inset(work, margin);
     // Keep on screen: open down-right of the pointer, flipping when needed.
     let mut x = if align_right { at.x - w } else { at.x };
     let mut y = at.y;
@@ -790,6 +792,7 @@ fn new_sub(parent: &Menu, row: usize, items: Vec<Item>) -> Menu {
     let fonts = fonts(s);
     let (w, h) = measure(&items, &fonts, s);
     let (work, _) = crate::win::ui::screen::of(parent.hwnd);
+    let work = crate::win::ui::screen::inset(work, parent.margin);
     let left = parent.origin.0 + parent.margin;
     let row_top = parent.origin.1 + parent.margin + layout_rows(parent).get(row).map_or(0.0, |r| r.0) as i32;
     let (x, y, flipped) = beside((left, left + parent.w), row_top, (w, h), (PAD * s).round() as i32, (OVERLAP * s).round() as i32, parent.leftward, work);

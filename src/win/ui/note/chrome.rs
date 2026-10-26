@@ -38,7 +38,8 @@ pub(super) fn tip_for(h: HWND, b: Btn) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(h, &mut rc) };
     if let Some((_, r)) = buttons(rc.right, st.s).into_iter().find(|(x, _)| *x == b) {
-        tooltip::hover(h, r, label, &k);
+        // Above the buttons when there's room: under them is the title.
+        tooltip::hover_over(h, r, label, &k);
     }
 }
 

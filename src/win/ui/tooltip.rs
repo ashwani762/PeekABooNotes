@@ -55,6 +55,9 @@ struct Tip {
     size: (i32, i32),
     margin: i32,
     above: bool,
+    /// Above the button when there's room, not under it (what's under it is being read:
+    /// a note's title under its header's buttons).
+    over: bool,
 }
 
 thread_local! {
@@ -105,6 +108,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 size: (0, 0),
                 margin: 0,
                 above: false,
+                over: false,
             });
         }
         t.as_mut().map(f)
@@ -114,22 +118,28 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
 /// The pointer rests on a button of `owner` at `anchor` (client coordinates).
 /// Call it on every move over the button; repeats are free.
 pub fn hover(owner: HWND, anchor: RECT, label: &str, keys: &str) {
-    rest(owner, anchor, label, keys, false, false);
+    rest(owner, anchor, label, keys, false, false, false);
+}
+
+/// `hover`, for a button with what's being read just under it: the tooltip goes above
+/// the button when there's room there.
+pub fn hover_over(owner: HWND, anchor: RECT, label: &str, keys: &str) {
+    rest(owner, anchor, label, keys, false, false, true);
 }
 
 /// Keyboard focus reached a button of `owner` at `anchor`: its tooltip comes up as for
 /// the pointer, after the same wait.
 pub fn focus(owner: HWND, anchor: RECT, label: &str, keys: &str) {
-    rest(owner, anchor, label, keys, true, false);
+    rest(owner, anchor, label, keys, true, false, false);
 }
 
 /// `hover` or (`by_key`) `focus`, the tip beside the button, on whichever side has room:
 /// for a button in a column of them (the deck's foot), which a tip under it would cover.
 pub fn beside(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) {
-    rest(owner, anchor, label, keys, by_key, true);
+    rest(owner, anchor, label, keys, by_key, true, false);
 }
 
-fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool, beside: bool) {
+fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool, beside: bool, over: bool) {
     with(|t| {
         let same = t.owner == owner && t.label == label && t.keys == keys && (t.anchor.left, t.anchor.top) == (anchor.left, anchor.top);
         if same && (t.pending || t.shown || t.muted) {
@@ -141,6 +151,7 @@ fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool, beside
         t.keys = keys.to_string();
         t.by_key = by_key;
         t.beside = beside;
+        t.over = over;
         t.muted = false;
         let warm = t.shown || t.hidden_at.is_some_and(|h| h.elapsed().as_millis() < WARM_MS);
         if warm {
@@ -234,11 +245,15 @@ fn show(t: &mut Tip, swap: bool) {
         t.fonts = Some((Font::new(12.5 * s, FW_NORMAL, theme::FACE_TEXT), Font::new(11.0 * s, FW_SEMIBOLD, theme::FACE_SMALL)));
     }
     let (w, h) = measure(t);
-    // Centred under the button; above it when there's no room below.
+    // The card and its shadow on the button's monitor.
+    t.margin = (26.0 * s) as i32;
+    let work = crate::win::ui::screen::inset(work, t.margin);
+    // Centred under the button; above it when there's no room below (or, `over`, when
+    // there's room above).
     let gap = (6.0 * s) as i32;
     let mut x = (tl.x + br.x) / 2 - w / 2;
     let mut y = br.y + gap;
-    t.above = y + h > work.bottom;
+    t.above = if t.over { tl.y - gap - h >= work.top } else { y + h > work.bottom };
     if t.beside {
         // Level with the button, on the side with room (left of one at the right edge).
         y = (tl.y + br.y) / 2 - h / 2;
@@ -247,9 +262,8 @@ fn show(t: &mut Tip, swap: bool) {
     } else if t.above {
         y = tl.y - gap - h;
     }
-    x = x.clamp(work.left + gap, (work.right - gap - w).max(work.left));
+    x = x.clamp(work.left, (work.right - w).max(work.left));
     y = y.clamp(work.top, (work.bottom - h).max(work.top));
-    t.margin = (26.0 * s) as i32;
     t.size = (w, h);
     t.origin = (x - t.margin, y - t.margin);
     t.shown = true;
