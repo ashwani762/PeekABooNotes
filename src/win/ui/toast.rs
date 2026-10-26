@@ -2,16 +2,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Undo HUD: a dark capsule that rises from the bottom of the screen with a countdown
-//! ring. Click it within ten seconds to restore what was deleted (or archived). The countdown waits
-//! while the pointer is on the toast, so reaching for Undo never races the clock.
+//! ring. It shows the newest of the actions still in time (`app`'s undo stack, see
+//! `common::undo`); a click takes that one back, and then shows the one before it, while
+//! that one is in time. The countdown waits while the pointer is on the toast, so reaching
+//! for Undo never races the clock. A notice (notes can't be saved) shows over it for a
+//! while, with nothing to undo.
+//!
+//! While only the clock runs, the toast is drawn again on a 100 ms timer, and only when
+//! the ring has moved a pixel or the seconds changed: frames at the display's rate are
+//! asked for only while it rises, sinks or lights up.
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
+use std::time::Instant;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, FW_SEMIBOLD};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+use crate::common::undo::SECONDS;
 use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
@@ -20,18 +29,22 @@ use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 
 const CLASS: &str = "PeekABooToast";
-const SECONDS: f32 = 10.0;
+/// The clock's timer while nothing on the toast moves.
+const T_CLOCK: usize = 1;
+const CLOCK_MS: u32 = 100;
 
 struct Toast {
     hwnd: HWND,
-    count: usize,
-    /// Archived rather than deleted.
-    archived: bool,
-    /// A plain message instead (notes can't be saved): nothing to undo, so no button and
-    /// no ring; it simply goes after its time.
-    notice: Option<String>,
-    /// Seconds of countdown left.
+    /// What Undo takes back now ("2 notes deleted"), and its seconds left; None when
+    /// there's nothing to undo.
+    undo: Option<String>,
     left: f32,
+    /// A plain message instead (notes can't be saved): nothing to undo, so no button and
+    /// no ring; it goes after its time (and an action still in time shows again).
+    notice: Option<String>,
+    notice_left: f32,
+    /// When the clock last ran; None while the pointer holds it.
+    clock_at: Option<Instant>,
     rise: Spring,
     /// The Undo button lights up while the pointer is on the toast (all of it undoes).
     hot: Spring,
@@ -39,6 +52,11 @@ struct Toast {
     pressed: bool,
     alive: bool,
     canvas: Option<Canvas>,
+    /// What was last drawn while nothing moved: the ring's step, the seconds, pressed.
+    /// None draws again.
+    drawn: Option<(i32, i32, bool)>,
+    /// The clock's timer is running.
+    timer: bool,
     /// The work area it rises in (the monitor in use when it was raised) and that
     /// monitor's scale.
     work: RECT,
@@ -57,16 +75,30 @@ thread_local! {
     static TOAST: RefCell<Option<Toast>> = const { RefCell::new(None) };
 }
 
-pub fn show(count: usize, archived: bool) {
-    raise(count, archived, None);
+/// What Undo would take back now changed (an action was done, undone or made final):
+/// the toast shows `msg`, rising if it wasn't up, or goes when there's nothing left and
+/// no notice.
+pub fn undo(msg: Option<String>) {
+    if msg.is_none() && TOAST.with(|t| t.borrow().is_none()) {
+        return;
+    }
+    with_toast(|t| {
+        t.undo = msg;
+        t.left = SECONDS;
+    });
 }
 
 /// Tell the user something that can't be undone or acted on here, for a few seconds.
 pub fn notice(text: String) {
-    raise(0, false, Some(text));
+    with_toast(|t| {
+        t.notice = Some(text);
+        t.notice_left = SECONDS;
+    });
 }
 
-fn raise(count: usize, archived: bool, notice: Option<String>) {
+/// The toast, made if need be on the monitor in use, after `f` changed what it says:
+/// measured again, named after it (what screen readers read), up or on its way out.
+fn with_toast(f: impl FnOnce(&mut Toast)) {
     let (work, s) = crate::win::ui::screen::active();
     TOAST.with(|t| {
         let mut t = t.borrow_mut();
@@ -76,7 +108,7 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
                 CreateWindowExW(
                     WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
                     wide(CLASS).as_ptr(),
-                    wide(t!("window_undo")).as_ptr(),
+                    wide("").as_ptr(),
                     WS_POPUP,
                     0,
                     0,
@@ -91,15 +123,18 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
             let (body, bold, tiny) = fonts(s);
             *t = Some(Toast {
                 hwnd,
-                count,
-                archived,
-                notice: None,
+                undo: None,
                 left: SECONDS,
+                notice: None,
+                notice_left: 0.0,
+                clock_at: None,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
                 hot: Spring::unit(0.0, (1.0, 0.12)),
                 pressed: false,
                 alive: true,
                 canvas: None,
+                drawn: None,
+                timer: false,
                 work,
                 s,
                 size: (0, 0.0),
@@ -110,21 +145,38 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
             });
         }
         let t = t.as_mut().unwrap();
-        // Raised again while showing, perhaps from another monitor: it moves there.
-        t.work = work;
-        if t.s != s {
-            (t.body, t.bold, t.tiny) = fonts(s);
-            t.s = s;
+        let was = (t.undo.clone(), t.notice.clone());
+        f(t);
+        let showing = t.undo.is_some() || t.notice.is_some();
+        if showing && (!t.alive || was != (t.undo.clone(), t.notice.clone())) {
+            // Raised again while showing, perhaps from another monitor: it moves there.
+            t.work = work;
+            if t.s != s {
+                (t.body, t.bold, t.tiny) = fonts(s);
+                t.s = s;
+            }
         }
-        t.count = count;
-        t.archived = archived;
-        t.notice = notice;
-        t.left = SECONDS;
-        t.alive = true;
-        t.size = measure(t);
-        t.rise.to(1.0);
+        settle(t);
     });
     anim::wake(Client::Toast);
+}
+
+/// After what the toast says changed: measured and named again, and up while it says
+/// anything, else on its way out.
+fn settle(t: &mut Toast) {
+    t.drawn = None;
+    match message(t) {
+        Some(msg) => {
+            t.alive = true;
+            t.size = measure(t);
+            t.rise.to(1.0);
+            unsafe { SetWindowTextW(t.hwnd, wide(&msg).as_ptr()) };
+        }
+        None => {
+            t.alive = false;
+            t.rise.to(0.0);
+        }
+    }
 }
 
 /// The toast's (body, bold, ring digit) fonts at scale `s`.
@@ -136,16 +188,6 @@ fn fonts(s: f32) -> (Font, Font, Font) {
     )
 }
 
-pub fn hide() {
-    TOAST.with(|t| {
-        if let Some(t) = t.borrow_mut().as_mut() {
-            t.alive = false;
-            t.rise.to(0.0);
-        }
-    });
-    anim::wake(Client::Toast);
-}
-
 /// Gone at once, without the slide out (quitting).
 pub fn close() {
     if let Some(t) = TOAST.with(|t| t.borrow_mut().take()) {
@@ -154,27 +196,44 @@ pub fn close() {
 }
 
 pub fn frame(dt: f32) -> bool {
-    let mut expire = false;
-    let keep = TOAST.with(|cell| {
+    step(dt)
+}
+
+/// Run the clock (the undo stack's and the notice's) and the springs `dt` seconds on, and
+/// draw what changed. Whether frames are wanted: while something moves. Otherwise, while
+/// the clock runs, its timer brings the next step.
+fn step(dt: f32) -> bool {
+    // The clock first, outside the toast's borrow: actions whose time ran out are made
+    // final, and what the toast says may change with it.
+    let Some((over, clock)) = TOAST.with(|c| {
+        c.borrow_mut().as_mut().map(|t| {
+            let over = hovered(t);
+            let now = Instant::now();
+            let clock = if over { 0.0 } else { t.clock_at.map_or(0.0, |at| now.duration_since(at).as_secs_f32()) };
+            t.clock_at = (!over && t.alive).then_some(now);
+            (over, clock)
+        })
+    }) else {
+        return false;
+    };
+    let left = app::undo_clock(clock);
+    TOAST.with(|cell| {
         let mut slot = cell.borrow_mut();
         let Some(t) = slot.as_mut() else { return false };
+        if let Some(left) = left {
+            t.left = left;
+        }
+        if t.notice.is_some() {
+            t.notice_left -= clock;
+            if t.notice_left <= 0.0 {
+                t.notice = None;
+                settle(t);
+            }
+        }
         let moving = t.rise.step(dt);
-        let over = hovered(t);
         t.pressed &= over;
         t.hot.to(if over && t.alive && t.notice.is_none() { 1.0 } else { 0.0 });
         let lighting = t.hot.step(dt);
-        if t.alive && !over {
-            t.left -= dt;
-        }
-        if t.alive && t.left <= 0.0 {
-            if t.notice.is_some() {
-                // Nothing pending behind a notice: it just goes.
-                t.alive = false;
-                t.rise.to(0.0);
-            } else {
-                expire = true;
-            }
-        }
         if !t.alive && !moving && t.rise.value <= 0.01 {
             unsafe { DestroyWindow(t.hwnd) };
             *slot = None;
@@ -183,15 +242,36 @@ pub fn frame(dt: f32) -> bool {
             crate::win::app::schedule_trim();
             return false;
         }
-        render(t);
+        let still = !moving && !lighting && t.alive;
+        let now = drawn_key(t);
+        if !still || t.drawn != Some(now) {
+            render(t);
+            t.drawn = still.then_some(now);
+        }
         // Held under the pointer, with nothing moving, the clock stops: the pointer moving
         // off it (WM_MOUSEMOVE, WM_MOUSELEAVE) starts it again.
-        moving || lighting || !t.alive || !over
-    });
-    if expire {
-        app::finalize_delete();
-    }
-    keep
+        let ticking = still && !over;
+        if ticking != t.timer {
+            t.timer = ticking;
+            unsafe {
+                if ticking {
+                    SetTimer(t.hwnd, T_CLOCK, CLOCK_MS, None);
+                } else {
+                    KillTimer(t.hwnd, T_CLOCK);
+                }
+            }
+        }
+        !still
+    })
+}
+
+/// What a drawing of the still toast shows that changes with the clock: the countdown
+/// ring to the pixel (along its length), the seconds, and the button pressed.
+fn drawn_key(t: &Toast) -> (i32, i32, bool) {
+    let left = t.left.clamp(0.0, SECONDS);
+    let px = (std::f32::consts::TAU * 10.0 * t.s).ceil();
+    let ring = if t.notice.is_some() || t.undo.is_none() { 0 } else { (left / SECONDS * px).ceil() as i32 };
+    (ring, left.ceil() as i32, t.pressed)
 }
 
 /// Whether the pointer is on the capsule (not on the shadow around it).
@@ -214,7 +294,7 @@ fn render(t: &mut Toast) {
     let s = t.s;
     let (w, bw) = t.size;
     let (h, m) = ((52.0 * s) as i32, (24.0 * s) as i32);
-    let msg = message(t);
+    let Some(msg) = message(t) else { return };
     let (cw, ch) = (w + 2 * m, h + 2 * m);
     if t.canvas.as_ref().map(|c| (c.w, c.h)) != Some((cw, ch)) {
         t.canvas = Some(Canvas::new(cw, ch));
@@ -230,8 +310,8 @@ fn render(t: &mut Toast) {
     c.shape(&card, 0x1C1C1E, 0.94 * a, 1.0, 0.0);
     c.shape(&card, 0xFFFFFF, 0.10 * a, 1.0, 1.0);
     c.begin_batch();
-    if let Some(msg) = &t.notice {
-        c.text(msg, &t.body, rect((x + 20.0 * s) as i32, y as i32, w - (40.0 * s) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    if t.notice.is_some() {
+        c.text(&msg, &t.body, rect((x + 20.0 * s) as i32, y as i32, w - (40.0 * s) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         c.flush();
         present(t, cw, ch);
         return;
@@ -258,8 +338,9 @@ fn render(t: &mut Toast) {
     present(t, cw, ch);
 }
 
-fn message(t: &Toast) -> String {
-    if t.archived { tn!("toast_archived", t.count) } else { tn!("toast_deleted", t.count) }
+/// What the toast says: the notice while there is one, else what Undo takes back.
+fn message(t: &Toast) -> Option<String> {
+    t.notice.clone().or_else(|| t.undo.clone())
 }
 
 /// The capsule's width and its Undo pill's, in pixels at scale `s`, for a message and a
@@ -275,9 +356,10 @@ fn sizes(s: f32, msg_w: i32, label_w: i32) -> (i32, f32) {
 /// `sizes` for what the toast says now (a notice has no button: its text, with margins).
 fn measure(t: &Toast) -> (i32, f32) {
     let s = t.s;
-    match &t.notice {
-        Some(msg) => (((t.body.measure(msg).0 as f32 + 40.0 * s).clamp(320.0 * s, 560.0 * s)).ceil() as i32, 0.0),
-        None => sizes(s, t.body.measure(&message(t)).0, t.bold.measure(t!("toast_undo")).0),
+    match (&t.notice, &t.undo) {
+        (Some(msg), _) => (((t.body.measure(msg).0 as f32 + 40.0 * s).clamp(320.0 * s, 560.0 * s)).ceil() as i32, 0.0),
+        (None, Some(msg)) => sizes(s, t.body.measure(msg).0, t.bold.measure(t!("toast_undo")).0),
+        (None, None) => t.size,
     }
 }
 
@@ -298,6 +380,12 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     unsafe {
         match msg {
             WM_MOUSEACTIVATE => return MA_NOACTIVATE as LRESULT,
+            WM_TIMER if wp == T_CLOCK => {
+                if step(0.0) {
+                    anim::wake(Client::Toast);
+                }
+                return 0;
+            }
             // The countdown waits while the pointer is on the capsule: going on, off, or
             // away, it looks again.
             WM_MOUSEMOVE => {
@@ -347,8 +435,13 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         t.notice.is_some()
                     })
                 });
-                // A notice has nothing to undo: a click just dismisses it.
-                if notice == Some(true) { hide() } else { app::undo_delete() }
+                // A notice has nothing to undo: a click just dismisses it (and shows what
+                // can still be undone, if anything).
+                if notice == Some(true) {
+                    with_toast(|t| t.notice = None);
+                } else {
+                    app::undo();
+                }
                 return 0;
             }
             _ => {}

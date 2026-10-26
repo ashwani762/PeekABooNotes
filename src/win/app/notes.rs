@@ -291,6 +291,64 @@ pub fn set_archived(ids: &[u64], archived: bool) {
     refresh();
 }
 
+/// What the Undo toast can take back (see `common::undo`): one entry of the stack.
+pub enum Undo {
+    /// Notes deleted, with their places among the notes, in the order they were taken out.
+    Deleted(Vec<(usize, Note)>),
+    /// Notes archived, with their places in the deck.
+    Archived(Vec<(u64, i64)>),
+}
+
+impl crate::common::undo::Action for Undo {
+    fn merge(&mut self, newer: Undo) -> Option<Undo> {
+        match (self, newer) {
+            (Undo::Deleted(a), Undo::Deleted(b)) => {
+                a.extend(b);
+                None
+            }
+            (Undo::Archived(a), Undo::Archived(b)) => {
+                a.extend(b);
+                None
+            }
+            (_, newer) => Some(newer),
+        }
+    }
+}
+
+impl Undo {
+    /// What the toast says about it.
+    fn message(&self) -> String {
+        match self {
+            Undo::Deleted(v) => tn!("toast_deleted", v.len()),
+            Undo::Archived(v) => tn!("toast_archived", v.len()),
+        }
+    }
+
+    /// The tray menu's row that takes it back.
+    fn menu_label(&self) -> &'static str {
+        match self {
+            Undo::Deleted(_) => t!("menu_undo_delete"),
+            Undo::Archived(_) => t!("menu_undo_archive"),
+        }
+    }
+}
+
+/// `a` was just done: it goes on the undo stack, and the toast shows it.
+fn done(a: Undo) {
+    ui(|u| u.undo.push(a));
+    show_undo();
+}
+
+/// The toast shows what Undo takes back now, or goes when there's nothing left.
+fn show_undo() {
+    toast::undo(ui(|u| u.undo.top().map(|e| e.action.message())));
+}
+
+/// The tray menu's Undo row, while the toast has something to take back.
+pub(super) fn undo_label() -> Option<&'static str> {
+    ui(|u| u.undo.top().map(|e| e.action.menu_label()))
+}
+
 /// Archive notes from a click or key, with the Undo toast, as deleting has.
 pub fn archive(ids: &[u64]) {
     let before: Vec<(u64, i64)> = store(|s| ids.iter().filter_map(|id| s.note(*id).filter(|n| !n.archived).map(|n| (n.id, n.order))).collect());
@@ -298,13 +356,7 @@ pub fn archive(ids: &[u64]) {
         return;
     }
     set_archived(ids, true);
-    let count = before.len();
-    // The toast undoes one thing: what was deleted before stays deleted.
-    ui(|u| {
-        u.pending.clear();
-        u.unarchive = before;
-    });
-    toast::show(count, true);
+    done(Undo::Archived(before));
 }
 
 pub fn delete(ids: Vec<u64>) {
@@ -319,14 +371,9 @@ pub fn delete(ids: Vec<u64>) {
     if removed.is_empty() {
         return;
     }
-    let count = ui(|u| {
-        u.unarchive.clear();
-        u.pending.extend(removed);
-        u.pending.len()
-    });
     save();
     refresh();
-    toast::show(count, false);
+    done(Undo::Deleted(removed));
 }
 
 /// Delete every note, archived ones too, once the user has said yes. The usual Undo toast
@@ -353,62 +400,72 @@ fn confirm_delete_all(owner: HWND, n: usize, at: Option<POINT>) -> bool {
 
 /// Whether the Undo toast has something to take back (it is showing).
 pub fn can_undo() -> bool {
-    ui(|u| !u.pending.is_empty() || !u.unarchive.is_empty())
+    ui(|u| !u.undo.is_empty())
 }
 
-/// The toast's Undo: the notes just deleted come back, or the ones just archived return to
-/// the deck where they were.
-pub fn undo_delete() {
-    let unarchive = ui(|u| std::mem::take(&mut u.unarchive));
-    if !unarchive.is_empty() {
-        toast::hide();
-        store_mut(|s| {
-            for (id, order) in &unarchive {
-                if let Some(n) = s.note_mut(*id) {
-                    n.archived = false;
-                    n.order = *order;
+/// The toast's Undo (its button, Ctrl+Z in All Notes, the tray menu): the newest action
+/// still in time is taken back, and the toast shows the one before it, if any. Notes
+/// deleted come back where they were, notes archived return to the deck where they were.
+pub fn undo() {
+    let Some(a) = ui(|u| u.undo.pop()) else { return };
+    show_undo();
+    let ids: Vec<u64> = match a {
+        Undo::Archived(v) => {
+            store_mut(|s| {
+                for (id, order) in &v {
+                    if let Some(n) = s.note_mut(*id) {
+                        n.archived = false;
+                        n.order = *order;
+                    }
                 }
-            }
-        });
-        save();
-        refresh();
-        crate::win::ui::allnotes::select(&unarchive.iter().map(|u| u.0).collect::<Vec<_>>());
-        return;
-    }
-    let mut pending = ui(|u| std::mem::take(&mut u.pending));
-    toast::hide();
-    if pending.is_empty() {
-        return;
-    }
-    pending.sort_by_key(|(i, _)| *i);
-    let ids: Vec<u64> = pending.iter().map(|(_, n)| n.id).collect();
-    store_mut(|s| {
-        for (i, n) in pending {
-            s.insert_at(i, n);
+            });
+            v.iter().map(|e| e.0).collect()
         }
-    });
+        Undo::Deleted(v) => {
+            let ids = v.iter().map(|(_, n)| n.id).collect();
+            store_mut(|s| s.put_back(v));
+            ids
+        }
+    };
     save();
     refresh();
     // What came back is what All Notes shows.
     crate::win::ui::allnotes::select(&ids);
 }
 
-pub fn finalize_delete() {
-    let gone: Vec<Note> = ui(|u| {
-        u.unarchive.clear();
-        u.pending.drain(..).map(|(_, n)| n).collect()
-    });
-    toast::hide();
-    if gone.is_empty() {
-        return;
+/// The toast's clock ran `dt` seconds (0 while the pointer holds it): every action whose
+/// own time ran out is made final, and the toast shows what's left. The seconds the newest
+/// has left, if any.
+pub fn undo_clock(dt: f32) -> Option<f32> {
+    let due = ui(|u| if dt > 0.0 { u.undo.tick(dt) } else { Vec::new() });
+    if !due.is_empty() {
+        for a in due {
+            make_final(a);
+        }
+        show_undo();
     }
-    // Gone for good: their saved versions too, and then the files only they linked.
+    ui(|u| u.undo.top().map(|e| e.left))
+}
+
+/// Every action the toast could still take back is final now (quitting).
+pub fn finalize_undo() {
+    for a in ui(|u| u.undo.drain()) {
+        make_final(a);
+    }
+}
+
+/// An action that can't be taken back any more: deleted notes are gone for good, their
+/// saved versions too, and then the files only they linked. An archive just stays.
+fn make_final(a: Undo) {
+    let Undo::Deleted(v) = a else { return };
+    let gone: Vec<Note> = v.into_iter().map(|(_, n)| n).collect();
     crate::win::ui::note::versions::forget(&gone.iter().map(|n| n.id).collect::<Vec<_>>());
     delete_attachments(&gone);
 }
 
-/// Take the attachments notes `gone` linked out of the folder, unless another note or a
-/// saved version (another note's, put back later) still links them.
+/// Take the attachments notes `gone` linked out of the folder, unless another note, a
+/// note deleted whose Undo is still in time, or a saved version (another note's, put back
+/// later) still links them.
 fn delete_attachments(gone: &[Note]) {
     use crate::common::attach;
     let names: std::collections::BTreeSet<String> = gone.iter().flat_map(|n| attach::linked(&n.rtf).into_iter().chain(attach::linked(&n.text))).collect();
@@ -428,7 +485,8 @@ fn delete_attachments(gone: &[Note]) {
     };
     // Each copy in gets a name of its own, so another note links one of these only through
     // what's saved (an assistant's change, a version put back), never just in its window.
-    let orphans = store(|s| attach::orphans(&names, s.d.notes.iter().flat_map(|n| [n.rtf.as_str(), n.text.as_str()]).chain(versions.iter().map(String::as_str))));
+    let pending: Vec<String> = ui(|u| pending_notes(u).flat_map(|n| [links_of(&n.rtf), n.text.clone()]).collect());
+    let orphans = store(|s| attach::orphans(&names, s.d.notes.iter().flat_map(|n| [n.rtf.as_str(), n.text.as_str()]).chain(pending.iter().map(String::as_str)).chain(versions.iter().map(String::as_str))));
     let dir = attach::dir();
     let (mut removed, mut failed) = (0, None);
     for name in &orphans {
@@ -443,6 +501,15 @@ fn delete_attachments(gone: &[Note]) {
         None if removed > 0 => log::info(&format!("deleted {removed} attachments of deleted notes")),
         None => {}
     }
+}
+
+/// The notes deleted whose Undo is still in time.
+fn pending_notes(u: &Ui) -> impl Iterator<Item = &Note> {
+    u.undo.iter().flat_map(|a| match a {
+        Undo::Deleted(v) => v.as_slice(),
+        _ => &[],
+    })
+    .map(|(_, n)| n)
 }
 
 /// At start: take out of the attachments folder the files no note links any more (left
@@ -467,7 +534,7 @@ pub(super) fn sweep_attachments() {
     }) else {
         return;
     };
-    kept.extend(ui(|u| u.pending.iter().flat_map(|(_, n)| [links_of(&n.rtf), n.text.clone()]).collect::<Vec<_>>()));
+    kept.extend(ui(|u| pending_notes(u).flat_map(|n| [links_of(&n.rtf), n.text.clone()]).collect::<Vec<_>>()));
     // Cut out of a note in an earlier session, and not pasted back yet; or copied in
     // Explorer, as files, from the folder itself.
     kept.extend(crate::win::util::clipboard_rtf());

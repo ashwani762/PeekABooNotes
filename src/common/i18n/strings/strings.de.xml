@@ -7,7 +7,6 @@
     <string name="tray_tooltip">%1$s — Notizen am Bildschirmrand</string>
     <string name="window_all_notes">Alle Notizen — %1$s</string>
     <string name="window_settings">%1$s – Einstellungen</string>
-    <string name="window_undo">Löschen widerrufen</string>
     <string name="settings_version">Version %1$s</string>
 
     <!-- Keys -->

@@ -7,7 +7,6 @@
     <string name="tray_tooltip">%1$s — des notes au bord de l’écran</string>
     <string name="window_all_notes">Toutes les notes — %1$s</string>
     <string name="window_settings">Réglages de %1$s</string>
-    <string name="window_undo">Annuler la suppression</string>
     <string name="settings_version">Version %1$s</string>
 
     <!-- Keys -->

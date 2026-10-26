@@ -108,9 +108,8 @@ pub struct Ui {
     pub main: HWND,
     pub worker: HWND,
     pub notes: HashMap<u64, HWND>,
-    pub pending: Vec<(usize, Note)>,
-    /// Notes just archived, with their places in the deck, for the toast's Undo.
-    pub unarchive: Vec<(u64, i64)>,
+    /// What the Undo toast can still take back, newest on top (`notes::Undo`).
+    pub undo: crate::common::undo::Stack<Undo>,
     pub dark: bool,
     pub icon: HICON,
     pub icon_sm: HICON,
@@ -302,7 +301,7 @@ pub fn quit() {
         }
     }
     // Notes still in the Undo toast are gone for good now (their files with them).
-    finalize_delete();
+    finalize_undo();
     toast::close();
     crate::win::ui::ghost::clear();
     deck::shutdown();
@@ -491,8 +490,7 @@ pub fn run() -> i32 {
                 main: null_mut(),
                 worker: null_mut(),
                 notes: HashMap::new(),
-                pending: Vec::new(),
-                unarchive: Vec::new(),
+                undo: Default::default(),
                 dark: wanted_dark(),
                 icon: gfx::app_icon(GetSystemMetrics(SM_CXICON).max(32)),
                 icon_sm: gfx::app_icon(GetSystemMetrics(SM_CXSMICON).max(16)),

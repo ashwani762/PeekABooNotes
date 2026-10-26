@@ -17,7 +17,6 @@
     <string name="tray_tooltip">%1$s — notes on the edge of your screen</string>
     <string name="window_all_notes">All Notes — %1$s</string>
     <string name="window_settings">%1$s Settings</string>
-    <string name="window_undo">Undo delete</string>
     <string name="settings_version">Version %1$s</string>
 
     <!-- Keys, as printed on keyboards -->

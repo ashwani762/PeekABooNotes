@@ -860,6 +860,15 @@ impl Store {
         self.d.notes.insert(i, n);
     }
 
+    /// Notes `remove` took out, with the places it gave, in the order it took them: each
+    /// goes back where it was, the last one taken first, so every place is among the
+    /// notes there were when it was taken.
+    pub fn put_back(&mut self, removed: Vec<(usize, Note)>) {
+        for (i, n) in removed.into_iter().rev() {
+            self.insert_at(i, n);
+        }
+    }
+
     pub fn reorder(&mut self, ids: &[u64]) {
         for (i, id) in ids.iter().enumerate() {
             if let Some(n) = self.note_mut(*id) {
@@ -1521,6 +1530,24 @@ mod tests {
         let mut frozen = Store::load(dir.clone());
         frozen.frozen = true;
         assert!(frozen.save().is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Notes deleted one after another (the first and last of three, as two deletes in a
+    /// row make one Undo) come back each in its place, whatever the order they went in.
+    #[test]
+    fn deleted_notes_go_back_where_they_were() {
+        let notes = |ids: &[u64]| ids.iter().map(|&id| Note { id, ..Default::default() }).collect::<Vec<_>>();
+        let ids = |s: &Store| s.d.notes.iter().map(|n| n.id).collect::<Vec<_>>();
+        let dir = folder("put-back");
+        let mut s = Store::load(dir.clone());
+        for order in [[1, 3], [3, 1]] {
+            s.d.notes = notes(&[1, 2, 3, 4]);
+            let removed: Vec<(usize, Note)> = order.iter().filter_map(|&id| s.remove(id)).collect();
+            assert_eq!(ids(&s), [2, 4]);
+            s.put_back(removed);
+            assert_eq!(ids(&s), [1, 2, 3, 4], "deleted in the order {order:?}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -19,6 +19,7 @@ pub mod mcp;
 pub mod search;
 pub mod store;
 pub mod theme;
+pub mod undo;
 pub mod util;
 pub mod zip;
 

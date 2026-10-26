@@ -7,7 +7,6 @@
     <string name="tray_tooltip">%1$s — स्क्रीन के किनारे पर नोट्स</string>
     <string name="window_all_notes">सभी नोट्स — %1$s</string>
     <string name="window_settings">%1$s सेटिंग्स</string>
-    <string name="window_undo">हटाना पूर्ववत करें</string>
     <string name="settings_version">संस्करण %1$s</string>
 
     <!-- Keys -->

@@ -181,15 +181,7 @@ pub fn tray_menu(at: Option<POINT>) {
     use menu::{Item, action, check};
     let hidden = store(|s| s.d.settings.deck_hidden);
     // What the Undo toast would take back, while it can: notes deleted or archived.
-    let undo = ui(|u| {
-        if !u.unarchive.is_empty() {
-            Some(t!("menu_undo_archive"))
-        } else if !u.pending.is_empty() {
-            Some(t!("menu_undo_delete"))
-        } else {
-            None
-        }
-    });
+    let undo = undo_label();
     let mut v = vec![
         action(CMD_NEW, t!("menu_new_note"), &hotkey_text(hotkey::NEW_NOTE), IC_ADD),
         action(CMD_ALL, t!("menu_all_notes"), &hotkey_text(hotkey::ALL_NOTES), IC_LIST),
@@ -222,7 +214,7 @@ pub(super) fn command(cmd: u32) {
         CMD_TOGGLE_DECK => update_settings(|s| s.deck_hidden = !s.deck_hidden),
         CMD_SWAP_EDGE => update_settings(|s| s.edge_left = !s.edge_left),
         CMD_DECK_KEYS => deck::take_keys(),
-        CMD_UNDO => undo_delete(),
+        CMD_UNDO => undo(),
         CMD_QUIT => quit(),
         CMD_SETTINGS => settings::show(),
         _ => {}

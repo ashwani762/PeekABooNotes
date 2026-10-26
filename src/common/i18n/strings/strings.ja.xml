@@ -7,7 +7,6 @@
     <string name="tray_tooltip">%1$s — 画面の端のメモ</string>
     <string name="window_all_notes">すべてのメモ — %1$s</string>
     <string name="window_settings">%1$s の設定</string>
-    <string name="window_undo">削除の取り消し</string>
     <string name="settings_version">バージョン %1$s</string>
 
     <!-- Keys -->

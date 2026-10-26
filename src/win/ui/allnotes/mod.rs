@@ -604,7 +604,7 @@ fn perform_inner(hwnd: HWND, a: Action) {
                 }
         }
         Action::New => new_here(),
-        Action::Undo => app::undo_delete(),
+        Action::Undo => app::undo(),
         Action::Settings => crate::win::ui::settings::show(),
         Action::Share(ids) => app::share(hwnd, &ids),
         Action::Reorder(ids) => {
