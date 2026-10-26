@@ -23,7 +23,7 @@ pub use format::*;
 pub use links::*;
 pub use lists::*;
 pub use markdown::*;
-pub use pictures::{fit_picture_widths, forget_pictures, picture_dragged, picture_pressed, widen_stored_pictures};
+pub use pictures::{fit_picture_widths, forget_pictures, picture_dragged, picture_pressed, pictures_changed, refit_picture_widths, widen_stored_pictures};
 pub use selectors::{has_selectors, hide_marks, marker_for, unmark, unmark_str};
 
 pub const CLASS: &str = "RICHEDIT50W";

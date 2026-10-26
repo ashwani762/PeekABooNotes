@@ -514,7 +514,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     // Quotes, code and tables stay as wide as the text column, and pictures within it.
     if msg == WM_SIZE {
         rich::style_blocks(e);
-        rich::fit_picture_widths(e);
+        rich::refit_picture_widths(e);
     }
     // RichEdit draws outside WM_PAINT too (typing, selecting, scrolling): put the
     // checkboxes back over their placeholder glyphs after anything that may have drawn.

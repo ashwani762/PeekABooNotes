@@ -61,14 +61,97 @@ thread_local! {
     static NARROWED: std::cell::RefCell<std::collections::HashMap<isize, Vec<Narrowed>>> = std::cell::RefCell::new(std::collections::HashMap::new());
     /// A press on a selected picture, which may resize it.
     static PRESSED: std::cell::Cell<Option<Press>> = const { std::cell::Cell::new(None) };
+    /// By editor: its pictures as the last fit left them, with the text's length and the
+    /// column's width then, until anything in it changes (`pictures_changed`). A resize
+    /// works out their sizes from this, rather than reading every picture again (21 ms a
+    /// resize with a hundred of them, the note's width unchanged or not).
+    static PLACED: std::cell::RefCell<std::collections::HashMap<isize, Placed>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// (editor, the picture's position, its size when pressed).
 type Press = (isize, i32, (i32, i32));
 
+/// An editor's pictures as a fit left them: the text's length then, the column's width,
+/// and each picture.
+struct Placed {
+    len: usize,
+    column: i32,
+    pics: Vec<Pictured>,
+}
+
+/// A picture as a fit left it: where it is, which it is (as `keys` has it), its own size,
+/// the size it's shown at, its paragraph's indents (twips), and whether it's in a cell
+/// (whose width is the table's to say).
+struct Pictured {
+    cp: i32,
+    key: (String, usize),
+    own: (i32, i32),
+    shown: (i32, i32),
+    indents: i32,
+    in_cell: bool,
+}
+
 /// Editor `h` is going, or has new content: what it narrowed is no more.
 pub fn forget_pictures(h: HWND) {
     NARROWED.with(|n| n.borrow_mut().remove(&(h as isize)));
+    pictures_changed(h);
+}
+
+/// Something in editor `h` changed (an edit, an undo): where its pictures are and what
+/// size they're shown at is to be read again at the next fit.
+pub fn pictures_changed(h: HWND) {
+    PLACED.with(|p| p.borrow_mut().remove(&(h as isize)));
+}
+
+/// `fit_picture_widths` for a resize of editor `h`: nothing to do while the column is as
+/// wide as at the last fit, and otherwise the sizes worked out from what that fit found,
+/// only the pictures whose size changes written again. Anything changed since that fit
+/// makes it a whole fit.
+pub fn refit_picture_widths(h: HWND) {
+    let column = column_twips(h);
+    let Some(mut placed) = PLACED.with(|p| p.borrow_mut().remove(&(h as isize))).filter(|p| p.len == text_len(h)) else {
+        fit_picture_widths(h);
+        return;
+    };
+    let in_cells = placed.pics.iter().any(|p| p.in_cell);
+    if placed.column != column || in_cells {
+        // Cells are as wide as their table makes them (refitted to the column just before).
+        let t = if in_cells { text(h) } else { Vec::new() };
+        let changes: Vec<(usize, (i32, i32))> = placed
+            .pics
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                let room = if p.in_cell { cell_text_width(h, &t, p.cp).unwrap_or(column) } else { column };
+                let want = fitted(p.own, room - p.indents);
+                ((want.0 - p.shown.0).abs() >= SLACK).then_some((i, want))
+            })
+            .collect();
+        if !changes.is_empty() {
+            let mask = send(h, EM_GETEVENTMASK, 0, 0);
+            send(h, EM_SETEVENTMASK, 0, 0);
+            still(h, || {
+                unrecorded(h, || {
+                    let (a, b) = sel(h);
+                    for &(i, want) in &changes {
+                        resize(h, placed.pics[i].cp, want);
+                        placed.pics[i].shown = want;
+                    }
+                    set_sel(h, a, b);
+                })
+            });
+            send(h, EM_SETEVENTMASK, 0, mask);
+            // What's narrowed now: these pictures, and those kept for an undo to bring back.
+            let before = NARROWED.with(|n| n.borrow_mut().remove(&(h as isize))).unwrap_or_default();
+            let mut narrowed: Vec<Narrowed> = before.into_iter().filter(|n| !placed.pics.iter().any(|p| p.key == n.key)).collect();
+            narrowed.extend(placed.pics.iter().filter(|p| p.shown != p.own).map(|p| Narrowed { key: p.key.clone(), shown: p.shown, own: p.own }));
+            if !narrowed.is_empty() {
+                NARROWED.with(|n| n.borrow_mut().insert(h as isize, narrowed));
+            }
+        }
+        placed.column = column;
+    }
+    PLACED.with(|p| p.borrow_mut().insert(h as isize, placed));
 }
 
 /// The pictures at `cps` in `h`, each as its attachment's link and which of the pictures
@@ -104,18 +187,24 @@ pub fn fit_picture_widths(h: HWND) {
 fn fit_now(h: HWND, t: &[u16]) {
     let (a, b) = sel(h);
     let column = column_twips(h);
+    // The table rows, found once: only a picture in one asks for its cell's width (which
+    // looked through the whole text for each picture).
+    let rows = rows(t);
     let cps: Vec<i32> = (0..t.len()).filter(|&i| t[i] == OBJECT).map(|i| i as i32).collect();
     let before = NARROWED.with(|n| n.borrow_mut().remove(&(h as isize))).unwrap_or_default();
     let keys = keys(h, t, &cps);
     // A picture narrowed here and then deleted can come back narrowed with Ctrl+Z: what it
     // was narrowed from is kept for it.
     let mut narrowed: Vec<Narrowed> = before.iter().filter(|n| !keys.contains(&n.key)).map(|n| Narrowed { key: n.key.clone(), shown: n.shown, own: n.own }).collect();
+    let mut pics = Vec::with_capacity(cps.len());
     for (cp, key) in cps.iter().copied().zip(keys) {
         let Some(pic) = read(h, cp) else { continue };
         // Narrowed here before, and still as it was left: its own size is what was kept.
         // Anything else (as made, as dragged to, as an undo put it back) is its own size.
         let own = before.iter().find(|n| n.key == key && n.shown == pic.shown).map_or(pic.shown, |n| n.own);
-        let want = fitted(own, room_at(h, t, cp, column));
+        let in_cell = rows.iter().any(|r| r.start <= cp as usize && (cp as usize) < r.end);
+        let (width, indents) = room_at(h, t, cp, column, in_cell);
+        let want = fitted(own, width - indents);
         let shown = if (want.0 - pic.shown.0).abs() >= SLACK {
             resize(h, cp, want);
             want
@@ -123,8 +212,17 @@ fn fit_now(h: HWND, t: &[u16]) {
             pic.shown
         };
         if shown != own {
-            narrowed.push(Narrowed { key, shown, own });
+            narrowed.push(Narrowed { key: key.clone(), shown, own });
         }
+        pics.push(Pictured { cp, key, own, shown, indents, in_cell });
+    }
+    // Every picture read: a resize can work from these.
+    if pics.len() == cps.len() {
+        PLACED.with(|p| {
+            let mut p = p.borrow_mut();
+            p.retain(|&w, _| unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(w as HWND) } != 0);
+            p.insert(h as isize, Placed { len: t.len(), column, pics });
+        });
     }
     if !narrowed.is_empty() {
         NARROWED.with(|n| {
@@ -197,7 +295,7 @@ pub fn widen_stored_pictures(rtf: &str) -> Option<String> {
 /// its handles, so its size is noted (see `picture_dragged`).
 pub fn picture_pressed(h: HWND) {
     let (a, b) = sel(h);
-    let press = (b == a + 1 && text(h).get(a as usize) == Some(&OBJECT)).then(|| read(h, a).map(|p| (h as isize, a, p.shown))).flatten();
+    let press = (b == a + 1 && raw_text(h, a as usize, b as usize) == [OBJECT]).then(|| read(h, a).map(|p| (h as isize, a, p.shown))).flatten();
     PRESSED.with(|p| p.set(press));
 }
 
@@ -213,7 +311,7 @@ pub fn picture_dragged(h: HWND, released: bool) -> bool {
     if released {
         PRESSED.with(|p| p.set(None));
     }
-    let Some(new) = (text(h).get(cp as usize) == Some(&OBJECT)).then(|| read(h, cp)).flatten().map(|p| p.shown) else { return false };
+    let Some(new) = (raw_text(h, cp as usize, cp as usize + 1) == [OBJECT]).then(|| read(h, cp)).flatten().map(|p| p.shown) else { return false };
     if new == old {
         return false;
     }
@@ -240,17 +338,18 @@ pub fn picture_dragged(h: HWND, released: bool) -> bool {
     });
     send(h, EM_SETEVENTMASK, 0, mask);
     end_group();
+    pictures_changed(h);
     true
 }
 
-/// The width a picture at `cp` can have: the text column (or its cell's), less its
-/// paragraph's indents (a checklist item's text column, say).
-fn room_at(h: HWND, t: &[u16], cp: i32, column: i32) -> i32 {
+/// The room a picture at `cp` has: the text column (or, `in_cell`, its cell's width), and
+/// its paragraph's indents to take off it (a checklist item's text column, say).
+fn room_at(h: HWND, t: &[u16], cp: i32, column: i32, in_cell: bool) -> (i32, i32) {
     set_sel(h, cp, cp);
     let mut pf = ParaFormat2::new();
     send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
-    let width = if t.contains(&ROW_START) { cell_text_width(h, t, cp).unwrap_or(column) } else { column };
-    width - pf.start_indent.max(0) - pf.offset.max(0) - pf.right_indent.max(0)
+    let width = if in_cell { cell_text_width(h, t, cp).unwrap_or(column) } else { column };
+    (width, pf.start_indent.max(0) + pf.offset.max(0) + pf.right_indent.max(0))
 }
 
 /// The RTF of `a..b`, stopping once `cap` bytes are out (a picture's data can run to
@@ -412,29 +511,49 @@ fn resize(h: HWND, cp: i32, size: (i32, i32)) {
     debug_assert_eq!(text_len(h), before, "a picture written again is still one character");
 }
 
-/// A picture's group with its size set to `size` twips.
+/// A picture's group with its size set to `size` twips, in one copy of it (each of the
+/// six numbers set in a copy of its own took six copies of the picture's data).
 fn sized(group: &str, size: (i32, i32)) -> String {
     // HIMETRIC for the size in `\picw` and `\pich`, as RichEdit writes them.
     let himetric = |tw: i32| (tw as i64 * 2540 / 1440) as i32;
-    let mut group = group.to_string();
-    for (word, v) in [("\\picwgoal", size.0), ("\\pichgoal", size.1), ("\\picscalex", 100), ("\\picscaley", 100), ("\\picw", himetric(size.0)), ("\\pich", himetric(size.1))] {
-        group = set_number(&group, word, v);
+    // Where each word's number is, as `set_number` finds it: no two are the same.
+    let mut at: Vec<(usize, usize, i32)> = [("\\picwgoal", size.0), ("\\pichgoal", size.1), ("\\picscalex", 100), ("\\picscaley", 100), ("\\picw", himetric(size.0)), ("\\pich", himetric(size.1))]
+        .into_iter()
+        .filter_map(|(word, v)| number_at(group, word).map(|(a, b)| (a, b, v)))
+        .collect();
+    at.sort_unstable();
+    let mut out = String::with_capacity(group.len() + 16);
+    let mut from = 0;
+    for (a, b, v) in at {
+        out.push_str(&group[from..a]);
+        out.push_str(&v.to_string());
+        from = b;
     }
-    group
+    out.push_str(&group[from..]);
+    out
 }
 
-/// `s` with the number after control word `word` set to `v` (where it has one).
-fn set_number(s: &str, word: &str, v: i32) -> String {
+/// Where the number after control word `word` is in `s` (its first one with a number).
+fn number_at(s: &str, word: &str) -> Option<(usize, usize)> {
     let mut from = 0;
     while let Some(i) = s[from..].find(word) {
         let at = from + i + word.len();
         let n = s[at..].chars().take_while(|c| c.is_ascii_digit() || *c == '-').count();
         if n > 0 {
-            return format!("{}{v}{}", &s[..at], &s[at + n..]);
+            return Some((at, at + n));
         }
         from = at;
     }
-    s.to_string()
+    None
+}
+
+/// `s` with the number after control word `word` set to `v` (where it has one).
+#[cfg(test)]
+fn set_number(s: &str, word: &str, v: i32) -> String {
+    match number_at(s, word) {
+        Some((a, b)) => format!("{}{v}{}", &s[..a], &s[b..]),
+        None => s.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -607,6 +726,76 @@ mod tests {
             assert_eq!(read(h, cp).unwrap().shown, (3600, 1800));
             unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(h) };
         }
+    }
+
+    /// A picture's group sized in one pass is what setting each number in turn made.
+    #[test]
+    fn sizing_in_one_pass() {
+        let one_by_one = |group: &str, size: (i32, i32)| {
+            let himetric = |tw: i32| (tw as i64 * 2540 / 1440) as i32;
+            let mut g = group.to_string();
+            for (word, v) in [("\\picwgoal", size.0), ("\\pichgoal", size.1), ("\\picscalex", 100), ("\\picscaley", 100), ("\\picw", himetric(size.0)), ("\\pich", himetric(size.1))] {
+                g = set_number(&g, word, v);
+            }
+            g
+        };
+        for group in [
+            test_picture(48, 24, 3600, 1800),
+            "{\\pict{\\*\\picprop}\\picscalex50\\picscaley-3\\picw100\\pich50\\picwgoal3600\\pichgoal1800\\pngblip 89504e47}".to_string(),
+            "{\\pict\\pngblip\\picwgoal10 0a}".to_string(),
+            "{\\pict\\pngblip 00}".to_string(),
+        ] {
+            for size in [(2000, 1000), (1, 1), (3600, 1800)] {
+                assert_eq!(sized(&group, size), one_by_one(&group, size), "{group}");
+            }
+        }
+    }
+
+    /// A resize works out the pictures' sizes from the last fit (or does nothing, the
+    /// note as wide as then) and comes to what fitting them afresh does: each shown the
+    /// same, the note storing the same. An edit since makes it a fit afresh.
+    #[test]
+    fn a_resize_fits_as_a_fresh_fit_does() {
+        let make = |width: i32| {
+            let h = editor(width);
+            insert_text(h, "T\rone\r\rtwo\r\rthree\r");
+            let starts: Vec<i32> = text(h).iter().enumerate().filter(|&(i, &c)| c == CR && i > 1).map(|(i, _)| i as i32).collect();
+            for (k, &at) in starts.iter().enumerate().rev().take(3) {
+                set_sel(h, at, at);
+                let link = format!("{{\\field{{\\*\\fldinst{{HYPERLINK \"attachment:p{k}.png\"}}}}{{\\fldrslt{{\\u8203?}}}}}}");
+                let (w, h2) = [(480, 240), (200, 300), (900, 100)][k % 3];
+                insert_rtf(h, &format!("{{\\rtf1 {}{link}}}", test_picture(w, h2, natural((w, h2)).0, natural((w, h2)).1)));
+            }
+            // One in an indented paragraph: less room.
+            let cp = text(h).iter().position(|&c| c == OBJECT).unwrap() as i32;
+            set_sel(h, cp, cp);
+            let mut pf = ParaFormat2::new();
+            pf.mask = PFM_STARTINDENT;
+            pf.start_indent = 700;
+            send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+            send(h, EM_EMPTYUNDOBUFFER, 0, 0);
+            h
+        };
+        let shown = |h: HWND| -> Vec<(i32, i32)> { text(h).iter().enumerate().filter(|&(_, &c)| c == OBJECT).map(|(i, _)| read(h, i as i32).unwrap().shown).collect() };
+        let h = make(400);
+        fit_picture_widths(h);
+        for width in [400, 400, 150, 152, 120, 300, 400, 90] {
+            unsafe { MoveWindow(h, 0, 0, width, 300, 0) };
+            refit_picture_widths(h);
+            let fresh = make(width);
+            fit_picture_widths(fresh);
+            assert_eq!(shown(h), shown(fresh), "at {width} px");
+            assert_eq!(get_rtf(h), get_rtf(fresh), "stored the same at {width} px");
+            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(fresh) };
+        }
+        // A picture's size changed behind the last fit's back (an undo, say): read again.
+        let cp = text(h).iter().position(|&c| c == OBJECT).unwrap() as i32;
+        unrecorded(h, || resize(h, cp, (600, 300)));
+        pictures_changed(h);
+        unsafe { MoveWindow(h, 0, 0, 400, 300, 0) };
+        refit_picture_widths(h);
+        assert_eq!(read(h, cp).unwrap().shown, (600, 300), "its own size now");
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(h) };
     }
 
     /// Notes stored before pictures kept their own size get it back, once; a picture at

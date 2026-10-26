@@ -665,14 +665,17 @@ pub fn retheme(h: HWND) {
 }
 
 fn mark_dirty(h: HWND) {
-    if let Some(st) = state(h)
-        && !st.loading {
+    if let Some(st) = state(h) {
+        // Its pictures may have moved or changed size: the next fit reads them again.
+        rich::pictures_changed(st.edit);
+        if !st.loading {
             st.dirty = true;
             unsafe {
                 SetTimer(h, T_SAVE, SAVE_DELAY_MS, None);
                 PostMessageW(h, WM_RESTYLE, 0, 0);
             }
         }
+    }
 }
 
 /// An emoji variation selector got into the editor directly (the emoji panel puts text
