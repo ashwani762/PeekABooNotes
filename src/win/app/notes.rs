@@ -81,10 +81,12 @@ pub fn rtf_to_markdown(rtf: &str) -> String {
     rich::set_rtf(w, rtf);
     rich::to_markdown(w, true)
 }
-/// Markdown (as `rtf_to_markdown` writes it) as a note's RTF.
+/// Markdown (as `rtf_to_markdown` writes it) as a note's RTF: its pictures and files
+/// (`attachments/<name>` there) are the note's attachments again.
 pub fn markdown_to_rtf(md: &str) -> String {
     let w = ui(|u| u.worker);
     rich::load_markdown(w, md);
+    note::own_attachments(w);
     rich::get_rtf(w)
 }
 

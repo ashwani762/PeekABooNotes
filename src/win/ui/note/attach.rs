@@ -311,14 +311,23 @@ pub(super) fn flush_pending(h: HWND) {
 /// Links in editor `e` (just loaded from Markdown in folder `base`) that point at local
 /// files `allowed` admits: the files are copied in as attachments (links to others stay
 /// as they are). A link alone on its line becomes the attachment itself (a picture
-/// shows); one inside a sentence keeps its words and points at the copy.
+/// shows); one inside a sentence keeps its words and points at the copy. A file already
+/// in the attachments folder (`attachments/photo.png` from the data folder, as a saved
+/// version or an assistant reading a note has it) is that attachment again, not copied.
 pub fn adopt_files(e: HWND, base: &Path, allowed: &attach::Allowed) {
     let t = rich::text(e);
     let mut copies = attach::Copies::default();
     // From the end, so what's changed never moves what's still to do.
     for (at, name_at, link) in rich::instructions(&t, 0, t.len()).into_iter().rev() {
-        let Some(file) = attach::local_file(&link, base).filter(|f| allowed.admits(f)) else { continue };
-        let Ok(name) = copies.copy_in(&file) else { continue };
+        let Some(file) = attach::local_file(&link, base) else { continue };
+        let name = match attached(&file) {
+            Some(name) => name,
+            None if allowed.admits(&file) => match copies.copy_in(&file) {
+                Ok(name) => name,
+                Err(_) => continue,
+            },
+            None => continue,
+        };
         let t = rich::text(e);
         let Some((a, b, _)) = rich::link_at(e, name_at as i32) else { continue };
         let line_start = t[..at].iter().rposition(|&c| c == 13).map_or(0, |i| i + 1);
@@ -334,6 +343,21 @@ pub fn adopt_files(e: HWND, base: &Path, allowed: &attach::Allowed) {
             rich::set_link(e, a, a + shown, &attach::url(&name));
         }
     }
+}
+
+/// The attachment `file` is, when it's one in the attachments folder.
+fn attached(file: &Path) -> Option<String> {
+    let dir = std::fs::canonicalize(attach::dir()).ok()?;
+    let f = std::fs::canonicalize(file).ok()?;
+    let name = f.file_name()?.to_str()?;
+    (f.parent() == Some(dir.as_path())).then(|| attach::name_of(&attach::url(name))).flatten()
+}
+
+/// Links in editor `e` (just loaded from Markdown a note was written out as: a saved
+/// version) to files in the attachments folder made those attachments again, pictures
+/// shown and files as chips. Nothing is copied in.
+pub fn own_attachments(e: HWND) {
+    adopt_files(e, &crate::common::util::data_dir(), &attach::Allowed { roots: Vec::new(), except: Vec::new() });
 }
 
 /// The folders an assistant's links may bring files in from: the user's own (pictures,
@@ -567,5 +591,67 @@ pub(super) fn drag_out(e: HWND, path: &Path, url: &str) {
         {
             PostMessageW(note, WM_ATTACH, 0, 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, ES_MULTILINE, WS_POPUP};
+
+    fn editor() -> HWND {
+        let h = unsafe {
+            LoadLibraryW(wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(h);
+        h
+    }
+
+    fn links(e: HWND) -> Vec<String> {
+        let t = rich::text(e);
+        rich::instructions(&t, 0, t.len()).into_iter().map(|l| l.2).collect()
+    }
+
+    /// A saved version (and what an assistant reads of a note) has its pictures and files as
+    /// `attachments/<name>`: put back, or written back by an assistant, they're the note's
+    /// attachments again, not links to nowhere, and nothing is copied.
+    #[test]
+    fn versions_keep_their_attachments() {
+        let dir = attach::dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        // A real picture, as WIC reads it.
+        let pict = rich::test_picture(4, 3, 60, 45);
+        let hex = pict.rsplit(' ').next().unwrap().trim_end_matches('}');
+        let png: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+        std::fs::write(dir.join("kept pic.png"), png).unwrap();
+        std::fs::write(dir.join("kept.pdf"), "x").unwrap();
+        let md = format!(
+            "# T\n![kept pic.png]({})\n[kept.pdf]({})\nsee [the plan]({}) here\n[gone.pdf]({})",
+            attach::export_link("kept pic.png"),
+            attach::export_link("kept.pdf"),
+            attach::export_link("kept.pdf"),
+            attach::export_link("gone.pdf")
+        );
+        let files = || std::fs::read_dir(&dir).unwrap().count();
+        let before = files();
+        for assistant in [false, true] {
+            let e = editor();
+            rich::load_markdown(e, &md);
+            if assistant {
+                adopt_files(e, &crate::common::util::data_dir(), &assistant_folders());
+            } else {
+                own_attachments(e);
+            }
+            assert_eq!(links(e), [attach::url("kept pic.png"), attach::url("kept.pdf"), attach::url("kept.pdf"), attach::export_link("gone.pdf")]);
+            assert!(rich::get_rtf(e).contains("\\pict"), "the picture shows");
+            // (A file's link in a sentence goes out under the file's name, as it always has.)
+            assert_eq!(rich::to_markdown(e, true), md.replace("[the plan]", "[kept.pdf]"));
+            assert_eq!(files(), before, "nothing copied");
+            unsafe { DestroyWindow(e) };
+        }
+        let _ = std::fs::remove_file(dir.join("kept pic.png"));
+        let _ = std::fs::remove_file(dir.join("kept.pdf"));
     }
 }
