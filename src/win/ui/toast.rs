@@ -16,7 +16,8 @@ use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::win::theme;
-use crate::win::util::{rect, wide};
+use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 
 const CLASS: &str = "PeekABooToast";
 const SECONDS: f32 = 10.0;
@@ -44,6 +45,9 @@ struct Toast {
     s: f32,
     /// The capsule's width and the Undo pill's (`sizes`), measured when it's raised.
     size: (i32, f32),
+    /// The capsule as last drawn, in the window: only it takes the pointer, not the shadow
+    /// around it.
+    capsule: RECT,
     body: Font,
     bold: Font,
     tiny: Font,
@@ -99,6 +103,7 @@ fn raise(count: usize, archived: bool, notice: Option<String>) {
                 work,
                 s,
                 size: (0, 0.0),
+                capsule: RECT { left: 0, top: 0, right: 0, bottom: 0 },
                 body,
                 bold,
                 tiny,
@@ -154,10 +159,10 @@ pub fn frame(dt: f32) -> bool {
         let mut slot = cell.borrow_mut();
         let Some(t) = slot.as_mut() else { return false };
         let moving = t.rise.step(dt);
-        let over = hovered(t.hwnd);
+        let over = hovered(t);
         t.pressed &= over;
         t.hot.to(if over && t.alive && t.notice.is_none() { 1.0 } else { 0.0 });
-        t.hot.step(dt);
+        let lighting = t.hot.step(dt);
         if t.alive && !over {
             t.left -= dt;
         }
@@ -176,7 +181,9 @@ pub fn frame(dt: f32) -> bool {
             return false;
         }
         render(t);
-        true
+        // Held under the pointer, with nothing moving, the clock stops: the pointer moving
+        // off it (WM_MOUSEMOVE, WM_MOUSELEAVE) starts it again.
+        moving || lighting || !t.alive || !over
     });
     if expire {
         app::finalize_delete();
@@ -184,14 +191,20 @@ pub fn frame(dt: f32) -> bool {
     keep
 }
 
-fn hovered(h: HWND) -> bool {
+/// Whether the pointer is on the capsule (not on the shadow around it).
+fn hovered(t: &Toast) -> bool {
     let mut p = POINT { x: 0, y: 0 };
     let mut r: RECT = unsafe { std::mem::zeroed() };
     unsafe {
         GetCursorPos(&mut p);
-        GetWindowRect(h, &mut r);
+        GetWindowRect(t.hwnd, &mut r);
     }
-    crate::win::util::pt_in(&r, p.x, p.y)
+    crate::win::util::pt_in(&t.capsule, p.x - r.left, p.y - r.top)
+}
+
+/// Whether window point (`x`, `y`) is on the capsule.
+fn on_capsule(x: i32, y: i32) -> bool {
+    TOAST.with(|t| t.borrow().as_ref().is_some_and(|t| crate::win::util::pt_in(&t.capsule, x, y)))
 }
 
 fn render(t: &mut Toast) {
@@ -209,6 +222,7 @@ fn render(t: &mut Toast) {
     let lift = (1.0 - t.rise.value) * 28.0 * s;
     let (x, y) = (m as f32, m as f32 * 0.6 + lift);
     let card = Shape::new(x, y, w as f32, h as f32, h as f32 / 2.0);
+    t.capsule = rect(x as i32, y as i32, w, h);
     c.soft_shadow(&card, s, 1.4 * a);
     c.shape(&card, 0x1C1C1E, 0.94 * a, 1.0, 0.0);
     c.shape(&card, 0xFFFFFF, 0.10 * a, 1.0, 1.0);
@@ -281,8 +295,32 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     unsafe {
         match msg {
             WM_MOUSEACTIVATE => return MA_NOACTIVATE as LRESULT,
-            // Shown on the press, done on the release.
+            // The countdown waits while the pointer is on the capsule: going on, off, or
+            // away, it looks again.
+            WM_MOUSEMOVE => {
+                let mut tme = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
+                TrackMouseEvent(&mut tme);
+                anim::wake(Client::Toast);
+                return 0;
+            }
+            WM_MOUSELEAVE => {
+                anim::wake(Client::Toast);
+                return 0;
+            }
+            // A hand on the capsule, the usual arrow on the shadow around it.
+            WM_SETCURSOR => {
+                let mut p = POINT { x: 0, y: 0 };
+                let mut r: RECT = std::mem::zeroed();
+                GetCursorPos(&mut p);
+                GetWindowRect(h, &mut r);
+                SetCursor(LoadCursorW(null_mut(), if on_capsule(p.x - r.left, p.y - r.top) { IDC_HAND } else { IDC_ARROW }));
+                return 1;
+            }
+            // Shown on the press, done on the release, on the capsule only.
             WM_LBUTTONDOWN => {
+                if !on_capsule(x_of(lp), y_of(lp)) {
+                    return 0;
+                }
                 TOAST.with(|t| {
                     if let Some(t) = t.borrow_mut().as_mut() {
                         t.pressed = true;
@@ -292,6 +330,14 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_LBUTTONUP => {
+                if !on_capsule(x_of(lp), y_of(lp)) {
+                    TOAST.with(|t| {
+                        if let Some(t) = t.borrow_mut().as_mut() {
+                            t.pressed = false;
+                        }
+                    });
+                    return 0;
+                }
                 let notice = TOAST.with(|t| {
                     t.borrow_mut().as_mut().map(|t| {
                         t.pressed = false;
