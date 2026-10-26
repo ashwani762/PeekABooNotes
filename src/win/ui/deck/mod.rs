@@ -41,6 +41,8 @@ mod layout;
 mod draw;
 mod keys;
 mod fullscreen;
+#[cfg(test)]
+mod probe;
 use layout::*;
 use draw::*;
 use keys::{Move, Stop};
@@ -84,6 +86,8 @@ struct Tab {
     color: u8,
     /// The note's window is open: its card is out of the deck (no spine, hollow capsule).
     open: bool,
+    /// Pinned on top of other windows: a dot in its hollow capsule while it's open.
+    pinned: bool,
     /// Position in the spine stack (for open cards: where the spine will return).
     slot: usize,
     reveal: Spring, // 0 = capsule in the pill, 1 = spine on the edge
@@ -96,6 +100,8 @@ struct Tab {
     pull: Spring, // 0 = tucked, 1 = pulled out (preview)
     /// Cached spine label layout: (max length, fitted text, text length, cell height).
     fitted: Option<(i32, String, i32, i32)>,
+    /// The spine label drawn (see `draw::label_sprite`), let go with `fitted`.
+    sprites: Vec<Sprite>,
     /// The preview body's laid-out height at the current scale and typography, measured
     /// the first time the card is pulled out (see `begin_preview`).
     body_h: Option<f32>,
@@ -110,6 +116,7 @@ impl Tab {
             body: String::new(),
             color: 0,
             open: false,
+            pinned: false,
             reveal: Spring::unit(0.0, motion::SHINGLE),
             delay: 0.0,
             reveal_goal: 0.0,
@@ -119,9 +126,16 @@ impl Tab {
             press: Spring::unit(1.0, motion::SNAPPY),
             pull: Spring::unit(0.0, motion::DEFAULT),
             fitted: None,
+            sprites: Vec::new(),
             body_h: None,
             slot: 0,
         }
+    }
+
+    /// The label's text, size or font changed: measure and draw it again.
+    fn relabel(&mut self) {
+        self.fitted = None;
+        self.sprites.clear();
     }
 
     fn springs(&mut self) -> [&mut Spring; 6] {
@@ -209,8 +223,8 @@ struct Deck {
     fonts: HashMap<(u8, i32, i32, u8), Font>,
     font_scale: f32,
     canvas: Option<Canvas>,
-    /// The hovered tab whose spine label is too long scrolls: (note, since).
-    marquee: Option<(u64, std::time::Instant)>,
+    /// The hovered tab whose spine label is too long scrolls.
+    marquee: Option<Marquee>,
     /// A label scrolled in the last frame, so the frame clock keeps running.
     marquee_live: bool,
     /// The deck has the keys (Ctrl+Alt+K) until Esc, or until they go elsewhere.
@@ -218,6 +232,9 @@ struct Deck {
     /// Hidden (by the user, or for a full-screen window), it's out only while it has the
     /// keys: Ctrl+Alt+K brought it.
     summoned: bool,
+    /// Where the pointer was when a note opened from the deck: until it moves, the cards
+    /// sliding up under it don't count as pointed at.
+    still: Option<POINT>,
 }
 
 struct Kbd {
@@ -234,9 +251,20 @@ thread_local! {
     static PASS_TO: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
 }
 
-/// Let the label fonts go (with no window open): each keeps DirectWrite state alive.
+/// Let the label fonts go (with no window open): each keeps DirectWrite state alive. The
+/// labels drawn go too.
 pub fn trim() {
-    with(|d| d.fonts.clear());
+    with(|d| {
+        d.fonts.clear();
+        for t in d.tabs.iter_mut() {
+            t.sprites = Vec::new();
+        }
+    });
+}
+
+/// Whether the deck is folded and still: its fonts aren't wanted for now.
+pub fn resting() -> bool {
+    with(|d| !d.open && !d.wide).unwrap_or(true)
 }
 
 fn with<R>(f: impl FnOnce(&mut Deck) -> R) -> Option<R> {
@@ -312,6 +340,7 @@ pub fn create() {
             marquee_live: false,
             kbd: None,
             summoned: false,
+            still: None,
         })
     });
     // As an app bar (without reserving space) we get ABN_FULLSCREENAPP for free.
@@ -366,7 +395,7 @@ pub fn note_edited(id: u64) {
         }
         let label = title.to_uppercase();
         if label != t.label {
-            t.fitted = None;
+            t.relabel();
         }
         t.label = label;
         t.title = title;
@@ -381,16 +410,41 @@ pub fn note_edited(id: u64) {
 }
 
 pub fn frame(dt: f32) -> bool {
-    with(|d| {
-        let moving = step(d, dt);
-        if !d.open && !moving && d.wide {
-            d.wide = false; // fully folded: shrink back to the small pill window
+    let (more, folded) = with(|d| {
+        let (moving, folded, draw) = advance(d, dt);
+        if draw {
+            render(d);
         }
-        d.marquee_live = false;
-        render(d);
-        moving || d.marquee_live
+        repoint(d);
+        (moving || d.marquee_live, folded)
     })
-    .unwrap_or(false)
+    .unwrap_or((false, false));
+    if folded {
+        // What the cards' text took (Direct2D, fonts, layouts) goes back to Windows once
+        // the deck has rested folded for a moment, as it does when a window closes.
+        app::schedule_trim();
+    }
+    more
+}
+
+/// One frame's motion: (still moving, just folded, anything to draw).
+fn advance(d: &mut Deck, dt: f32) -> (bool, bool, bool) {
+    let moving = step(d, dt);
+    let folded = !d.open && !moving && d.wide;
+    if folded {
+        d.wide = false; // fully folded: shrink back to the small pill window
+    }
+    // Nothing moves but a scrolling label, and it hasn't come a pixel further: the frame
+    // would be the last one again (it moves 34 px a second, and rests at its ends).
+    if !moving
+        && let Some(m) = d.marquee.as_ref()
+        && let (at, true) = m.now(d.geo.s)
+        && at == m.drawn
+    {
+        return (false, folded, false);
+    }
+    d.marquee_live = false;
+    (moving, folded, true)
 }
 
 fn update_visibility(d: &mut Deck) {
@@ -786,6 +840,74 @@ fn end_preview(d: &mut Deck) {
     anim::wake(Client::Deck);
 }
 
+/// The pointer is over `hit` now: it lights up, and a card comes out after a rest there (at
+/// once while another is out, as the pointer scrubs along the deck).
+fn point_at(d: &mut Deck, hit: Hit) {
+    if hit == d.hover {
+        return;
+    }
+    d.hover = hit;
+    // While the deck has the keys, the ring goes where the pointer lights, so Enter opens
+    // what's shown.
+    let stop = match hit {
+        Hit::Tab(i) => Some(Stop::Card(d.tabs[i].id)),
+        Hit::More => Some(Stop::More),
+        Hit::Plus => Some(Stop::Plus),
+        Hit::None => None,
+    };
+    if let (Some(k), Some(stop)) = (d.kbd.as_mut(), stop) {
+        k.at = Some(stop);
+    }
+    unsafe { KillTimer(d.hwnd, T_PREVIEW) };
+    match hit {
+        Hit::Tab(i) if d.previewing => begin_preview(d, i),
+        Hit::Tab(_) => unsafe {
+            SetTimer(d.hwnd, T_PREVIEW, motion::PREVIEW_DWELL_MS, None);
+        },
+        _ => {
+            if d.previewing {
+                end_preview(d);
+            }
+        }
+    }
+    anim::wake(Client::Deck);
+}
+
+/// A note opens from the deck: the cards close up behind its card, but what slides under
+/// the pointer is not pointed at until the pointer moves.
+fn hold_still() {
+    let mut at = POINT { x: 0, y: 0 };
+    unsafe { GetCursorPos(&mut at) };
+    with(|d| {
+        d.still = Some(at);
+        point_at(d, Hit::None);
+    });
+}
+
+/// The cards moved under a pointer that didn't (fanning out, making room, tucking back):
+/// what it's over now is what it points at, as if it had moved, so resting on a card that
+/// slid under it brings that card out. Not while dragging, a menu is up or the deck has
+/// the keys, nor while the pointer stays where it was when a note opened from here.
+fn repoint(d: &mut Deck) {
+    if !(d.open && d.wide) || d.drag.is_some() || d.menu || d.kbd.is_some() {
+        return;
+    }
+    let mut at = POINT { x: 0, y: 0 };
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    unsafe {
+        GetCursorPos(&mut at);
+        GetWindowRect(d.hwnd, &mut r);
+    }
+    if !crate::win::util::pt_in(&r, at.x, at.y) || d.still.is_some_and(|p| (p.x, p.y) == (at.x, at.y)) {
+        return;
+    }
+    let hit = hit_test(d, at.x - r.left, at.y - r.top);
+    if hit != d.hover {
+        point_at(d, hit);
+        tip(d, hit, false);
+    }
+}
+
 /// While a card's menu is up: has the pointer moved on to another card (or the + / more
 /// buttons)? Then the menu and the pulled-out card go away together, and the deck is
 /// live again under the pointer for whatever it reaches next.
@@ -925,40 +1047,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     return Action::None;
                 }
             }
-            let hit = hit_test(d, x, y);
-            if hit != d.hover {
-                d.hover = hit;
-                // While the deck has the keys, the ring goes where the pointer lights, so
-                // Enter opens what's shown.
-                let stop = match hit {
-                    Hit::Tab(i) => Some(Stop::Card(d.tabs[i].id)),
-                    Hit::More => Some(Stop::More),
-                    Hit::Plus => Some(Stop::Plus),
-                    Hit::None => None,
-                };
-                if let (Some(k), Some(stop)) = (d.kbd.as_mut(), stop) {
-                    k.at = Some(stop);
-                }
-                unsafe { KillTimer(hwnd, T_PREVIEW) };
-                match hit {
-                    Hit::Tab(i) if d.previewing => begin_preview(d, i), // scrub between cards instantly
-                    Hit::Tab(_) => unsafe {
-                        SetTimer(hwnd, T_PREVIEW, motion::PREVIEW_DWELL_MS, None);
-                    },
-                    _ => {
-                        if d.previewing {
-                            end_preview(d);
-                        }
-                    }
-                }
-                anim::wake(Client::Deck);
+            // A note just opened from here, and the pointer hasn't moved since: the cards
+            // that slid up under it aren't what it's pointing at.
+            let mut at = POINT { x: 0, y: 0 };
+            unsafe { GetCursorPos(&mut at) };
+            if d.still.is_some_and(|p| (p.x, p.y) != (at.x, at.y)) {
+                d.still = None;
             }
+            let hit = if d.still.is_some() { Hit::None } else { hit_test(d, x, y) };
+            point_at(d, hit);
             // On every move: the buttons slide as a pulled-out card tucks back.
             tip(d, hit, false);
             Action::None
         }),
         WM_MOUSELEAVE => with(|d| {
             d.tracking = false;
+            d.still = None;
             crate::win::ui::tooltip::leave(hwnd);
             // The pointer "leaves" for our own context menu: hold still until it closes.
             // While the deck has the keys it stays open, lit where the ring is.
@@ -1162,8 +1266,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         _ => None,
     };
     match action {
-        Some(Action::Open(id)) => app::toggle_note(id),
-        Some(Action::New) => app::new_note(),
+        Some(Action::Open(id)) => {
+            hold_still();
+            app::toggle_note(id)
+        }
+        Some(Action::New) => {
+            hold_still();
+            app::new_note()
+        }
         Some(Action::More) => app::show_all_notes(false),
         Some(Action::TabMenu(id, at)) => {
             // Beside the pulled-out card, never over it, at the height you clicked (from

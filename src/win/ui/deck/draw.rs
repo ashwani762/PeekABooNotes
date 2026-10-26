@@ -4,6 +4,7 @@
 //! Painting the deck: the pill, the cards and their spines, the + and "+N" buttons.
 
 use super::*;
+use crate::win::render::gfx::Image;
 use crate::win::ui::focus;
 
 pub(super) fn font(d: &mut Deck, face: u8, px: f32, weight: i32) -> Font {
@@ -27,6 +28,20 @@ pub(super) fn render(d: &mut Deck) {
     if !d.visible {
         return;
     }
+    let (wx, wy) = paint(d, app::dark());
+    if let Some(c) = d.canvas.as_ref() {
+        c.present(d.hwnd, wx, wy);
+    }
+    unsafe {
+        if IsWindowVisible(d.hwnd) == 0 {
+            ShowWindow(d.hwnd, SW_SHOWNOACTIVATE);
+            SetWindowPos(d.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+}
+
+/// Draw the deck as it is now on its canvas; returns where the window goes on screen.
+pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
     // Only as wide as what is visible: the full width is needed only while a card is out.
     if d.wide {
         let s = d.geo.s;
@@ -47,7 +62,6 @@ pub(super) fn render(d: &mut Deck) {
     if d.canvas.as_ref().map(|c| (c.w, c.h)) != Some((ww, wh)) {
         d.canvas = Some(Canvas::new(ww, wh));
     }
-    let dark = app::dark();
     let mat = theme::chrome(dark);
     let ring = ring_hit(d);
     let mut c = d.canvas.take().unwrap();
@@ -154,14 +168,8 @@ pub(super) fn render(d: &mut Deck) {
         c.fill_raw(0, z.top, z.left, z.bottom, 0);
         c.fill_raw(z.right, z.top, ww, z.bottom, 0);
     }
-    c.present(d.hwnd, wx, wy);
     d.canvas = Some(c);
-    unsafe {
-        if IsWindowVisible(d.hwnd) == 0 {
-            ShowWindow(d.hwnd, SW_SHOWNOACTIVATE);
-            SetWindowPos(d.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-    }
+    (wx, wy)
 }
 
 /// How far a scrolling spine label has moved after `t` seconds, and whether it's still
@@ -187,6 +195,57 @@ fn marquee_offset(t: f32, span: f32, s: f32) -> (f32, bool) {
     (f * span, true)
 }
 
+/// The pointed-at card's label, too long for its spine, scrolling along it.
+pub(super) struct Marquee {
+    pub(super) id: u64,
+    since: std::time::Instant,
+    /// How much longer the label is than the spine's room.
+    span: f32,
+    /// What the last frame drew (see `now`).
+    pub(super) drawn: i32,
+}
+
+impl Marquee {
+    /// How far the label is along now, in whole pixels (it's put down on whole pixels),
+    /// or -1 while it rests at its start, shortened; and whether it still moves.
+    pub(super) fn now(&self, s: f32) -> (i32, bool) {
+        let (offset, moving) = marquee_offset(self.since.elapsed().as_secs_f32(), self.span, s);
+        (if moving && offset > 0.0 { offset.round() as i32 } else { -1 }, moving)
+    }
+}
+
+/// A spine label as Direct2D drew it, upright on a clear canvas: its text and ink, the
+/// picture, the room left around the text for glyphs that reach past their box, and the
+/// text's length.
+pub(super) struct Sprite {
+    text: String,
+    ink: u32,
+    img: Image,
+    pad: i32,
+    len: i32,
+}
+
+/// Card `t`'s label `text` (`len` long, `cell_h` across) as a picture, drawn the first time
+/// it's wanted and kept: a card shows its shortened label, and while pointed at the whole
+/// one, so it keeps two. Drawing text costs a Direct2D pass each time; putting a picture
+/// down costs a few thousand pixels.
+fn label_sprite<'a>(t: &'a mut Tab, lf: &Font, text: &str, len: i32, cell_h: i32, ink: u32) -> &'a Sprite {
+    if let Some(k) = t.sprites.iter().position(|s| s.ink == ink && s.text == text) {
+        return &t.sprites[k];
+    }
+    let pad = 3;
+    let mut c = Canvas::new(cell_h.max(lf.ascent + lf.descent) + 2 * pad, len.max(1) + 2 * pad);
+    c.clear(0);
+    let o = (pad as f32, (pad + len) as f32);
+    c.rotated(text, lf, o, -90.0, o, rect(0, 0, c.w, c.h), ink, 1.0);
+    let img = c.snapshot(rect(0, 0, c.w, c.h)).unwrap_or_else(|| Image::from_pixels(1, 1, vec![0]));
+    if t.sprites.len() >= 2 {
+        t.sprites.remove(0);
+    }
+    t.sprites.push(Sprite { text: text.to_string(), ink, img, pad, len });
+    t.sprites.last().unwrap()
+}
+
 pub(super) fn draw_card(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, origin_y: f32, dark: bool) {
     c.begin_batch();
     draw_card_inner(d, c, i, w, origin_y, dark);
@@ -205,6 +264,13 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
         let a = clamp01(d.pill.value);
         if d.tabs[i].open {
             c.shape(&cp.shape, col.accent, a, 1.0, 1.6 * s);
+            if d.tabs[i].pinned {
+                // Pinned on top of everything: a pin's head in the hollow capsule.
+                let sh = cp.shape;
+                let r = 1.4 * s;
+                let (x, y) = (sh.x + sh.w / 2.0, sh.y + sh.h / 2.0);
+                c.shape(&Shape::new(x - r, y - r, 2.0 * r, 2.0 * r, r), col.accent, a, 1.0, 0.0);
+            }
         } else {
             c.shape(&cp.shape, col.accent, a, 1.0, 0.0);
         }
@@ -242,8 +308,11 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
     }
     let lf = font(d, 0, 10.5, FW_SEMIBOLD as i32);
     let reserve = if open { 16.0 * s } else { 0.0 };
-    // Quantise so a card growing/shrinking doesn't re-measure its label every frame.
-    let max_len = ((sh.h - 28.0 * s - reserve).max(10.0) as i32 / 8) * 8;
+    // Fitted to the card as it is once fanned out, so the label doesn't change as the card
+    // grows out of its capsule (the card's edge cuts it meanwhile). Quantised so a card
+    // being pulled out doesn't re-measure its label every frame.
+    let tall = lerp(g.tab_h, preview_height(d, i), cp.pull);
+    let max_len = ((tall - 28.0 * s - reserve).max(10.0) as i32 / 8) * 8;
     let (label, len, cell_h) = match &d.tabs[i].fitted {
         Some((m, l, len, ch)) if *m == max_len => (l.clone(), *len, *ch),
         _ => {
@@ -255,44 +324,48 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
     };
     // The hovered tab's label, if it was shortened, scrolls along the spine to show it all.
     let scroll = d.hover == Hit::Tab(i) && d.drag.is_none() && label_a >= 0.999 && label != d.tabs[i].label && !crate::win::render::anim::reduced();
-    let (label, len, offset) = if scroll {
+    let (label, len, offset, whole) = if scroll {
         let id = d.tabs[i].id;
-        let t0 = match d.marquee {
-            Some((m, t0)) if m == id => t0,
-            _ => {
-                let now = std::time::Instant::now();
-                d.marquee = Some((id, now));
-                now
-            }
+        let whole_len = lf.measure(&d.tabs[i].label).0;
+        let span = (whole_len - max_len).max(0) as f32;
+        let m = match d.marquee.take() {
+            Some(m) if m.id == id => Marquee { span, ..m },
+            _ => Marquee { id, since: std::time::Instant::now(), span, drawn: -1 },
         };
-        let span = (lf.measure(&d.tabs[i].label).0 - max_len).max(0) as f32;
-        let (offset, moving) = marquee_offset(t0.elapsed().as_secs_f32(), span, s);
+        let (at, moving) = m.now(s);
+        d.marquee = Some(Marquee { drawn: at, ..m });
         d.marquee_live |= moving;
-        if moving { (d.tabs[i].label.clone(), max_len, offset) } else { (label, len, 0.0) }
+        // Resting at its start it reads as it does unpointed at, ending in "…"; the whole
+        // label, cut where the spine ends, only once it moves.
+        if at >= 0 { (d.tabs[i].label.clone(), whole_len, at as f32, true) } else { (label, len, 0.0, false) }
     } else {
         // Off this tab: the next time it's pointed at, its label scrolls again.
-        if d.hover != Hit::Tab(i) && d.marquee.is_some_and(|(m, _)| m == d.tabs[i].id) {
+        if d.hover != Hit::Tab(i) && d.marquee.as_ref().is_some_and(|m| m.id == d.tabs[i].id) {
             d.marquee = None;
         }
-        (label, len, 0.0)
+        (label, len, 0.0, false)
     };
     let spine_cx = cp.spine_x + dir * spine_w / 2.0;
-    let (ox, oy) = rot(spine_cx - cell_h as f32 / 2.0, sh.y + 14.0 * s + len as f32 + offset);
+    // While the whole label runs the spine's length, its start sits at the foot of the
+    // spine's room and moves down past it by `offset`.
+    let foot = sh.y + 14.0 * s + if whole { max_len as f32 } else { len as f32 };
+    let (ox, oy) = rot(spine_cx - cell_h as f32 / 2.0, foot + offset);
     let clip = if scroll {
         rect(sh.x.min(sh.x + sh.w) as i32 - 4, (sh.y + 14.0 * s) as i32, sh.w as i32 + 8, max_len)
     } else {
         rect(sh.x.min(sh.x + sh.w) as i32 - 4, sh.y as i32 - 4, sh.w as i32 + 8, sh.h as i32 + 8)
     };
-    // Reads bottom-to-top along the spine: rotated -90 degrees, plus the card's lean.
-    let angle = -90.0 + sh.angle.to_degrees();
-    c.rotated(&label, &lf, (ox, oy), angle, (ox, oy), clip, ink, 0.9 * label_a);
+    // Reads bottom-to-top along the spine: turned -90 degrees, plus the card's lean. Drawn
+    // once, and put down turned with the card from then on.
+    let lab = label_sprite(&mut d.tabs[i], &lf, &label, len, cell_h, ink);
+    c.over_turned(&lab.img, (lab.pad as f32, (lab.pad + lab.len) as f32), (ox, oy), sh.angle, clip, 0.9 * label_a);
     if scroll {
         // Soften the edge(s) where the moving label is cut, instead of slicing letters.
         c.flush();
         let span = (sh.y + 14.0 * s) as i32;
         let fade = (12.0 * s) as i32;
         let (x0, xw) = ((spine_cx - cell_h as f32 / 2.0) as i32 - 3, cell_h + 6);
-        let cut_end = offset < (lf.measure(&label).0 - max_len) as f32 - 0.5;
+        let cut_end = whole && offset < (len - max_len) as f32 - 0.5;
         for k in 0..fade {
             // Fully paper at the very edge, so nothing of a cut glyph shows there.
             let a = k as f32 / fade as f32;

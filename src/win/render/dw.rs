@@ -391,6 +391,9 @@ fn draw(t: &mut Target, layout: IDWriteTextLayout, origin: (f32, f32), angle: f3
     if b.right <= b.left || b.bottom <= b.top || alpha <= 0.003 {
         return;
     }
+    // In quarter degrees: Direct2D keeps a colour glyph's rendering for each angle it's
+    // drawn at (see `render`), and a card leaning as it moves would be at a new one each frame.
+    let angle = (angle * 4.0).round() / 4.0;
     let op = Op { layout, origin, angle, pivot, bounds: b, rgb, alpha };
     match t.batch.as_mut() {
         Some(q) => q.push(op),
@@ -398,9 +401,33 @@ fn draw(t: &mut Target, layout: IDWriteTextLayout, origin: (f32, f32), angle: f3
     }
 }
 
-/// Draw recorded ops: one BindDC/BeginDraw/EndDraw over their union, then a single
-/// premultiplied composite of that region onto the image.
+/// How finely text's opacity is told apart (see `render`).
+const ALPHA_STEPS: f32 = 255.0;
+
+/// Draw recorded ops: for each opacity among them, one BindDC/BeginDraw/EndDraw over their
+/// union, then a single premultiplied composite of that region onto the image, at that
+/// opacity. Direct2D draws them opaque: it keeps what it made of a colour glyph (an emoji)
+/// for every opacity, and every angle, it was ever drawn at, for as long as the render
+/// target lives, so text fading in and out over an animation made it grow by about 10 KB
+/// a frame without end. Fading the pixels it drew is the same, and costs it nothing.
 pub fn render(t: &mut Target, ops: &[Op]) {
+    let level = |o: &Op| (o.alpha.clamp(0.0, 1.0) * ALPHA_STEPS).round() as u32;
+    // Most batches have one or two opacities (a card's label, its text).
+    let mut levels: Vec<u32> = Vec::new();
+    for o in ops {
+        let l = level(o);
+        if !levels.contains(&l) {
+            levels.push(l);
+        }
+    }
+    for l in levels {
+        let group: Vec<&Op> = ops.iter().filter(|o| level(o) == l).collect();
+        render_at(t, &group, l as f32 / ALPHA_STEPS);
+    }
+}
+
+/// `render` for ops of one opacity, `alpha`.
+fn render_at(t: &mut Target, ops: &[&Op], alpha: f32) {
     if ops.is_empty() {
         return;
     }
@@ -426,7 +453,7 @@ pub fn render(t: &mut Target, ops: &[Op]) {
             let m = if o.angle.abs() > 0.01 { Matrix3x2::rotation_around(o.angle, Vector2 { X: o.pivot.0, Y: o.pivot.1 }) * shift } else { shift };
             e.rt.SetTransform(&m);
             let c = |sh: u32| ((o.rgb >> sh) & 0xFF) as f32 / 255.0;
-            e.brush.SetColor(&D2D1_COLOR_F { r: c(16), g: c(8), b: c(0), a: o.alpha.clamp(0.0, 1.0) });
+            e.brush.SetColor(&D2D1_COLOR_F { r: c(16), g: c(8), b: c(0), a: 1.0 });
             e.rt.DrawTextLayout(Vector2 { X: o.origin.0, Y: o.origin.1 }, &o.layout, &e.brush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
             e.rt.SetTransform(&shift);
             e.rt.PopAxisAlignedClip();
@@ -438,16 +465,21 @@ pub fn render(t: &mut Target, ops: &[Op]) {
         return;
     }
     unsafe { windows_sys::Win32::Graphics::Gdi::GdiFlush() };
-    // Premultiplied "over" of the rendered text onto the image.
+    // Premultiplied "over" of the rendered text, at `alpha`, onto the image.
+    let k = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
     for y in u.top..u.bottom {
         let row = (y * t.w) as usize;
         for x in u.left..u.right {
             let i = row + x as usize;
-            let s = t.scratch[i];
-            let sa = s >> 24;
-            if sa == 0 {
+            let mut s = t.scratch[i];
+            if s >> 24 == 0 {
                 continue;
             }
+            if k < 255 {
+                let f = |sh: u32| ((((s >> sh) & 0xFF) * k + 127) / 255) << sh;
+                s = f(24) | f(16) | f(8) | f(0);
+            }
+            let sa = s >> 24;
             let d = t.img[i];
             let inv = 255 - sa;
             let ch = |sh: u32| -> u32 {
@@ -545,5 +577,34 @@ mod tests {
         f.measure(&format!("text {}", MOST_LAYOUTS + 99));
         assert_eq!(cached_layouts(), kept);
         LAYOUTS.with(|c| c.borrow_mut().clear());
+    }
+
+    /// Text drawn faded is the text drawn opaque, at that opacity; in one batch with text
+    /// at another opacity, each keeps its own.
+    #[test]
+    fn faded_text_is_opaque_text_faded() {
+        use crate::win::render::gfx::Canvas;
+        let f = Font::new(14.0, 400, "Segoe UI");
+        let r = RECT { left: 4, top: 4, right: 120, bottom: 30 };
+        let shot = |alphas: &[f32]| {
+            let mut c = Canvas::new(124, 34 * alphas.len() as i32);
+            c.clear(0);
+            c.begin_batch();
+            for (k, a) in alphas.iter().enumerate() {
+                let r = RECT { top: r.top + 34 * k as i32, bottom: r.bottom + 34 * k as i32, ..r };
+                c.text("Gift ideas \u{1F381}", &f, r, 0x204060, *a, 0);
+            }
+            c.flush();
+            c.copy_out(RECT { left: 0, top: 0, right: c.w, bottom: c.h })
+        };
+        let (opaque, both) = (shot(&[1.0, 1.0]), shot(&[1.0, 0.4]));
+        let k = (0.4f32 * 255.0).round() as u32;
+        let n = opaque.len() / 2;
+        assert!(opaque[..n].iter().any(|p| p >> 24 != 0));
+        assert_eq!(both[..n], opaque[..n]);
+        for (f, o) in both[n..].iter().zip(&opaque[n..]) {
+            let scaled = |sh: u32| ((((o >> sh) & 0xFF) * k + 127) / 255) << sh;
+            assert_eq!(*f, scaled(24) | scaled(16) | scaled(8) | scaled(0));
+        }
     }
 }

@@ -109,7 +109,6 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     let window = if kind == Kind::Open { &to.0 } else { &from.0 };
     let (_, s) = crate::win::ui::screen::of_rect(window);
     let pad = (48.0 * s) as i32;
-    let b = union(&from.0, &to.0, pad);
     let (ww, wh) = window_size(&from.0, &to.0, pad);
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
     let hwnd = unsafe {
@@ -128,6 +127,19 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
             null_mut(),
         )
     };
+    let mut g = card(hwnd, kind, from, to, color, content, s);
+    g.on_arrive = on_arrive;
+    render(&mut g);
+    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+    GHOSTS.with(|gs| gs.borrow_mut().push(g));
+    anim::wake(Client::Ghost);
+}
+
+/// The card flying from `from` to `to` at scale `s`, drawn in `hwnd`.
+fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, s: f32) -> Ghost {
+    let pad = (48.0 * s) as i32;
+    let b = union(&from.0, &to.0, pad);
+    let (ww, wh) = window_size(&from.0, &to.0, pad);
     let params = match kind {
         Kind::Open => (0.86, 0.38),
         Kind::Close => (1.0, 0.3),
@@ -160,7 +172,7 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
         // The note's own typography, so the flight matches the window it becomes.
         title_font: crate::win::editor::rich::preview_fonts(s).0,
         body_font: crate::win::editor::rich::preview_fonts(s).1,
-        on_arrive,
+        on_arrive: None,
         arrived: false,
     };
     g.x.to(lx(t));
@@ -168,10 +180,7 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     g.w.to((t.right - t.left) as f32);
     g.h.to((t.bottom - t.top) as f32);
     g.r.to(to.1);
-    render(&mut g);
-    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
-    GHOSTS.with(|gs| gs.borrow_mut().push(g));
-    anim::wake(Client::Ghost);
+    g
 }
 
 /// 0 at the start of the flight, 1 on arrival (by size, so it is robust to overshoot).
@@ -185,7 +194,12 @@ fn progress(g: &Ghost) -> f32 {
 }
 
 fn render(g: &mut Ghost) {
-    let dark = app::dark();
+    let (x, y) = paint(g, app::dark());
+    g.canvas.present(g.hwnd, x, y);
+}
+
+/// Draw the card as it is now; returns where its window goes on screen.
+fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
     let s = g.s;
     let p = progress(g);
     let alpha = match g.kind {
@@ -215,10 +229,13 @@ fn render(g: &mut Ghost) {
         c.flush();
         match (g.kind, g.from_image.as_ref()) {
             (Kind::Open, Some(from)) => {
-                // From the deck card straight into the window, with no empty card between.
-                let k = clamp01((p - 0.05) / 0.55);
-                c.image(from, sh.x, sh.y, &sh, alpha * (1.0 - k));
-                c.image(img, sh.x, sh.y, &sh, alpha * k);
+                // From the deck card into the window: the card's words fade before the
+                // window's come, so the two never show at once, doubled a little apart
+                // (they're laid out differently), and the paper never stands empty for long.
+                let out = clamp01((p - 0.05) / 0.25);
+                let into = clamp01((p - 0.27) / 0.33);
+                c.image(from, sh.x, sh.y, &sh, alpha * (1.0 - out));
+                c.image(img, sh.x, sh.y, &sh, alpha * into);
             }
             _ => c.image(img, sh.x, sh.y, &sh, content),
         }
@@ -242,7 +259,7 @@ fn render(g: &mut Ghost) {
         }
     }
     c.flush();
-    c.present(g.hwnd, g.origin.0 + wx as i32 - g.pad, g.origin.1 + wy as i32 - g.pad);
+    (g.origin.0 + wx as i32 - g.pad, g.origin.1 + wy as i32 - g.pad)
 }
 
 /// Drop every card still in flight (quitting).
@@ -308,5 +325,46 @@ mod tests {
         assert_eq!((w, h), (440 + 96, 550 + 96));
         // Four bytes a pixel: about a megabyte, where the whole path would take 50.
         assert!(w * h * 4 < 2_000_000);
+    }
+
+    /// Timing (run with --ignored --nocapture): what a note's flights cost to draw, frame
+    /// by frame at 99 Hz: open from a pulled-out deck card into a 320 x 360 window with its
+    /// picture, and back to its tab.
+    #[test]
+    #[ignore]
+    fn probe_flights() {
+        use super::*;
+        let paper = |w: i32, h: i32| crate::win::render::gfx::Image::from_pixels(w, h, vec![0xFFF6_E7A6; (w * h) as usize]);
+        let tab = RECT { left: 2236, top: 400, right: 2540, bottom: 560 };
+        let note = RECT { left: 1880, top: 300, right: 2200, bottom: 660 };
+        for kind in [Kind::Open, Kind::Close] {
+            let (from, to) = if kind == Kind::Open { ((tab, 14.0), (note, 8.0)) } else { ((note, 8.0), (tab, 14.0)) };
+            let content = Content {
+                title: "Q4 goals, draft".into(),
+                body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(),
+                body_top: None,
+                image: Some(paper(320, 360)),
+                from_image: (kind == Kind::Open).then(|| paper(304, 160)),
+            };
+            let mut g = card(null_mut(), kind, from, to, 3, content, 1.0);
+            let (mut n, t0) = (0, std::time::Instant::now());
+            loop {
+                let mut moving = false;
+                for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade] {
+                    moving |= sp.step(1.0 / 99.0);
+                }
+                if !g.arrived && !moving {
+                    g.arrived = true;
+                    g.fade.to(0.0);
+                }
+                paint(&mut g, false);
+                n += 1;
+                if (g.arrived && g.fade.settled() && g.fade.value <= 0.01) || n > 300 {
+                    break;
+                }
+            }
+            let spent = t0.elapsed();
+            eprintln!("PROBE flight {}: {n} frames, {spent:.1?} ({:.2?} a frame)", if kind == Kind::Open { "open" } else { "close" }, spent / n);
+        }
     }
 }

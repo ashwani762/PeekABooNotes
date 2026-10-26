@@ -8,6 +8,11 @@ use super::*;
 pub(super) fn compute_geo(n_items: usize) -> Geo {
     let (left, pos, max_tabs) = app::store(|s| (s.d.settings.edge_left, s.d.settings.deck_pos, s.d.settings.deck_max.clamp(3, 16) as usize));
     let (work, s) = monitor_geo();
+    geo_for(n_items, left, pos, max_tabs, work, s)
+}
+
+/// The deck's geometry for `n_items` cards on the edge of `work` at scale `s`.
+pub(super) fn geo_for(n_items: usize, left: bool, pos: f32, max_tabs: usize, work: RECT, s: f32) -> Geo {
     let wh = (work.bottom - work.top) as f32;
     let mut g = Geo { s, left, work, ..Default::default() };
     let gap = -6.0 * s; // shingled: each card tucks slightly under the next
@@ -48,14 +53,14 @@ pub(super) fn tab_texts(id: u64) -> (String, String) {
 
 /// Rebuild the tab list from the store, keeping the springs of tabs that still exist.
 pub(super) fn sync(d: &mut Deck) {
-    let rows: Vec<(u64, u8)> = app::store(|s| s.active_notes().into_iter().filter(|n| !n.off_deck).map(|n| (n.id, n.color)).collect());
+    let rows: Vec<(u64, u8, bool)> = app::store(|s| s.active_notes().into_iter().filter(|n| !n.off_deck).map(|n| (n.id, n.color, n.pinned)).collect());
     let open: Vec<u64> = app::ui(|u| u.notes.keys().copied().collect());
     let in_deck = rows.iter().filter(|r| !open.contains(&r.0)).count();
     let before = stops(d);
     let mut g = compute_geo(in_deck);
     let mut old: HashMap<u64, Tab> = d.tabs.drain(..).map(|t| (t.id, t)).collect();
     let mut slot = 0usize;
-    for (id, color) in rows.into_iter() {
+    for (id, color, pinned) in rows.into_iter() {
         let is_open = open.contains(&id);
         // Only cards in the deck count toward its size: open notes take no slot (they
         // keep a hollow capsule in the pill), so they must never crowd real cards out.
@@ -79,12 +84,13 @@ pub(super) fn sync(d: &mut Deck) {
         }
         let label = title.to_uppercase();
         if label != t.label {
-            t.fitted = None;
+            t.relabel();
         }
         t.label = label;
         t.title = title;
         t.body = body;
         t.color = color;
+        t.pinned = pinned;
         if is_open != t.open {
             t.open = is_open;
             // Out: the ghost carried the card away. Back: it slides in from its capsule.
@@ -121,7 +127,7 @@ pub(super) fn sync(d: &mut Deck) {
         d.fonts.clear();
         d.font_scale = g.s;
         for t in d.tabs.iter_mut() {
-            t.fitted = None;
+            t.relabel();
         }
     }
     // Text, scale or typography may have changed: measure again when next pulled out,
@@ -321,9 +327,18 @@ pub(super) fn hit_test(d: &Deck, x: i32, y: i32) -> Hit {
     let g = &d.geo;
     let s = g.s;
     let (fx, fy) = (x as f32, y as f32);
-    // Topmost first: pulled-out cards, then tabs from the bottom of the stack up.
+    // Topmost first: pulled-out cards, then tabs from the bottom of the stack up. Along the
+    // edge, where the tabs are, a pulled-out card counts only across its own tab: past it,
+    // the pointer moving along the edge is on the next tab, under the card, which comes out
+    // in its place.
+    let along_edge = if g.left { fx < TAB_W * s } else { fx >= g.ew as f32 - TAB_W * s };
+    let first = |i: usize| {
+        let t = &d.tabs[i];
+        let own = fy >= t.y.value && fy < t.y.value + g.tab_h;
+        if along_edge && !own && t.pull.value > 0.0 { -1.0 } else { t.pull.value }
+    };
     let mut order: Vec<usize> = (0..d.tabs.len()).collect();
-    order.sort_by(|&a, &b| d.tabs[b].pull.value.partial_cmp(&d.tabs[a].pull.value).unwrap_or(std::cmp::Ordering::Equal).then(b.cmp(&a)));
+    order.sort_by(|&a, &b| first(b).partial_cmp(&first(a)).unwrap_or(std::cmp::Ordering::Equal).then(b.cmp(&a)));
     for i in order {
         if d.tabs[i].open || d.tabs[i].reveal.value < 0.3 {
             continue;
