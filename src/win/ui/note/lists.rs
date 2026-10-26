@@ -1099,6 +1099,39 @@ mod tests {
         assert_eq!(rich::to_markdown(h, true), "# T\nlet a");
     }
 
+    /// Enter on a code block's first line: the new line doesn't take the first line's air
+    /// above it, so the lines stay evenly spaced.
+    #[test]
+    fn enter_on_a_code_blocks_first_line_keeps_it_even() {
+        // Where each line of the code block holding `cp` starts, and its paragraph spacing.
+        let lines = |h: HWND| {
+            let t = rich::text(h);
+            let (_, _, ca, cb) = rich::cell_at(h, &t, 4).unwrap();
+            let starts: Vec<usize> = std::iter::once(ca).chain((ca..cb).filter(|&i| t[i] == rich::CR).map(|i| i + 1)).filter(|&i| i < cb).collect();
+            starts
+                .into_iter()
+                .map(|i| {
+                    rich::set_sel(h, i as i32, i as i32);
+                    let mut pf = rich::ParaFormat2::new();
+                    rich::send(h, rich::EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+                    (rich::baseline_at(h, i as i32).unwrap_or(-1), pf.space_before, pf.space_after)
+                })
+                .collect::<Vec<_>>()
+        };
+        let h = editor("");
+        rich::load_markdown(h, "T\n```\none\ntwo\nthree\n```");
+        rich::style_blocks(h);
+        let t = rich::text(h);
+        let (_, _, ca, cb) = rich::cell_at(h, &t, 4).unwrap();
+        let a = rich::past_tag(h, &t, ca, cb) as i32;
+        rich::set_sel(h, a + 3, a + 3);
+        assert_eq!(block_enter(h), Some(true));
+        let l = lines(h);
+        assert_eq!(l.len(), 4);
+        let gaps: Vec<i32> = l.windows(2).map(|w| w[1].0 - w[0].0).collect();
+        assert!(gaps.iter().all(|&g| g == gaps[0]), "line gaps {gaps:?}, lines (baseline, before, after) {l:?}");
+    }
+
     /// A selection from a line into the quote below it: the line becomes a code block,
     /// the quote stays a quote, and no row marks end up as text.
     #[test]

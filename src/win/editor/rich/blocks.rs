@@ -384,8 +384,16 @@ fn code_styled(h: HWND, a: i32, b: i32, ink: u32) -> bool {
         send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
         (pf.space_before, pf.space_after)
     };
-    let (first, last) = (para(a), para(b));
-    first.0 == CODE_AIR && last.1 == CODE_AIR && (a == b || text(h)[a as usize..b as usize].contains(&CR) == (first.1 == 0))
+    // Every line, not just the first and the last: Enter on the first line gives the new
+    // line the first one's air above it, which left a gap in the middle of the block.
+    let t = text(h);
+    let mut starts = vec![a];
+    starts.extend((a..b).filter(|&i| t.get(i as usize) == Some(&CR)).map(|i| i + 1).filter(|&i| i <= b));
+    let n = starts.len();
+    starts.iter().enumerate().all(|(k, &at)| {
+        let (before, after) = para(at);
+        before == if k == 0 { CODE_AIR } else { 0 } && after == if k + 1 == n { CODE_AIR } else { 0 }
+    })
 }
 
 // ---------------------------------------------------------------- making blocks
