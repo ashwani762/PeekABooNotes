@@ -297,8 +297,8 @@ pub fn set_archived(ids: &[u64], archived: bool) {
 pub enum Undo {
     /// Notes deleted, with their places among the notes, in the order they were taken out.
     Deleted(Vec<(usize, Note)>),
-    /// Notes archived, with their places in the deck.
-    Archived(Vec<(u64, i64)>),
+    /// Notes archived (each keeps its place in the deck meanwhile).
+    Archived(Vec<u64>),
     /// Notes restored from the archive.
     Restored(Vec<u64>),
     /// Notes an import brought in. Each import is one of its own.
@@ -365,12 +365,12 @@ pub(super) fn undo_label() -> Option<&'static str> {
 
 /// Archive notes from a click or key, with the Undo toast, as deleting has.
 pub fn archive(ids: &[u64]) {
-    let before: Vec<(u64, i64)> = store(|s| ids.iter().filter_map(|id| s.note(*id).filter(|n| !n.archived).map(|n| (n.id, n.order))).collect());
-    if before.is_empty() {
+    let away: Vec<u64> = store(|s| ids.iter().copied().filter(|id| s.note(*id).is_some_and(|n| !n.archived)).collect());
+    if away.is_empty() {
         return;
     }
-    set_archived(ids, true);
-    done(Undo::Archived(before));
+    set_archived(&away, true);
+    done(Undo::Archived(away));
 }
 
 /// Notes `ids` were just imported: the toast offers to take them out again.
@@ -435,24 +435,17 @@ pub fn can_undo() -> bool {
 pub fn undo() {
     let Some(a) = ui(|u| u.undo.pop()) else { return };
     show_undo();
+    let archive = matches!(a, Undo::Restored(_));
     let ids: Vec<u64> = match a {
-        Undo::Archived(v) => {
-            store_mut(|s| {
-                for (id, order) in &v {
-                    if let Some(n) = s.note_mut(*id) {
-                        n.archived = false;
-                        n.order = *order;
-                    }
-                }
-            });
-            v.iter().map(|e| e.0).collect()
-        }
-        Undo::Restored(v) => {
-            v.iter().for_each(|&id| put_away(id));
+        // Each back in its place: archiving left it there (see `set_archived`).
+        Undo::Archived(v) | Undo::Restored(v) => {
+            if archive {
+                v.iter().for_each(|&id| put_away(id));
+            }
             store_mut(|s| {
                 for id in &v {
                     if let Some(n) = s.note_mut(*id) {
-                        n.archived = true;
+                        n.archived = archive;
                     }
                 }
             });
