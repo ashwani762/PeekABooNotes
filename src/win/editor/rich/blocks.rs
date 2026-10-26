@@ -345,13 +345,14 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
                     if code_styled(h, ca as i32, cb as i32, c(ink)) {
                         continue;
                     }
-                    set_sel(h, ca as i32, cb as i32);
-                    let mut cf = CharFormat2::new();
-                    cf.mask = CFM_FACE | CFM_SIZE | CFM_COLOR | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT;
-                    set_face(&mut cf, mono_face());
-                    cf.height = body_size() * 9 / 10;
-                    cf.color = c(ink);
-                    send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+                    let cf = code_format(c(ink));
+                    // The cell's mark too: an empty line there (a new block's) types in the
+                    // mark's look, which was the body font, larger and lower, until the
+                    // block was next restyled.
+                    for (x, y) in [(cb, cb + 1), (ca, cb)] {
+                        set_sel(h, x as i32, y as i32);
+                        send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
+                    }
                     // A little air above the first line and below the last, inside the shading.
                     let mut pf = ParaFormat2::new();
                     pf.mask = PFM_SPACEBEFORE | PFM_SPACEAFTER;
@@ -389,9 +390,23 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
     set_sel(h, a, b);
 }
 
+/// Code's look: monospace, a little smaller than the text around it, plain, in `ink`.
+fn code_format(ink: u32) -> CharFormat2 {
+    let mut cf = CharFormat2::new();
+    cf.mask = CFM_FACE | CFM_SIZE | CFM_COLOR | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT;
+    set_face(&mut cf, mono_face());
+    cf.height = body_size() * 9 / 10;
+    cf.color = ink;
+    cf
+}
+
 /// Whether the code cell text from `a` to `b` already has the code look: the monospace
-/// face at its size in `ink`, plain, with air above its first line and below its last.
+/// face at its size in `ink`, plain, with air above its first line and below its last,
+/// and the cell's mark in that face (what an empty line types in).
 fn code_styled(h: HWND, a: i32, b: i32, ink: u32) -> bool {
+    if !font_is(h, b, b + 1, mono_face(), body_size() * 9 / 10) {
+        return false;
+    }
     set_sel(h, a, b);
     let cf = char_format(h, SCF_SELECTION);
     let all = CFM_FACE | CFM_SIZE | CFM_COLOR | CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT;
@@ -627,7 +642,8 @@ pub fn unwrap(h: HWND, cp: i32) -> Option<(i32, i32)> {
     Some((start, start + len))
 }
 
-/// How far the quote `row` is indented under a list item, in levels (0: at the margin).
+/// How far the quote (or code block) `row` is indented under a list item, in levels (0: at
+/// the margin).
 pub fn quote_level(h: HWND, row: Row) -> usize {
     get(h, row).map_or(0, |(r, _)| if r.indent <= 0 { 0 } else { 1 + level_at(r.indent - BULLET_TEXT) as usize })
 }
@@ -640,7 +656,8 @@ pub fn depth(t: &[u16], row: Row) -> usize {
 /// Quotes go this deep, as RichEdit nests tables.
 pub const MAX_QUOTE_DEPTH: usize = 15;
 
-/// Indent the quote `row` to `level`: level 1 lines its bar up under a list item's text,
+/// Indent the quote (or code block) `row` to `level`: level 1 lines its bar (or box) up
+/// under a list item's text,
 /// each level after that a nesting step further, under an item of the level before (the
 /// deepest, under an item of the deepest list level).
 pub fn set_quote_level(h: HWND, row: Row, level: usize) {
@@ -1203,6 +1220,9 @@ mod tests {
             // Lists inside a quote, and quotes under list items.
             "T\n> - a\n>   - b\n>     - c\n> 1. one\n> 2. two\n> - [ ] task\n> - [x] done",
             "T\n- item\n  > under it\n- next\n  - nested\n    > under that",
+            // Code under list items, its own indents kept, and a count going on after it.
+            "T\n- ab\n  ```rust\n  xyz\n\n    indented\n  ```\n- next\n  - nested\n    ```\n    deeper\n    ```",
+            "T\n1. one\n  ```\n  code\n  ```\n2. two",
             "T\n1. first\n  > quoted\n2. second",
             // Alignment, inside and outside blocks.
             "T\n<p align=\"center\">c</p>\n<p align=\"right\">r</p>\n> <p align=\"center\">in a quote</p>",
@@ -1227,5 +1247,32 @@ mod tests {
             let light = to_markdown(h, false);
             assert_eq!(crate::common::store::title_of(&light), "T", "title: {light}");
         }
+    }
+
+    /// A new code block's empty line types in code's look from the first letter, wherever
+    /// the caret was meanwhile (it typed the body font until the block was next restyled).
+    #[test]
+    fn a_new_code_block_types_in_code() {
+        let code = |h: HWND, a: i32| font_is(h, a, a + 1, mono_face(), body_size() * 9 / 10);
+        let h = editor();
+        insert_text(h, "Title\r");
+        let cell = insert_block(h, 6, Block::Code, 1, 1);
+        set_sel(h, 0, 0);
+        set_sel(h, cell, cell);
+        replace_sel(h, "x");
+        assert!(code(h, cell), "{}", plain(h));
+        // A block that was made before: restyled so too.
+        let h = editor();
+        insert_text(h, "Title\r");
+        let cell = insert_block(h, 6, Block::Code, 1, 1);
+        let mark = cell;
+        set_sel(h, mark, mark + 1);
+        set_body_format(h);
+        assert!(!code(h, mark));
+        style_blocks(h);
+        assert!(code(h, mark));
+        set_sel(h, cell, cell);
+        replace_sel(h, "y");
+        assert!(code(h, cell));
     }
 }

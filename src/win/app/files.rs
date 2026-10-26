@@ -271,8 +271,9 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
     if n > 0 {
         save();
         refresh();
-        imported(added);
     }
+    // A word in the toast either way: what came in (with Undo), and what was here already.
+    imported(added, here);
     Some(Ok(Imported { added: n, here }))
 }
 

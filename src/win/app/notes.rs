@@ -129,7 +129,34 @@ pub(super) fn placement(id: u64) -> RECT {
     let gap = (8.0 * s) as i32;
     let x = if left { ex + gap } else { ex - w - gap };
     let y = (cy - (60.0 * s) as i32).clamp(work.top + gap, (work.bottom - h - gap).max(work.top));
-    RECT { left: x, top: y, right: x + w, bottom: y + h }
+    // Not right on top of a note open there already (new notes made one after another).
+    let open: Vec<(i32, i32)> = ui(|u| u.notes.values().copied().collect::<Vec<_>>())
+        .into_iter()
+        .filter_map(|h| {
+            let mut r: RECT = unsafe { std::mem::zeroed() };
+            (unsafe { GetWindowRect(h, &mut r) } != 0).then_some((r.left, r.top))
+        })
+        .collect();
+    cascade(RECT { left: x, top: y, right: x + w, bottom: y + h }, &open, (24.0 * s) as i32, work, left)
+}
+
+/// Where a note first opening at `r` goes when an open note's corner (of `taken`) is there
+/// already: a step down and away from the deck (`left`: the deck is on the left), as often
+/// as it takes, while it stays in `work`; past that, where it was.
+fn cascade(r: RECT, taken: &[(i32, i32)], step: i32, work: RECT, left: bool) -> RECT {
+    let near = |x: i32, y: i32| taken.iter().any(|&(tx, ty)| (tx - x).abs() < step / 2 && (ty - y).abs() < step / 2);
+    let mut at = r;
+    for _ in 0..20 {
+        if !near(at.left, at.top) {
+            return at;
+        }
+        let dx = if left { step } else { -step };
+        at = RECT { left: at.left + dx, top: at.top + step, right: at.right + dx, bottom: at.bottom + step };
+        if at.bottom > work.bottom || at.left < work.left || at.right > work.right {
+            break;
+        }
+    }
+    r
 }
 
 /// Open a note, growing out of its card in the deck: the card fanned out, else its capsule
@@ -315,8 +342,9 @@ pub enum Undo {
     Archived(Vec<u64>),
     /// Notes restored from the archive.
     Restored(Vec<u64>),
-    /// Notes an import brought in. Each import is one of its own.
-    Imported(Vec<u64>),
+    /// Notes an import brought in, and how many files it left out as notes here already.
+    /// Each import is one of its own.
+    Imported(Vec<u64>, usize),
 }
 
 impl crate::common::undo::Action for Undo {
@@ -346,7 +374,9 @@ impl Undo {
             Undo::Deleted(v) => tn!("toast_deleted", v.len()),
             Undo::Archived(v) => tn!("toast_archived", v.len()),
             Undo::Restored(v) => tn!("toast_restored", v.len()),
-            Undo::Imported(v) => tn!("toast_imported", v.len()),
+            Undo::Imported(v, 0) => tn!("toast_imported", v.len()),
+            // "1 note imported, 2 already here"
+            Undo::Imported(v, here) => t!("result_and", tn!("toast_imported_some", v.len()), tn!("result_already_here", *here)),
         }
     }
 
@@ -356,7 +386,7 @@ impl Undo {
             Undo::Deleted(_) => t!("menu_undo_delete"),
             Undo::Archived(_) => t!("menu_undo_archive"),
             Undo::Restored(_) => t!("menu_undo_restore"),
-            Undo::Imported(_) => t!("menu_undo_import"),
+            Undo::Imported(..) => t!("menu_undo_import"),
         }
     }
 }
@@ -387,9 +417,17 @@ pub fn archive(ids: &[u64]) {
     done(Undo::Archived(away));
 }
 
-/// Notes `ids` were just imported: the toast offers to take them out again.
-pub(super) fn imported(ids: Vec<u64>) {
-    done(Undo::Imported(ids));
+/// Notes `ids` were just imported, and `here` files left out as notes here already: the
+/// toast offers to take them out again, and says what was left out. With none brought in,
+/// it just says so.
+pub(super) fn imported(ids: Vec<u64>, here: usize) {
+    if ids.is_empty() {
+        if here > 0 {
+            toast::notice(tn!("toast_already_here", here));
+        }
+        return;
+    }
+    done(Undo::Imported(ids, here));
 }
 
 /// Bring notes back from the archive, to their places in the deck, with the Undo toast,
@@ -470,7 +508,7 @@ pub fn undo() {
             store_mut(|s| s.put_back(v));
             ids
         }
-        Undo::Imported(v) => {
+        Undo::Imported(v, _) => {
             v.iter().for_each(|&id| put_away(id));
             let gone: Vec<Note> = store_mut(|s| v.iter().filter_map(|id| s.remove(*id)).map(|(_, n)| n).collect());
             save();
@@ -746,6 +784,36 @@ pub fn note_command(id: u64, cmd: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A new note's spot taken by an open note: a step down and away from the deck, again
+    /// for each one there, and back to the spot when the steps would leave the screen.
+    #[test]
+    fn new_notes_cascade() {
+        let work = RECT { left: 0, top: 0, right: 2000, bottom: 1000 };
+        let r = RECT { left: 1500, top: 100, right: 1820, bottom: 460 };
+        let at = |r: RECT| (r.left, r.top);
+        assert_eq!(at(cascade(r, &[], 24, work, false)), (1500, 100));
+        assert_eq!(at(cascade(r, &[(1503, 98)], 24, work, false)), (1476, 124));
+        assert_eq!(at(cascade(r, &[(1500, 100), (1476, 124)], 24, work, false)), (1452, 148));
+        // The deck on the left: away from it is to the right.
+        let l = RECT { left: 100, top: 100, right: 420, bottom: 460 };
+        assert_eq!(at(cascade(l, &[(100, 100)], 24, work, true)), (124, 124));
+        // No room further down: where it was.
+        let low = RECT { left: 1500, top: 630, right: 1820, bottom: 990 };
+        assert_eq!(at(cascade(low, &[(1500, 630)], 24, work, false)), (1500, 630));
+    }
+
+    /// An import's toast says what was left out as notes here already, beside what came in.
+    #[test]
+    fn an_import_toast_says_what_was_here_already() {
+        crate::common::i18n::init("en");
+        assert_eq!(Undo::Imported(vec![1], 0).message(), "Note imported");
+        assert_eq!(Undo::Imported(vec![1, 2, 3], 0).message(), "3 notes imported");
+        assert_eq!(Undo::Imported(vec![1], 2).message(), "1 note imported, 2 already here");
+        assert_eq!(Undo::Imported(vec![1, 2], 1).message(), "2 notes imported, 1 already here");
+        assert_eq!(tn!("toast_already_here", 1), "Note already here");
+        assert_eq!(tn!("toast_already_here", 3), "3 notes already here");
+    }
 
     /// The sweep's copy of a note leaves its pictures' data out, and every link in.
     #[test]

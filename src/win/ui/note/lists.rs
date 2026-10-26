@@ -316,11 +316,22 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
         return None;
     }
     if ps > 0 && pe == a && String::from_utf16_lossy(&t[ps as usize..pe as usize]).trim() == "```" {
+        // On a list item the block takes the item's place, under the item above it, as deep
+        // as the item was (as "> " does): no empty item is left below it.
+        let item = rich::list_level(e);
         rich::still(e, || {
             rich::set_sel(e, ps, pe);
             rich::replace_sel(e, "");
+            if item.is_some() {
+                rich::set_numbering(e, 0);
+            }
             let over = if rich::text(e).get(ps as usize) == Some(&rich::CR) { 1 } else { 0 };
             let cell = rich::insert_block_over(e, ps, over, Block::Code, 1, 1);
+            if let Some(level) = item
+                && let Some((_, rows)) = rich::block_at(e, &rich::text(e), ps)
+            {
+                rich::set_quote_level(e, rows[0], level as usize + 1);
+            }
             rich::set_sel(e, cell, cell);
         });
         return Some(true);
@@ -529,19 +540,28 @@ pub(super) fn caret_off_box(e: HWND, left: bool) {
 /// After RichEdit's own undo or redo, which selects what it put back: a selection holding a
 /// checklist box (a tick undone or redone a step at a time) is let go, the caret after it.
 /// Selected, the box's glyph showed beside its circle as a block of the selection's colour,
-/// and the circle sat in a halo of it.
+/// and the circle sat in a halo of it. So is one starting right after a box, the space
+/// between it and the text in it (a tick redone, whose last step struck the item through):
+/// the caret goes after the box.
 pub(super) fn selection_off_boxes(e: HWND) {
     let (a, b) = rich::sel(e);
     if a == b {
         return;
     }
     let (a, b) = (a.min(b).max(0) as usize, a.max(b).max(0) as usize);
-    let from = a.saturating_sub(1);
+    let from = a.saturating_sub(3);
     let t = rich::raw_text(e, from, b);
-    let boxed = (a..b).any(|i| t.get(i - from).copied().is_some_and(is_task) && (i == 0 || t.get(i - 1 - from) == Some(&rich::CR)));
-    if boxed {
+    let at = |i: usize| t.get(i.wrapping_sub(from)).copied();
+    let box_at = |i: usize| at(i).is_some_and(is_task) && (i == 0 || at(i - 1) == Some(rich::CR));
+    if (a..b).any(box_at) {
         rich::set_sel(e, b as i32, b as i32);
         caret_off_box(e, false);
+        return;
+    }
+    // The box just before the selection, which has the space after it.
+    if a > 0 && box_at(a - 1) {
+        let gap = if at(a) == Some(b' ' as u16) { 2 } else { 1 };
+        rich::set_sel(e, (a - 1 + gap) as i32, (a - 1 + gap) as i32);
     }
 }
 
@@ -725,6 +745,26 @@ mod tests {
         // Enter in an empty block takes it away.
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h).replace('^', ""), "Title/");
+        // ``` on a new list item: the block goes under the item above, and no empty item
+        // is left below it.
+        let cases = [
+            ("Title\n- ab\n- x", 1, "# Title\n- ab\n  ```\n  xyz\n  ```"),
+            ("Title\n- ab\n  - x", 2, "# Title\n- ab\n    ```\n    xyz\n    ```"),
+        ];
+        for (md, level, want) in cases {
+            let h = editor("");
+            rich::load_markdown(h, md);
+            let end = rich::text(h).len() as i32;
+            rich::set_sel(h, end - 1, end);
+            rich::replace_sel(h, "```");
+            assert_eq!(block_enter(h), Some(true));
+            assert_eq!(plain(h), "Title/ab/[/^|]/", "{md}");
+            let t = rich::text(h);
+            let (_, rows) = rich::block_at(h, &t, rich::sel(h).0).unwrap();
+            assert_eq!(rich::quote_level(h, rows[0]), level, "{md}");
+            rich::replace_sel(h, "xyz");
+            assert_eq!(rich::to_markdown(h, true), want, "{md}");
+        }
         // Empty lines in the middle of code stay, however many.
         let h = editor("Title\ra\rb\rend");
         caret(h, "a");
@@ -1105,6 +1145,26 @@ mod tests {
             assert_eq!(rich::text(h)[cp as usize], rich::CHECKED, "redo ticks again");
             assert!(struck(h));
         }
+        // RichEdit's own undo and redo (the group forgotten meanwhile) select what they put
+        // back: the caret goes after the box instead, with nothing selected.
+        rich::forget_groups();
+        const EM_UNDO: u32 = 0x00C7;
+        rich::send(h, EM_UNDO, 0, 0);
+        selection_off_boxes(h);
+        assert_eq!(rich::text(h)[cp as usize], rich::BOX);
+        assert_eq!(rich::sel(h), (cp + 2, cp + 2), "after undo");
+        rich::send(h, rich::EM_REDO, 0, 0);
+        assert_eq!(rich::text(h)[cp as usize], rich::CHECKED);
+        // (It selected the item's text, from just after the box.)
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (cp + 2, cp + 2), "after redo");
+        // Text selected elsewhere in an item stays selected.
+        rich::set_sel(h, cp + 3, cp + 5);
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (cp + 3, cp + 5));
+        rich::set_sel(h, cp + 2, cp + 6);
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (cp + 2, cp + 6));
     }
 
     /// An assistant's change (or a version put back) in an open note: one Ctrl+Z takes it

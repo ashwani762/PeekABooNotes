@@ -179,7 +179,7 @@ pub fn list_level(h: HWND) -> Option<i32> {
     send(h, EM_HIDESELECTION, 1, 0);
     let r = para_level(h, &text(h), a).map(|(l, _)| l);
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);
+    show_selection(h);
     r
 }
 
@@ -192,7 +192,7 @@ pub fn item_before(h: HWND, t: &[u16], cp: i32) -> bool {
     send(h, EM_HIDESELECTION, 1, 0);
     let r = para_level(h, t, para_start(t, cp - 1)).is_some();
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);
+    show_selection(h);
     r
 }
 
@@ -237,7 +237,7 @@ pub fn nest(h: HWND, delta: i32) -> bool {
         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
     }
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);
+    show_selection(h);
     any
 }
 

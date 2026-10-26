@@ -376,6 +376,12 @@ fn rtf_of(h: HWND, a: i32, b: i32, cap: usize) -> Vec<u8> {
     c.out
 }
 
+/// The size (twips) the picture at `cp` in `h` is shown at, if that's one. It moves the
+/// selection (to the picture).
+pub fn picture_shown(h: HWND, cp: i32) -> Option<(i32, i32)> {
+    (raw_text(h, cp.max(0) as usize, cp.max(0) as usize + 1) == [OBJECT]).then(|| read(h, cp)).flatten().map(|p| p.shown)
+}
+
 /// The picture at `cp`, if that's one.
 fn read(h: HWND, cp: i32) -> Option<Pic> {
     parse(&rtf_of(h, cp, cp + 1, 16 * 1024))
