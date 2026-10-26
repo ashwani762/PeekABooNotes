@@ -986,8 +986,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 paint_now(hwnd);
                 return 0;
             }
-            WM_SETTINGCHANGE => {
-                with(|w| w.startup = app::startup_enabled());
+            WM_ACTIVATE if (wp & 0xFFFF) as u32 != WA_INACTIVE => {
+                // Back from another app: Start with Windows may have been turned off there
+                // (Task Manager, Windows Settings), so it's asked again, not on every
+                // WM_SETTINGCHANGE; asking can block (the Store build's startup task).
+                let from_outside = {
+                    let mut pid = 0u32;
+                    let other = lp as HWND;
+                    !other.is_null() && {
+                        GetWindowThreadProcessId(other, &mut pid);
+                        pid != windows_sys::Win32::System::Threading::GetCurrentProcessId()
+                    }
+                };
+                if from_outside {
+                    let on = app::startup_enabled();
+                    if with(|w| std::mem::replace(&mut w.startup, on) != on) == Some(true) {
+                        refresh();
+                    }
+                }
+                // A result that came due while another window was in front gets its time now.
+                if RESULT_WAITS.with(|r| r.replace(false)) {
+                    SetTimer(hwnd, T_RESULT, RESULT_MS, None);
+                }
             }
             // The Deck page lists the displays, and shows the choice only with more
             // than one: built again with the displays there are now.
@@ -1015,14 +1035,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_TIMER if wp == T_RESULT => {
                 KillTimer(hwnd, T_RESULT);
-                // Export shows its folder on top: the ✓ waits (looking twice a second)
-                // until Settings is back in front, then gets its full time there.
-                let front = GetForegroundWindow() == hwnd;
-                if !front {
+                // Export shows its folder on top: the ✓ waits, with no timer running, until
+                // Settings is back in front (WM_ACTIVATE), then gets its full time there.
+                if GetForegroundWindow() != hwnd {
                     RESULT_WAITS.with(|r| r.set(true));
-                    SetTimer(hwnd, T_RESULT, 500, None);
-                } else if RESULT_WAITS.with(|r| r.replace(false)) {
-                    SetTimer(hwnd, T_RESULT, RESULT_MS, None);
                 } else {
                     with(|w| w.result_a.to(0.0));
                     anim::wake(Client::Settings);
@@ -1036,6 +1052,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     }
                 });
                 draw::forget_preview();
+                RESULT_WAITS.with(|r| r.set(false));
                 app::schedule_trim();
                 return 0;
             }
