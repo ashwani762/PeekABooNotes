@@ -282,6 +282,17 @@ fn create(x: i32, y: i32, w: i32, h: i32, sub: bool) -> HWND {
 }
 
 /// Show a menu at `at` (screen coordinates). Returns the chosen command id, 0 if dismissed.
+/// Tell Windows a menu popup opened or closed, as its own menus do (`TrackPopupMenu`
+/// raises these). The taskbar's hidden-icons flyout stays open while the menu of one of its
+/// icons is up only when it hears this; without it, the flyout closed as soon as the
+/// pointer went from it into the menu. Screen readers announce the menu from it too.
+fn announce(hwnd: HWND, open: bool) {
+    const OBJID_CLIENT: i32 = -4;
+    const CHILDID_SELF: i32 = 0;
+    let event = if open { EVENT_SYSTEM_MENUPOPUPSTART } else { EVENT_SYSTEM_MENUPOPUPEND };
+    unsafe { windows_sys::Win32::UI::Accessibility::NotifyWinEvent(event, hwnd, OBJID_CLIENT, CHILDID_SELF) };
+}
+
 pub fn show(items: Vec<Item>, at: POINT) -> u32 {
     show_with(items, at, false, None)
 }
@@ -337,6 +348,7 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
     with(|o| draw(o, 0));
     unsafe {
         ShowWindow(hwnd, SW_SHOW);
+        announce(hwnd, true);
         SetForegroundWindow(hwnd);
         SetCapture(hwnd);
     }
@@ -355,6 +367,7 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
             ReleaseCapture();
             KillTimer(hwnd, T_SUB);
             for m in o.menus.iter().rev() {
+                announce(m.hwnd, false);
                 DestroyWindow(m.hwnd);
             }
         }
@@ -727,6 +740,7 @@ fn close_after(o: &mut Open, level: usize) {
     while o.menus.len() > level + 1 {
         if let Some(m) = o.menus.pop() {
             crate::win::ui::tooltip::leave(m.hwnd);
+            announce(m.hwnd, false);
             unsafe { DestroyWindow(m.hwnd) };
         }
     }
@@ -754,6 +768,7 @@ fn open_sub(o: &mut Open, level: usize, row: usize, keys: bool) {
         o.menus[level].hot = Target::Row(row);
         draw(o, level + 1);
         unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+        announce(hwnd, true);
         anim::wake(Client::Menu);
     }
     if keys {
