@@ -107,6 +107,8 @@ struct Row {
     label: &'static str,
     sub: Option<String>,
     ctl: Ctl,
+    /// Greyed out: a shortcut that's off (its `sub` says why).
+    off: bool,
 }
 
 struct Group {
@@ -116,15 +118,26 @@ struct Group {
 }
 
 fn row(key: Key, label: &'static str, ctl: Ctl) -> Row {
-    Row { key: Some(key), label, sub: None, ctl }
+    Row { key: Some(key), label, sub: None, ctl, off: false }
 }
 
 fn row_sub(key: Key, label: &'static str, sub: &str, ctl: Ctl) -> Row {
-    Row { key: Some(key), label, sub: Some(sub.into()), ctl }
+    Row { key: Some(key), label, sub: Some(sub.into()), ctl, off: false }
 }
 
 fn keys(label: &'static str, k: &'static [&'static str]) -> Row {
-    Row { key: None, label, sub: None, ctl: Ctl::Keys(k) }
+    Row { key: None, label, sub: None, ctl: Ctl::Keys(k), off: false }
+}
+
+/// A shortcut that works anywhere (Ctrl+Alt and the letter last in `k`): greyed out,
+/// saying why, while it's off.
+fn hotkey(label: &'static str, k: &'static [&'static str]) -> Row {
+    let letter = k.last().and_then(|l| l.bytes().next()).unwrap_or(0);
+    let why = app::hotkey_off(letter).map(|off| match off {
+        app::HotkeyOff::Types => t!("shortcut_off_types").to_string(),
+        app::HotkeyOff::Taken => t!("shortcut_off_taken").to_string(),
+    });
+    Row { key: None, label, off: why.is_some(), sub: why, ctl: Ctl::Keys(k) }
 }
 
 struct Pal {

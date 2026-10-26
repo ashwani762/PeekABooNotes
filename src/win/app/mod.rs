@@ -14,7 +14,6 @@ use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Controls::Dialogs::*;
 use windows_sys::Win32::UI::Controls::{ICC_LISTVIEW_CLASSES, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, RegisterHotKey};
 use windows_sys::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, ShellExecuteW, Shell_NotifyIconW,
 };
@@ -31,11 +30,13 @@ mod menus;
 mod files;
 mod share;
 mod prefs;
+mod hotkeys;
 pub use notes::*;
 pub use menus::*;
 pub use files::*;
 pub use share::share;
 pub use prefs::*;
+pub use hotkeys::{Off as HotkeyOff, hotkey_off, hotkey_text};
 pub use mcp::{CLIENTS as MCP_CLIENTS, Connect as McpConnect, connect as mcp_connect, connected as mcp_connected, set_enabled as set_mcp_enabled};
 
 // Note commands (menus, shortcuts).
@@ -267,18 +268,6 @@ fn tray_icon(op: u32) {
     }
 }
 
-/// Ctrl+Alt and a letter. The deck's keys are on K rather than D: Ctrl+Alt+D is
-/// Magnifier's docked view, likely in use by the very people who want the deck by keyboard.
-const HOTKEYS: [(u32, u8); 7] = [
-    (CMD_NEW, b'N'),
-    (CMD_ALL, b'A'),
-    (CMD_ARCHIVE, b'L'),
-    (CMD_REOPEN, b'O'),
-    (CMD_TOGGLE_DECK, b'H'),
-    (CMD_SWAP_EDGE, b'E'),
-    (CMD_DECK_KEYS, b'K'),
-];
-
 pub fn quit() {
     let wins: Vec<HWND> = ui(|u| u.notes.values().copied().collect());
     remember_open();
@@ -309,7 +298,14 @@ pub fn quit() {
 unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let tb = UI.with(|u| u.try_borrow().ok().and_then(|u| u.as_ref().map(|u| u.taskbar_created))).unwrap_or(0);
     match msg {
-        WM_HOTKEY => command(wp as u32),
+        WM_HOTKEY => {
+            if hotkeys::pressed(h, wp as u32) {
+                command(wp as u32);
+            }
+        }
+        // A keyboard layout added, removed or switched to: AltGr and a letter may type a
+        // character there that a shortcut would swallow.
+        WM_INPUTLANGCHANGE => hotkeys::recheck(h),
         WM_TRAY => match (lp & 0xFFFF) as u32 {
             WM_LBUTTONUP => show_all_notes(false),
             WM_RBUTTONUP | WM_CONTEXTMENU => tray_menu(None),
@@ -321,6 +317,7 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
             return 0;
         }
         WM_SETTINGCHANGE => {
+            hotkeys::recheck(h);
             apply_motion();
             apply_theme();
             // The work area may have changed (the taskbar moved or hides itself).
@@ -505,10 +502,8 @@ pub fn run() -> i32 {
         note::register();
         deck::create();
         tray(true);
-        for (id, key) in HOTKEYS {
-            // If another app owns a combination we simply go without it.
-            RegisterHotKey(main, id as i32, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, key as u32);
-        }
+        // Those another app owns, or whose keys type a character (AltGr), we go without.
+        hotkeys::register(main);
 
         reopen_at_start();
         share::cleanup();

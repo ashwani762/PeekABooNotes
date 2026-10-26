@@ -163,8 +163,16 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
     let mid = (r.top + r.bottom) / 2;
     match &row.sub {
         Some(sub) => {
-            c.line_ct(row.label, &f.label, lx, mid - (4.0 * s) as i32, (r.right - lx) - px_ctl(w, row, &r), None, p.text, DT_LEFT);
-            let sw = (r.right - lx) - px_ctl(w, row, &r) - (12.0 * s) as i32;
+            // As on a row of one subtitle line, however many lines it wraps onto.
+            let mid1 = r.top + (ROW_SUB_H * s / 2.0) as i32;
+            c.line_ct(row.label, &f.label, lx, mid1 - (4.0 * s) as i32, (r.right - lx) - px_ctl(w, row, &r), None, if row.off { p.sub } else { p.text }, DT_LEFT);
+            let sw = sub_width(w, row, &r);
+            if sub_wraps(row) {
+                let top = mid1 + (15.0 * s) as i32 - f.sub.ascent;
+                let h = f.sub.wrapped_height(sub, sw);
+                c.text_ct(sub, &f.sub, rect(lx, top, sw, h), None, p.sub, DT_LEFT | DT_WORDBREAK);
+                return draw_ctl(w, c, p, pl, &r, mid);
+            }
             // The colour row names its choice, previewing whichever swatch is under the pointer.
             let named;
             let sub = match (&row.ctl, row.key) {
@@ -179,7 +187,7 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
                 _ => sub.as_str(),
             };
             let fitted = if row.key == Some(Key::Folder) { f.sub.fit_path(sub, sw.max(10)) } else { f.sub.fit(sub, sw.max(10)) };
-            c.line_ct(&fitted, &f.sub, lx, mid + (15.0 * s) as i32, sw, None, p.sub, DT_LEFT);
+            c.line_ct(&fitted, &f.sub, lx, mid1 + (15.0 * s) as i32, sw, None, p.sub, DT_LEFT);
         }
         None => {
             let lw = (r.right - lx) - px_ctl(w, row, &r) - (12.0 * s) as i32;
@@ -187,6 +195,13 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
             c.line_ct(&label, &f.label, lx, mid + f.label.cap / 2, lw.max(10), None, p.text, DT_LEFT);
         }
     }
+    draw_ctl(w, c, p, pl, &r, mid);
+}
+
+/// Row `pl`'s control, drawn at `r` (risen with the page) around its middle `mid`.
+fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
+    let (s, f, row) = (w.s, &w.fonts, pl.row);
+    let r = *r;
     let knob = row.key.and_then(|k| w.knobs.get(&k)).map(|sp| sp.value).unwrap_or(0.0);
     let pressed = |sub: usize| row.key.is_some_and(|k| w.pressed == Hit::Ctl(k, sub) && w.hover == w.pressed);
     let hovered = |sub: usize| row.key.is_some_and(|k| w.hover == Hit::Ctl(k, sub));
@@ -329,10 +344,12 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
                 let kw = (f.key.measure(k).0 as f32 + 14.0 * s).max(h);
                 x -= kw;
                 let cap = Shape::new(x, y, kw, h, 5.0 * s);
-                // A keycap: a darker lip under a lighter face.
-                c.shape(&Shape::new(cap.x, cap.y + 1.0 * s, cap.w, cap.h, cap.r), p.text, 0.10, 1.0, 0.0);
-                c.shape(&cap, mix(p.group, p.text, 0.06), 1.0, 1.0, 0.0);
-                c.line_ct(k, &f.key, x as i32, mid + f.key.cap / 2, kw as i32, None, p.text, DT_CENTER);
+                // A keycap: a darker lip under a lighter face; flat and grey when it's off.
+                if !row.off {
+                    c.shape(&Shape::new(cap.x, cap.y + 1.0 * s, cap.w, cap.h, cap.r), p.text, 0.10, 1.0, 0.0);
+                }
+                c.shape(&cap, mix(p.group, p.text, if row.off { 0.04 } else { 0.06 }), 1.0, 1.0, 0.0);
+                c.line_ct(k, &f.key, x as i32, mid + f.key.cap / 2, kw as i32, None, if row.off { p.sub } else { p.text }, DT_CENTER);
                 x -= 5.0 * s;
             }
         }

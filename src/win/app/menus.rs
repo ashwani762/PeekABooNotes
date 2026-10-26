@@ -182,18 +182,18 @@ pub fn tray_menu(at: Option<POINT>) {
         }
     });
     let mut v = vec![
-        action(CMD_NEW, t!("menu_new_note"), &crate::common::i18n::keys(&["ctrl", "alt", "N"]), IC_ADD),
-        action(CMD_ALL, t!("menu_all_notes"), &crate::common::i18n::keys(&["ctrl", "alt", "A"]), IC_LIST),
-        action(CMD_ARCHIVE, t!("menu_archive"), &crate::common::i18n::keys(&["ctrl", "alt", "L"]), IC_ARCHIVE),
-        action(CMD_REOPEN, t!("menu_reopen_last"), &crate::common::i18n::keys(&["ctrl", "alt", "O"]), IC_REFRESH),
+        action(CMD_NEW, t!("menu_new_note"), &hotkey_text(b'N'), IC_ADD),
+        action(CMD_ALL, t!("menu_all_notes"), &hotkey_text(b'A'), IC_LIST),
+        action(CMD_ARCHIVE, t!("menu_archive"), &hotkey_text(b'L'), IC_ARCHIVE),
+        action(CMD_REOPEN, t!("menu_reopen_last"), &hotkey_text(b'O'), IC_REFRESH),
     ];
     if let Some(label) = undo {
         v.push(action(CMD_UNDO, label, "", IC_UNDO));
     }
     v.extend([
         Item::Separator,
-        check(CMD_TOGGLE_DECK, t!("menu_show_deck"), &crate::common::i18n::keys(&["ctrl", "alt", "H"]), !hidden),
-        action(CMD_SWAP_EDGE, t!("menu_move_deck"), &crate::common::i18n::keys(&["ctrl", "alt", "E"]), IC_SWAP),
+        check(CMD_TOGGLE_DECK, t!("menu_show_deck"), &hotkey_text(b'H'), !hidden),
+        action(CMD_SWAP_EDGE, t!("menu_move_deck"), &hotkey_text(b'E'), IC_SWAP),
         Item::Separator,
         action(CMD_SETTINGS, t!("menu_settings"), "", IC_SETTINGS),
         Item::Separator,

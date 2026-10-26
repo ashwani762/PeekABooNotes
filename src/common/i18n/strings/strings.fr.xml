@@ -266,6 +266,8 @@
     <string name="shortcut_deck_move">Passer d’une carte à l’autre</string>
     <string name="shortcut_deck_menu">Menu de la carte</string>
     <string name="shortcut_deck_leave">Revenir à la fenêtre précédente</string>
+    <string name="shortcut_off_types">Désactivé : ces touches tapent un caractère sur votre clavier</string>
+    <string name="shortcut_off_taken">Désactivé : une autre application utilise ces touches</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Dossier des notes</string>

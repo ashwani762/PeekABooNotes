@@ -30,10 +30,33 @@ pub(super) fn content_x(w: &Win) -> (f32, f32) {
 
 pub(super) fn row_h(r: &Row) -> f32 {
     match (&r.ctl, &r.sub) {
-        (Ctl::Keys(_), _) => KEY_ROW_H,
         (Ctl::Preview, _) => PREVIEW_H,
         (_, Some(_)) => ROW_SUB_H,
+        (Ctl::Keys(_), _) => KEY_ROW_H,
         _ => ROW_H,
+    }
+}
+
+/// The room row `row` (laid out at `r`) leaves its subtitle: from the inset to its control.
+pub(super) fn sub_width(w: &Win, row: &Row, r: &RECT) -> i32 {
+    let lx = r.left + (INSET * w.s) as i32;
+    ((r.right - lx) - px_ctl(w, row, r) - (12.0 * w.s) as i32).max(10)
+}
+
+/// Whether row `row`'s subtitle wraps onto more lines when it's too long for one. The
+/// folder's path is shortened in the middle instead, and the colour row's name is short.
+pub(super) fn sub_wraps(row: &Row) -> bool {
+    row.sub.is_some() && row.key != Some(Key::Folder) && !matches!(row.ctl, Ctl::Swatches)
+}
+
+/// How much taller than one line row `row`'s subtitle is at `r`'s width (0 for one line).
+pub(super) fn sub_extra(w: &Win, row: &Row, r: &RECT) -> i32 {
+    match &row.sub {
+        Some(sub) if sub_wraps(row) => {
+            let line = w.fonts.sub.ascent + w.fonts.sub.descent;
+            (w.fonts.sub.wrapped_height(sub, sub_width(w, row, r)) - line).max(0)
+        }
+        _ => 0,
     }
 }
 
@@ -65,10 +88,20 @@ fn place_to<'a>(w: &Win, groups: &'a [Group]) -> (Vec<Item<'a>>, f32) {
             out.push(Item::Header(h, (y + 17.0 * s) as i32));
             y += HEADER_H * s;
         }
-        let total: f32 = g.rows.iter().map(|r| row_h(r) * s).sum();
+        // A subtitle too long for one line wraps, and its row grows by the extra lines.
+        let at = |r: &Row, y: f32| {
+            let one = rect(x0 as i32, y as i32, cw as i32, (row_h(r) * s) as i32);
+            row_h(r) * s + sub_extra(w, r, &one) as f32
+        };
+        let (mut ty, mut total) = (y, 0.0);
+        for r in &g.rows {
+            let h = at(r, ty);
+            ty += h;
+            total += h;
+        }
         out.push(Item::Box(Shape::new(x0, y, cw, total, 10.0 * s)));
         for (i, r) in g.rows.iter().enumerate() {
-            let h = row_h(r) * s;
+            let h = at(r, y);
             out.push(Item::Row(Placed { row: r, r: rect(x0 as i32, y as i32, cw as i32, h as i32), first: i == 0 }));
             y += h;
         }

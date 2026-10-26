@@ -266,6 +266,8 @@
     <string name="shortcut_deck_move">कार्डों के बीच जाएँ</string>
     <string name="shortcut_deck_menu">कार्ड मेनू</string>
     <string name="shortcut_deck_leave">पिछली विंडो पर लौटें</string>
+    <string name="shortcut_off_types">बंद: आपके कीबोर्ड पर इन कुंजियों से एक अक्षर टाइप होता है</string>
+    <string name="shortcut_off_taken">बंद: कोई दूसरा ऐप इन कुंजियों का उपयोग करता है</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">नोट्स फ़ोल्डर</string>

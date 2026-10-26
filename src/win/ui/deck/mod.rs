@@ -773,12 +773,11 @@ fn leave_menu(hwnd: HWND, id: u64, pt: POINT) -> bool {
 
 /// The plus button and the "+N" tile say what they do; anything else lets the tooltip go.
 fn tip(d: &Deck, hit: Hit, by_key: bool) {
-    use crate::common::i18n::keys;
     use crate::win::ui::tooltip;
     let (label, k) = match hit {
-        Hit::Plus => (t!("menu_new_note").to_string(), keys(&["ctrl", "alt", "N"])),
+        Hit::Plus => (t!("menu_new_note").to_string(), app::hotkey_text(b'N')),
         // It opens All Notes, so it shares that shortcut.
-        Hit::More => (tn!("tip_more_notes", d.geo.more), keys(&["ctrl", "alt", "A"])),
+        Hit::More => (tn!("tip_more_notes", d.geo.more), app::hotkey_text(b'A')),
         _ => {
             tooltip::leave(d.hwnd);
             return;

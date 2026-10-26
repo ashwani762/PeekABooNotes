@@ -118,7 +118,7 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 
 ## Shortcuts
 
-**Anywhere** (if another app already uses one, PeekABoo Notes goes without it)
+**Anywhere** (if another app already uses one, PeekABoo Notes goes without it; Settings › Shortcuts shows it as off and the log says so)
 
 | Keys | Action |
 |---|---|
@@ -129,6 +129,8 @@ How it works: the assistant starts `peekaboo-mcp.exe`, which carries its JSON-RP
 | Ctrl+Alt+H | Show or hide the deck |
 | Ctrl+Alt+E | Move the deck to the other edge |
 | Ctrl+Alt+K | Give the deck the keys (again, or Esc, to give them back) |
+
+Ctrl+Alt is also AltGr, and on many keyboards AltGr and a letter types a character (€ with E on German, French and Spanish keyboards; ą, ę, ł, ń, ó on Polish ones). A hotkey would swallow it in every app, so `app/hotkeys.rs` asks each of the user's keyboard layouts (`GetKeyboardLayoutList`, then `ToUnicodeEx` with Ctrl and Alt down) whether Ctrl+Alt and the letter types something, and leaves out every shortcut that does. The layouts are looked at again on `WM_INPUTLANGCHANGE` and `WM_SETTINGCHANGE`, and when a hotkey arrives from a window whose layout wasn't known yet; that press then does nothing if the new layout types a character with it. Menus and tooltips leave out a shortcut that's off.
 
 **In a note**
 

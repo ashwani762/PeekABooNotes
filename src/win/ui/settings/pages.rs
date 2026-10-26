@@ -58,7 +58,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 rows: vec![row_sub(Key::HideUnpinned, t!("settings_hide_unpinned"), t!("settings_hide_unpinned_sub"), Ctl::Toggle)],
                 footer: None,
             },
-            Group { header: Some(t!("settings_group_preview")), rows: vec![Row { key: None, label: "", sub: None, ctl: Ctl::Preview }], footer: None },
+            Group { header: Some(t!("settings_group_preview")), rows: vec![Row { key: None, label: "", sub: None, ctl: Ctl::Preview, off: false }], footer: None },
         ],
         2 => vec![
             Group {
@@ -81,13 +81,13 @@ pub(super) fn page(i: usize) -> Vec<Group> {
             Group {
                 header: Some(t!("settings_group_anywhere")),
                 rows: vec![
-                    keys(t!("shortcut_new_note"), &["ctrl", "alt", "N"]),
-                    keys(t!("shortcut_all_notes"), &["ctrl", "alt", "A"]),
-                    keys(t!("shortcut_archive"), &["ctrl", "alt", "L"]),
-                    keys(t!("shortcut_reopen"), &["ctrl", "alt", "O"]),
-                    keys(t!("shortcut_toggle_deck"), &["ctrl", "alt", "H"]),
-                    keys(t!("shortcut_move_deck"), &["ctrl", "alt", "E"]),
-                    keys(t!("shortcut_deck_keys"), &["ctrl", "alt", "K"]),
+                    hotkey(t!("shortcut_new_note"), &["ctrl", "alt", "N"]),
+                    hotkey(t!("shortcut_all_notes"), &["ctrl", "alt", "A"]),
+                    hotkey(t!("shortcut_archive"), &["ctrl", "alt", "L"]),
+                    hotkey(t!("shortcut_reopen"), &["ctrl", "alt", "O"]),
+                    hotkey(t!("shortcut_toggle_deck"), &["ctrl", "alt", "H"]),
+                    hotkey(t!("shortcut_move_deck"), &["ctrl", "alt", "E"]),
+                    hotkey(t!("shortcut_deck_keys"), &["ctrl", "alt", "K"]),
                 ],
                 footer: None,
             },
