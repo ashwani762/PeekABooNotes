@@ -14,6 +14,7 @@
     <string name="key_ctrl">Ctrl</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Maj</string>
+    <string name="key_win">Win</string>
     <string name="key_enter">Entrée</string>
     <string name="key_del">Suppr</string>
     <string name="key_esc">Échap</string>
@@ -123,6 +124,7 @@
     <string name="empty_archive_body">Les notes archivées quittent la pile mais restent consultables ici.</string>
     <string name="empty_notes_title">Pas encore de notes</string>
     <string name="empty_notes_body">Appuyez sur %1$s ou cliquez sur + ci-dessus pour en écrire une.</string>
+    <string name="empty_notes_body_plain">Cliquez sur + ci-dessus pour en écrire une.</string>
     <string name="state_in_deck">Active · Dans la pile</string>
     <string name="state_off_deck">Active · Hors de la pile</string>
     <string name="state_archived">Archivée</string>
@@ -278,6 +280,15 @@
     <string name="shortcut_deck_leave">Revenir à la fenêtre précédente</string>
     <string name="shortcut_off_types">Désactivé (bêta) : ces touches tapent un caractère sur votre clavier</string>
     <string name="shortcut_off_taken">Désactivé : une autre application utilise ces touches</string>
+    <string name="shortcut_press">Appuyez sur les touches</string>
+    <string name="shortcut_none">Désactivé</string>
+    <string name="shortcut_recording">Échap annule, Retour arrière le désactive</string>
+    <string name="shortcut_need_modifiers">Maintenez deux touches parmi %1$s, %2$s, %3$s et %4$s</string>
+    <string name="shortcut_need_key">Terminez par une lettre, un chiffre ou F1 à F12</string>
+    <string name="shortcut_used_by">Déjà utilisé pour « %1$s »</string>
+    <string name="shortcut_refused_types">Ces touches tapent un caractère sur votre clavier</string>
+    <string name="shortcut_refused_taken">Pris par une autre application</string>
+    <string name="settings_shortcuts_default">Raccourcis par défaut</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Dossier des notes</string>
@@ -293,6 +304,7 @@
     <string name="settings_delete_all">Supprimer toutes les notes</string>
     <string name="settings_delete_all_sub">Toutes, y compris les notes archivées</string>
     <string name="button_delete_all">Tout supprimer</string>
+    <string name="button_reset_defaults">Rétablir</string>
     <plurals name="menu_delete_all_notes">
         <item quantity="one">Supprimer %d note</item>
         <item quantity="other">Supprimer les %d notes</item>

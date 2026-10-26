@@ -25,7 +25,8 @@ fn with_display_row(mut rows: Vec<Row>) -> Vec<Row> {
     rows
 }
 
-pub(super) fn page(i: usize) -> Vec<Group> {
+/// Page `i`'s rows; `edit` is what the shortcuts' rows have to say.
+pub(super) fn page(i: usize, edit: &Edit) -> Vec<Group> {
     match i {
         0 => vec![
             Group { header: None, rows: vec![row(Key::Startup, t!("settings_start_with_windows"), Ctl::Toggle)], footer: None },
@@ -80,15 +81,11 @@ pub(super) fn page(i: usize) -> Vec<Group> {
         3 => vec![
             Group {
                 header: Some(t!("settings_group_anywhere")),
-                rows: vec![
-                    hotkey(t!("shortcut_new_note"), &["ctrl", "alt", "N"]),
-                    hotkey(t!("shortcut_all_notes"), &["ctrl", "alt", "A"]),
-                    hotkey(t!("shortcut_archive"), &["ctrl", "alt", "L"]),
-                    hotkey(t!("shortcut_reopen"), &["ctrl", "alt", "O"]),
-                    hotkey(t!("shortcut_toggle_deck"), &["ctrl", "alt", "H"]),
-                    hotkey(t!("shortcut_move_deck"), &["ctrl", "alt", "E"]),
-                    hotkey(t!("shortcut_deck_keys"), &["ctrl", "alt", "K"]),
-                ],
+                // Each one's keys change with a click; the defaults are a click away.
+                rows: (0..hotkey::COUNT)
+                    .map(|i| hotkey(i, edit))
+                    .chain(std::iter::once(row(Key::ResetKeys, t!("settings_shortcuts_default"), Ctl::Button(t!("button_reset_defaults")))))
+                    .collect(),
                 footer: None,
             },
             Group {
@@ -126,7 +123,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 ],
                 footer: None,
             },
-            // Once Ctrl+Alt+K has given the deck the keys.
+            // Once Go to the deck's shortcut has given the deck the keys.
             Group {
                 header: Some(t!("settings_page_deck")),
                 rows: vec![

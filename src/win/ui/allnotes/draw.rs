@@ -122,7 +122,10 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         } else if l.mode == 1 {
             (t!("empty_archive_title").to_string(), t!("empty_archive_body").to_string())
         } else {
-            (t!("empty_notes_title").to_string(), t!("empty_notes_body", crate::common::i18n::keys(&["ctrl", "alt", "N"])))
+            // The New Note shortcut as it is now, or just the plus button while it's off.
+            let keys = app::hotkey_text(crate::common::hotkey::NEW_NOTE);
+            let body = if keys.is_empty() { t!("empty_notes_body_plain").to_string() } else { t!("empty_notes_body", keys) };
+            (t!("empty_notes_title").to_string(), body)
         };
         let y = px(LIST_TOP + 64.0);
         c.line_ct(&headline, &f.empty, px(16.0), y, (lay.list_w - 32.0 * s) as i32, None, mix(p.list, p.text, la), DT_CENTER);

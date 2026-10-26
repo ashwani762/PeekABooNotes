@@ -14,6 +14,7 @@
     <string name="key_ctrl">Strg</string>
     <string name="key_alt">Alt</string>
     <string name="key_shift">Umschalt</string>
+    <string name="key_win">Win</string>
     <string name="key_enter">Eingabe</string>
     <string name="key_del">Entf</string>
     <string name="key_esc">Esc</string>
@@ -123,6 +124,7 @@
     <string name="empty_archive_body">Archivierte Notizen verlassen den Stapel, bleiben hier aber durchsuchbar.</string>
     <string name="empty_notes_title">Noch keine Notizen</string>
     <string name="empty_notes_body">Drücke %1$s oder klicke oben auf +, um eine zu schreiben.</string>
+    <string name="empty_notes_body_plain">Klicke oben auf +, um eine zu schreiben.</string>
     <string name="state_in_deck">Aktiv · Im Stapel</string>
     <string name="state_off_deck">Aktiv · Nicht im Stapel</string>
     <string name="state_archived">Archiviert</string>
@@ -278,6 +280,15 @@
     <string name="shortcut_deck_leave">Zurück zum vorigen Fenster</string>
     <string name="shortcut_off_types">Aus (Beta): Diese Tasten schreiben auf deiner Tastatur ein Zeichen</string>
     <string name="shortcut_off_taken">Aus: Ein anderes Programm nutzt diese Tasten</string>
+    <string name="shortcut_press">Tasten drücken</string>
+    <string name="shortcut_none">Aus</string>
+    <string name="shortcut_recording">Esc bricht ab, die Rücktaste schaltet es aus</string>
+    <string name="shortcut_need_modifiers">Halte dazu zwei von %1$s, %2$s, %3$s und %4$s gedrückt</string>
+    <string name="shortcut_need_key">Als letzte Taste einen Buchstaben, eine Ziffer oder F1 bis F12</string>
+    <string name="shortcut_used_by">Schon für „%1$s“ vergeben</string>
+    <string name="shortcut_refused_types">Diese Tasten schreiben auf deiner Tastatur ein Zeichen</string>
+    <string name="shortcut_refused_taken">Von einem anderen Programm belegt</string>
+    <string name="settings_shortcuts_default">Standard-Tastenkürzel</string>
 
     <!-- Settings: Data -->
     <string name="settings_notes_folder">Notizordner</string>
@@ -293,6 +304,7 @@
     <string name="settings_delete_all">Alle Notizen löschen</string>
     <string name="settings_delete_all_sub">Jede Notiz, auch archivierte</string>
     <string name="button_delete_all">Alle löschen</string>
+    <string name="button_reset_defaults">Standard wiederherstellen</string>
     <plurals name="menu_delete_all_notes">
         <item quantity="one">%d Notiz löschen</item>
         <item quantity="other">Alle %d Notizen löschen</item>
