@@ -231,11 +231,13 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
             empty += 1;
             continue;
         }
-        if text.encode_utf16().count() > crate::common::store::MAX_NOTE_CHARS {
+        // A note's own length counts, not its Markdown's: the marks and escapes an export
+        // writes make a full note's file longer than the note.
+        rich::load_markdown(w, text);
+        if rich::too_long(w) {
             failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
             continue;
         }
-        rich::load_markdown(w, text);
         // Links to files beside it (an export's attachments) come in as attachments.
         // Only files beside the imported one (an export's attachments folder): a Markdown
         // file from elsewhere can't pull in whatever it names.

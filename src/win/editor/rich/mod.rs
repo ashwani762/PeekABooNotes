@@ -522,6 +522,13 @@ pub fn limit_length_of(h: HWND, t: &[u16]) {
     send(h, EM_EXLIMITTEXT, 0, length_limit(t).min(i32::MAX as usize) as isize);
 }
 
+/// Whether `h` holds more than a note may: its text, links' hidden addresses left out,
+/// as typing counts it (`limit_length`).
+pub fn too_long(h: HWND) -> bool {
+    let t = text(h);
+    t.len() > crate::common::store::MAX_NOTE_CHARS + hidden_len_with(&t, &instructions(&t, 0, t.len()))
+}
+
 /// The most characters RichEdit may hold, given what it holds now (`t`).
 fn length_limit(t: &[u16]) -> usize {
     length_limit_with(t, &instructions(t, 0, t.len()))

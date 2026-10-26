@@ -1292,6 +1292,22 @@ mod tests {
         assert_eq!(length_limit(&long), long.len());
     }
 
+    /// An import counts the note, not its file: a full note's Markdown runs longer than
+    /// the note (each bullet's "- "), and still comes in; a note longer than the limit
+    /// doesn't.
+    #[test]
+    fn a_full_notes_export_isnt_too_long() {
+        let line = format!("- {}\n", "x".repeat(48));
+        let md = format!("T\n{}", line.repeat(2010));
+        assert!(md.encode_utf16().count() > crate::common::store::MAX_NOTE_CHARS);
+        let h = editor();
+        load_markdown(h, &md);
+        assert!(text(h).len() > 98_000 && !too_long(h), "{} characters", text(h).len());
+        let h = editor();
+        load_markdown(h, &"x".repeat(crate::common::store::MAX_NOTE_CHARS + 5));
+        assert!(too_long(h));
+    }
+
     /// Where Tab has no tab character to type: in the title, the first paragraph.
     #[test]
     fn the_title_is_the_first_paragraph() {
