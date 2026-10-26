@@ -41,6 +41,11 @@ pub fn data_dir() -> PathBuf {
     // Worked out (and created) once; it's asked for on every save and some paints.
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
+        // Tests never touch real notes: a test build isn't portable, so it would otherwise
+        // use (and log into) the user's own Documents folder.
+        #[cfg(test)]
+        let dir = std::env::temp_dir().join(format!("peekaboo-tests-{}", std::process::id()));
+        #[cfg(not(test))]
         let dir = if portable() { exe_dir().join("PeekABooData") } else { crate::os::documents_dir().join("PeekABoo Notes") };
         let _ = std::fs::create_dir_all(&dir);
         dir
