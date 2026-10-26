@@ -1017,12 +1017,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             WM_DPICHANGED => {
                 with(|w| {
-                    w.s = (wp & 0xFFFF) as f32 / 96.0;
+                    let s = (wp & 0xFFFF) as f32 / 96.0;
+                    // The page stays scrolled to the same place at the new scale.
+                    let k = s / w.s;
+                    w.scroll.snap(w.scroll.target * k);
+                    w.s = s;
                     w.fonts = Fonts::new(w.s);
                     w.side_y.snap(w.page as f32 * SIDE_ROW * w.s);
                 });
                 let r = &*(lp as *const RECT);
                 SetWindowPos(hwnd, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+                with(|w| {
+                    let max = max_scroll(w);
+                    if w.scroll.value > max {
+                        w.scroll.snap(max);
+                    }
+                });
                 return 0;
             }
             WM_CLOSE => {
