@@ -461,31 +461,35 @@ pub(super) fn cell_text_width(h: HWND, t: &[u16], cp: i32) -> Option<i32> {
 /// Where a code block's language (the `rust` of ```rust) is in its cell's text `a..b`:
 /// it's kept as hidden text at the cell's start, which the RTF keeps while RichEdit draws
 /// nothing for it, moves the caret past it, never types into it and leaves it out of a
-/// copy. None for code without one. (Emoji selectors' stand-ins are hidden too, and are
-/// not it.)
+/// copy. None for code without one. Only hidden text at the very start is it: emoji
+/// selectors' stand-ins are hidden too, and so is a link's `HYPERLINK "url"` (which notes
+/// opened in 0.6.0 can have in code).
 pub fn code_tag(h: HWND, t: &[u16], a: usize, b: usize) -> Option<(usize, usize)> {
     use windows::Win32::UI::Controls::RichEdit::{tomCharFormat, tomTrue};
+    // Up to the first link instruction, if one starts it there is none.
+    let b = instructions(t, a, b.min(t.len())).first().map_or(b.min(t.len()), |l| l.0);
     let r = range(h, a as i32, a as i32)?;
-    let mut tag: Option<(usize, usize)> = None;
     let mut x = a;
-    // A run of formatting at a time: code is mostly one.
-    while x < b.min(t.len()) {
+    // A run of formatting at a time.
+    while x < b {
         let (end, hidden) = unsafe {
             r.SetRange(x as i32, x as i32).ok()?;
             r.MoveEnd(tomCharFormat.0, 1).ok()?;
             let end = (r.GetEnd().ok()?.max(0) as usize).clamp(x + 1, b);
             (end, r.GetFont().ok()?.GetHidden().ok()? == tomTrue.0)
         };
-        for (i, &c) in t.iter().enumerate().take(end).skip(x) {
-            if hidden && unmark(c) == c {
-                tag = Some(tag.map_or((i, i + 1), |(s, _)| (s, i + 1)));
-            } else if tag.is_some() {
-                return tag;
-            }
+        if !hidden {
+            break;
         }
-        x = end;
+        match t[x..end].iter().position(|&c| unmark(c) != c) {
+            Some(k) => {
+                x += k;
+                break;
+            }
+            None => x = end,
+        }
     }
-    tag
+    (x > a).then_some((a, x))
 }
 
 /// Where the text of the code cell `a..b` starts, past a language kept at its start.

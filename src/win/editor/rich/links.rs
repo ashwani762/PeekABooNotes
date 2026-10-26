@@ -382,7 +382,18 @@ pub fn link_addresses(h: HWND, a: usize, b: usize) {
     for (start, name, _) in instructions(&t, pa, pb) {
         gap[start - pa..name - pa].iter_mut().for_each(|g| *g = true);
     }
-    let space = |i: usize| gap[i - pa] || matches!(t[i], 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
+    // In code an address is code: a code block's cells are left as they are.
+    if t.contains(&ROW_START) {
+        for row in rows(&t).into_iter().filter(|r| r.start < pb && r.end > pa) {
+            if kind(h, row) == Block::Code {
+                for (ca, cb) in cells(&t, row) {
+                    gap[ca.clamp(pa, pb) - pa..cb.clamp(pa, pb) - pa].iter_mut().for_each(|g| *g = true);
+                }
+            }
+        }
+    }
+    // A table's row and cell marks end a word too: a link never reaches past its cell.
+    let space = |i: usize| gap[i - pa] || matches!(t[i], 0x20 | 0x09 | 0x0B | 0x0D | 0xA0 | CELL | ROW_START | ROW_END);
     let lead = "([<\"'".encode_utf16().collect::<Vec<u16>>();
     let trail = ".,;:!?)]}>\"'".encode_utf16().collect::<Vec<u16>>();
     let mut words = Vec::new();
@@ -850,6 +861,73 @@ mod tests {
         link_addresses(h, 0, usize::MAX);
         assert_eq!(instructions(&text(h), 0, text(h).len()).len(), 3);
         unsafe { DestroyWindow(h) };
+    }
+
+    /// An address at the end of a quote or a table cell links only itself, never the
+    /// cell's end mark (which corrupted the block, and the note saved it so), also when it
+    /// was linked as typed and the note opens again.
+    #[test]
+    fn addresses_stay_in_their_cell() {
+        for (md, urls) in [
+            ("# T\n> Source: https://example.com/a", vec!["https://example.com/a"]),
+            ("# T\n> Source: https://example.com/a\nafter", vec!["https://example.com/a"]),
+            ("# T\n| site | note |\n| --- | --- |\n| https://example.com | ok |", vec!["https://example.com"]),
+            ("# T\n| site |\n| --- |\n| see https://example.com |", vec!["https://example.com"]),
+            ("# T\n| a | b |\n| --- | --- |\n| www.a.org | www.b.org |", vec!["https://www.a.org", "https://www.b.org"]),
+        ] {
+            let h = editor();
+            setup(h);
+            load_markdown(h, md);
+            link_addresses(h, 0, usize::MAX);
+            let t = text(h);
+            let found: Vec<String> = instructions(&t, 0, t.len()).into_iter().map(|l| l.2).collect();
+            assert_eq!(found, urls, "{md}");
+            assert_eq!(to_markdown(h, true), md);
+            unsafe { DestroyWindow(h) };
+        }
+        let h = editor();
+        setup(h);
+        load_markdown(h, "T\n> see https://example.com/a");
+        let t = text(h);
+        let s = String::from_utf16_lossy(&t).find("https").unwrap();
+        link_addresses(h, s, s + "https://example.com/a".len());
+        let h2 = editor();
+        setup(h2);
+        set_rtf(h2, &get_rtf(h));
+        link_addresses(h2, 0, usize::MAX);
+        let t = text(h2);
+        assert_eq!(instructions(&t, 0, t.len()).into_iter().map(|l| l.2).collect::<Vec<_>>(), ["https://example.com/a"]);
+        assert_eq!(to_markdown(h2, true), "# T\n> see https://example.com/a");
+        unsafe { DestroyWindow(h) };
+        unsafe { DestroyWindow(h2) };
+    }
+
+    /// In code an address is code: opening a note (or pasting) links none there, and a
+    /// link made in code before this goes out as its text, never as the fence's language.
+    #[test]
+    fn code_keeps_its_addresses() {
+        for md in [
+            "# T\n```\ncurl https://example.com/api -v\n```",
+            "# T\n```py\nurl = 'https://example.com/api'\nprint(url)\n```",
+            "# T\n```\nhttps://example.com/api\n```",
+            "# T\n```sh\nhttps://example.com/api\n```",
+            "# T\n> ```\n> curl https://example.com/api\n> ```\n> see www.example.com",
+        ] {
+            let h = editor();
+            setup(h);
+            load_markdown(h, md);
+            link_addresses(h, 0, usize::MAX);
+            let t = text(h);
+            let found: Vec<String> = instructions(&t, 0, t.len()).into_iter().map(|l| l.2).collect();
+            let want: Vec<&str> = if md.contains("www.") { vec!["https://www.example.com"] } else { vec![] };
+            assert_eq!(found, want, "{md}");
+            assert_eq!(to_markdown(h, true), md);
+            // Linked as 0.6.0 linked them: the text and the language are as they were.
+            let at = String::from_utf16_lossy(&t).find("https://example.com/api").unwrap();
+            assert!(set_link(h, at as i32, at as i32 + 23, "https://example.com/api"));
+            assert_eq!(to_markdown(h, true), md, "a link in code");
+            unsafe { DestroyWindow(h) };
+        }
     }
 
     #[test]

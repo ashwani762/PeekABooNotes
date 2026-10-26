@@ -233,10 +233,15 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
             // Its language goes on the opening fence (```rust); its text is the rest.
             let tag = code_tag(h, t, a, b);
             let lang = tag.filter(|_| inline).map(|(s, e)| unmark_str(&t[s..e])).unwrap_or_default();
-            let code: Vec<u16> = match tag {
-                Some((s, e)) => t[a..s].iter().chain(&t[e..b]).copied().collect(),
-                None => t[a..b].to_vec(),
-            };
+            // (Links in code, as opening a note in 0.6.0 made of addresses there, are their
+            // text: their hidden instructions stay out.)
+            let mut code: Vec<u16> = Vec::with_capacity(b - a);
+            let mut i = tag.map_or(a, |(_, e)| e);
+            for (at, name, _) in instructions(t, i, b) {
+                code.extend_from_slice(&t[i..at]);
+                i = name;
+            }
+            code.extend_from_slice(&t[i..b]);
             let lines: Vec<String> = code.split(|&c| c == CR).map(|l| unmark_str(l).replace('\u{B}', "\n")).collect();
             // A fence longer than any run of backticks starting a line of the code, so none
             // of them ends it early. (The light text keeps to three, as previews read it.)
