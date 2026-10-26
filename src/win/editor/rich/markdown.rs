@@ -455,6 +455,11 @@ fn marks_at(fx: &Effects, i: usize, n: usize, link: bool) -> Marks {
     (e & CFM_BOLD != 0, e & CFM_ITALIC != 0, e & CFM_STRIKEOUT != 0, e & CFM_UNDERLINE != 0 && !link)
 }
 
+/// The marks both `a` and `b` have.
+fn both(a: Marks, b: Marks) -> Marks {
+    (a.0 && b.0, a.1 && b.1, a.2 && b.2, a.3 && b.3)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut String, link: bool) -> Marks {
     let links = instructions(t, a, b);
@@ -478,8 +483,20 @@ fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, o
             while shown_end > name && blank(t[shown_end - 1]) {
                 shown_end -= 1;
             }
+            // A mark stays open across the link only when all of its text has it: the
+            // others close before its `[` and open again inside, and those opened inside
+            // close before its `]` (`[**bold link**](url)`, not `[**bold link](url)**`).
+            let mut across = cur;
+            for k in name..shown_end {
+                if !blank(t[k]) && fx.of[k - fx.from] & CFM_HIDDEN == 0 {
+                    across = both(across, marks_at(fx, k, 1, true));
+                }
+            }
+            close_marks(out, cur, across);
             out.push('[');
-            cur = marks(fx, h, t, name, shown_end, cur, out, true);
+            let inside = marks(fx, h, t, name, shown_end, across, out, true);
+            cur = both(inside, across);
+            close_marks(out, inside, cur);
             out.push_str(&format!("]({url})"));
             out.push_str(&unmark_str(&t[shown_end..end]));
             i = end;
@@ -1456,6 +1473,21 @@ mod tests {
         // In a quote too.
         let md = "# T\n> \\>>> py\n>   \\- x\n> \\| a |\n> | --- |";
         cycle(md, md);
+    }
+
+    /// A mark on part of a link's text, or starting in it, opens and closes inside its
+    /// brackets; one on all of it may stay open around it.
+    #[test]
+    fn marks_in_links_nest() {
+        for md in [
+            "# T\n[**bold link**](https://a.b)",
+            "# T\n[_it_ and **bold**](https://a.b) after",
+            "# T\n**bold [link](https://a.b) more**",
+            "# T\n**bold** [link](https://a.b) **more**",
+            "# T\n**a** [**b** c](https://a.b)",
+        ] {
+            cycle(md, md);
+        }
     }
 
     /// A ticked item goes out without the strikethrough it's drawn with, but with the
