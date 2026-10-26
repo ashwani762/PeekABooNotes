@@ -43,6 +43,9 @@ struct Toast {
     /// no ring; it goes after its time (and an action still in time shows again).
     notice: Option<String>,
     notice_left: f32,
+    /// What it said last, and whether that was a notice: it goes on showing it as it
+    /// sinks away.
+    said: (String, bool),
     /// When the clock last ran; None while the pointer holds it.
     clock_at: Option<Instant>,
     rise: Spring,
@@ -127,6 +130,7 @@ fn with_toast(f: impl FnOnce(&mut Toast)) {
                 left: SECONDS,
                 notice: None,
                 notice_left: 0.0,
+                said: (String::new(), false),
                 clock_at: None,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
                 hot: Spring::unit(0.0, (1.0, 0.12)),
@@ -171,6 +175,7 @@ fn settle(t: &mut Toast) {
             t.size = measure(t);
             t.rise.to(1.0);
             unsafe { SetWindowTextW(t.hwnd, wide(&msg).as_ptr()) };
+            t.said = (msg, t.notice.is_some());
         }
         None => {
             t.alive = false;
@@ -294,7 +299,8 @@ fn render(t: &mut Toast) {
     let s = t.s;
     let (w, bw) = t.size;
     let (h, m) = ((52.0 * s) as i32, (24.0 * s) as i32);
-    let Some(msg) = message(t) else { return };
+    let msg = message(t).unwrap_or_else(|| t.said.0.clone());
+    let notice = t.notice.is_some() || (t.undo.is_none() && t.said.1);
     let (cw, ch) = (w + 2 * m, h + 2 * m);
     if t.canvas.as_ref().map(|c| (c.w, c.h)) != Some((cw, ch)) {
         t.canvas = Some(Canvas::new(cw, ch));
@@ -310,7 +316,7 @@ fn render(t: &mut Toast) {
     c.shape(&card, 0x1C1C1E, 0.94 * a, 1.0, 0.0);
     c.shape(&card, 0xFFFFFF, 0.10 * a, 1.0, 1.0);
     c.begin_batch();
-    if t.notice.is_some() {
+    if notice {
         c.text(&msg, &t.body, rect((x + 20.0 * s) as i32, y as i32, w - (40.0 * s) as i32, h), 0xF2F2F2, a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         c.flush();
         present(t, cw, ch);
