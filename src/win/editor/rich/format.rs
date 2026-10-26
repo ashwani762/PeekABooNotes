@@ -243,6 +243,11 @@ pub fn set_box_colors(h: HWND, ink: u32, done: u32, text: u32) {
     BOX_COLORS.with(|m| m.borrow_mut().insert(h as isize, (ink, done, text)));
 }
 
+/// Editor `h` is going: its checklist colours with it.
+pub fn forget_box_colors(h: HWND) {
+    BOX_COLORS.with(|m| m.borrow_mut().remove(&(h as isize)));
+}
+
 /// Text typed at the caret (or the selection) takes a completed item's look: struck
 /// through, in the secondary colour.
 pub fn set_done_format(h: HWND) {

@@ -275,6 +275,12 @@ pub fn forget_groups() {
     UNDONE_GROUP.with(|g| *g.borrow_mut() = None);
 }
 
+/// Editor `h` is going: a group of its own goes with it (two copies of its text).
+pub fn forget_groups_of(h: HWND) {
+    LAST_GROUP.with(|g| g.borrow_mut().take_if(|g| g.0 == h as isize));
+    UNDONE_GROUP.with(|g| g.borrow_mut().take_if(|g| g.0.0 == h as isize));
+}
+
 /// Run `f`, which only changes how things look (no text moves), outside the undo history:
 /// Ctrl+Z steps over it to the last thing the user did.
 pub fn unrecorded<R>(h: HWND, f: impl FnOnce() -> R) -> R {

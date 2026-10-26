@@ -341,6 +341,8 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             crate::win::editor::checks::forget(e);
             crate::win::editor::fade::forget(e);
             rich::forget_block_colors(e);
+            rich::forget_box_colors(e);
+            rich::forget_groups_of(e);
             rich::forget_doc(e);
             rich::forget_pictures(e);
             RemoveWindowSubclass(e, Some(edit_proc), 1);

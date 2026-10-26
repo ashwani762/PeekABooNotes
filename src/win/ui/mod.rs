@@ -433,6 +433,13 @@ thread_local! {
     static THUMBS: RefCell<Vec<Thumb>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Let the previews' pictures (up to a dozen, 3.5 MB) and fonts go, with no window open:
+/// they come back on the next preview drawn.
+pub fn trim_previews() {
+    THUMBS.with(|t| t.borrow_mut().clear());
+    VARIANTS.with(|m| m.borrow_mut().clear());
+}
+
 fn block_font(f: &Font, v: Variant) -> Font {
     if let Some(hit) = VARIANTS.with(|m| m.borrow().iter().find(|e| e.1 == v && e.0.same(f)).map(|e| e.2.clone())) {
         return hit;

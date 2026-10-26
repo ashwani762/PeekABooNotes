@@ -52,6 +52,11 @@ pub fn forget(e: HWND) {
     ANIMS.with(|a| a.borrow_mut().retain(|k, _| k.0 != e as isize));
 }
 
+/// Let the canvas go (with no note open).
+pub fn trim() {
+    CANVAS.with(|c| c.borrow_mut().take());
+}
+
 /// Start the tick (or untick) animation for the box at `cp`.
 pub fn animate(e: HWND, cp: i32, checked: bool) {
     let from = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 0.0 } else { 1.0 });

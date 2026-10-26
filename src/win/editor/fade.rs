@@ -113,6 +113,11 @@ pub fn forget(e: HWND) {
     SEEN.with(|m| m.borrow_mut().remove(&(e as isize)));
 }
 
+/// Let the canvas go (with no note open).
+pub fn trim() {
+    CANVAS.with(|c| c.borrow_mut().take());
+}
+
 fn band(s: f32) -> i32 {
     (BAND * s).ceil() as i32
 }
