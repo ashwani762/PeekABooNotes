@@ -215,6 +215,9 @@ struct Deck {
     marquee_live: bool,
     /// The deck has the keys (Ctrl+Alt+K) until Esc, or until they go elsewhere.
     kbd: Option<Kbd>,
+    /// Hidden (by the user, or for a full-screen window), it's out only while it has the
+    /// keys: Ctrl+Alt+K brought it.
+    summoned: bool,
 }
 
 struct Kbd {
@@ -308,6 +311,7 @@ pub fn create() {
             marquee: None,
             marquee_live: false,
             kbd: None,
+            summoned: false,
         })
     });
     // As an app bar (without reserving space) we get ABN_FULLSCREENAPP for free.
@@ -391,7 +395,7 @@ pub fn frame(dt: f32) -> bool {
 
 fn update_visibility(d: &mut Deck) {
     let (hidden, over_fs) = app::store(|s| (s.d.settings.deck_hidden, s.d.settings.over_fullscreen));
-    let show = !hidden && (!d.fullscreen || over_fs);
+    let show = (!hidden && (!d.fullscreen || over_fs)) || d.summoned;
     if show != d.visible {
         d.visible = show;
         if !show {
@@ -594,18 +598,19 @@ fn show_ring(d: &mut Deck) {
 
 /// Ctrl+Alt+K: the deck takes the keys, fanned out with the focus ring on its top card.
 /// Pressed again while the deck has them, it gives them back. A hidden deck (by the user,
-/// or for a full-screen app) has nothing to show, so the keys stay where they are.
+/// or for a full-screen app) comes out for as long as it has them, and hides again after.
 pub fn take_keys() {
-    let Some((hwnd, has, visible)) = with(|d| (d.hwnd, d.kbd.is_some(), d.visible)) else { return };
+    let Some((hwnd, has)) = with(|d| (d.hwnd, d.kbd.is_some())) else { return };
     if has {
         give_keys_back(hwnd);
         return;
     }
-    if !visible {
-        return;
-    }
     let prev = unsafe { GetForegroundWindow() };
     with(|d| {
+        if !d.visible {
+            d.summoned = true;
+            update_visibility(d);
+        }
         unsafe { KillTimer(hwnd, T_COLLAPSE) };
         set_open(d, true, false);
         d.kbd = Some(Kbd { at: stops(d).first().copied(), prev });
@@ -636,6 +641,10 @@ fn drop_keys(d: &mut Deck) -> Option<HWND> {
     crate::win::ui::tooltip::leave(d.hwnd);
     render(d);
     anim::wake(Client::Deck);
+    if std::mem::take(&mut d.summoned) {
+        // Out only for the keys: hidden again.
+        update_visibility(d);
+    }
     Some(k.prev)
 }
 

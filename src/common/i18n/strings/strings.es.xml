@@ -18,6 +18,9 @@
     <string name="key_del">Supr</string>
     <string name="key_esc">Esc</string>
     <string name="key_tab">Tab</string>
+    <string name="key_home">Inicio</string>
+    <string name="key_end">Fin</string>
+    <string name="key_letter">A–Z</string>
 
     <!-- Menus -->
     <string name="menu_new_note">Nueva nota</string>
@@ -265,6 +268,8 @@
     <string name="shortcut_undo_toast">Deshacer un archivado o una eliminación</string>
     <string name="shortcut_deck_keys">Ir al mazo</string>
     <string name="shortcut_deck_move">Moverse entre tarjetas</string>
+    <string name="shortcut_deck_ends">Primera o última tarjeta</string>
+    <string name="shortcut_deck_letter">Siguiente tarjeta que empieza por esa letra</string>
     <string name="shortcut_deck_menu">Menú de la tarjeta</string>
     <string name="shortcut_deck_leave">Volver a la ventana anterior</string>
     <string name="shortcut_off_types">Desactivado: estas teclas escriben un carácter en tu teclado</string>

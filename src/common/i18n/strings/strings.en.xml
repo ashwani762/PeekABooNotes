@@ -28,6 +28,9 @@
     <string name="key_del">Del</string>
     <string name="key_esc">Esc</string>
     <string name="key_tab">Tab</string>
+    <string name="key_home">Home</string>
+    <string name="key_end">End</string>
+    <string name="key_letter">A–Z</string>
 
     <!-- Menus -->
     <string name="menu_new_note">New Note</string>
@@ -277,6 +280,8 @@
     <string name="shortcut_undo_toast">Undo an archive or delete</string>
     <string name="shortcut_deck_keys">Go to the deck</string>
     <string name="shortcut_deck_move">Move between cards</string>
+    <string name="shortcut_deck_ends">First or last card</string>
+    <string name="shortcut_deck_letter">Next card starting with a letter</string>
     <string name="shortcut_deck_menu">Card menu</string>
     <string name="shortcut_deck_leave">Back to the previous window</string>
     <string name="shortcut_off_types">Off: these keys type a character on your keyboard</string>

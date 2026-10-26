@@ -956,8 +956,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         with(|w| {
                             let back = vk == VK_UP;
                             if w.kbd == Focus::Pages {
-                                let n = PAGES.len();
-                                set_page(w, if back { (w.page + n - 1) % n } else { (w.page + 1) % n });
+                                // Stopping at the ends, as a list does (Tab comes round).
+                                set_page(w, if back { w.page.saturating_sub(1) } else { (w.page + 1).min(PAGES.len() - 1) });
                             } else {
                                 move_focus(w, back, false);
                             }

@@ -18,6 +18,9 @@
     <string name="key_del">Del</string>
     <string name="key_esc">Esc</string>
     <string name="key_tab">Tab</string>
+    <string name="key_home">Home</string>
+    <string name="key_end">End</string>
+    <string name="key_letter">文字</string>
 
     <!-- Menus -->
     <string name="menu_new_note">新規メモ</string>
@@ -253,6 +256,8 @@
     <string name="shortcut_undo_toast">アーカイブや削除を取り消す</string>
     <string name="shortcut_deck_keys">デッキに移動</string>
     <string name="shortcut_deck_move">カード間を移動</string>
+    <string name="shortcut_deck_ends">最初または最後のカード</string>
+    <string name="shortcut_deck_letter">その文字で始まる次のカード</string>
     <string name="shortcut_deck_menu">カードのメニュー</string>
     <string name="shortcut_deck_leave">前のウィンドウに戻る</string>
     <string name="shortcut_off_types">オフ: お使いのキーボードでは、このキーで文字が入力されます</string>

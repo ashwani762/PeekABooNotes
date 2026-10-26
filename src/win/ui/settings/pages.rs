@@ -131,6 +131,8 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 header: Some(t!("settings_page_deck")),
                 rows: vec![
                     keys(t!("shortcut_deck_move"), &["\u{2191}", "/", "\u{2193}"]),
+                    keys(t!("shortcut_deck_ends"), &["home", "/", "end"]),
+                    keys(t!("shortcut_deck_letter"), &["letter"]),
                     keys(t!("menu_open"), &["enter"]),
                     keys(t!("shortcut_deck_menu"), &["shift", "F10"]),
                     keys(t!("shortcut_deck_leave"), &["esc"]),
