@@ -246,6 +246,7 @@
     <string name="settings_deck_display">Stapel zeigen auf</string>
     <string name="settings_deck_display_away">Bis der Bildschirm wieder verbunden ist, liegt der Stapel auf dem Hauptbildschirm</string>
     <string name="display_main">Hauptbildschirm</string>
+    <string name="display_main_named">Hauptbildschirm (%1$s)</string>
     <string name="display_builtin">Integrierter Bildschirm</string>
     <string name="display_numbered">Bildschirm %d</string>
     <string name="display_not_connected">%s (nicht verbunden)</string>

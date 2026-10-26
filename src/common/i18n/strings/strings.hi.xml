@@ -246,6 +246,7 @@
     <string name="settings_deck_display">डेक इस पर दिखाएँ</string>
     <string name="settings_deck_display_away">दोबारा कनेक्ट होने तक डेक मुख्य डिस्प्ले पर है</string>
     <string name="display_main">मुख्य डिस्प्ले</string>
+    <string name="display_main_named">मुख्य डिस्प्ले (%1$s)</string>
     <string name="display_builtin">बिल्ट-इन डिस्प्ले</string>
     <string name="display_numbered">डिस्प्ले %d</string>
     <string name="display_not_connected">%s (कनेक्ट नहीं है)</string>

@@ -231,6 +231,7 @@
     <string name="settings_deck_display">デッキを表示する画面</string>
     <string name="settings_deck_display_away">再接続されるまで、デッキはメイン ディスプレイに表示されます</string>
     <string name="display_main">メイン ディスプレイ</string>
+    <string name="display_main_named">メイン ディスプレイ (%1$s)</string>
     <string name="display_builtin">内蔵ディスプレイ</string>
     <string name="display_numbered">ディスプレイ %d</string>
     <string name="display_not_connected">%s (未接続)</string>

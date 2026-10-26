@@ -257,6 +257,8 @@
     <string name="settings_deck_display">Show the deck on</string>
     <string name="settings_deck_display_away">Until it's connected again, the deck is on the main display</string>
     <string name="display_main">Main display</string>
+    <!-- %s is the main display's name: "Main display (DELL U2720Q)" -->
+    <string name="display_main_named">Main display (%1$s)</string>
     <string name="display_builtin">Built-in display</string>
     <!-- A display without a name of its own: %d is its place in the list -->
     <string name="display_numbered">Display %d</string>

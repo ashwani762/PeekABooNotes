@@ -222,6 +222,9 @@ pub(super) fn hit_test(w: &Win, x: i32, y: i32) -> Hit {
         if !pt_in(&p.r, x, y) {
             continue;
         }
+        if p.row.disabled {
+            return Hit::None;
+        }
         return match &p.row.ctl {
             // The whole row flips a switch: a big, forgiving target.
             Ctl::Toggle => Hit::Ctl(k, 0),

@@ -6,16 +6,16 @@
 use super::*;
 use crate::win::ui::focus;
 
-/// The control on this page for setting `k`.
+/// The control on this page for setting `k`, unless it's greyed out.
 fn control(groups: &[Group], k: Key) -> Option<&Ctl> {
-    groups.iter().flat_map(|g| g.rows.iter()).find(|r| r.key == Some(k)).map(|r| &r.ctl)
+    groups.iter().flat_map(|g| g.rows.iter()).find(|r| r.key == Some(k) && !r.disabled).map(|r| &r.ctl)
 }
 
 /// The page list, then each control on the page, top to bottom. Keycaps and the preview
-/// only show things, so Tab passes them by.
+/// only show things, and greyed-out settings do nothing, so Tab passes them by.
 fn tab_order(w: &Win) -> Vec<Focus> {
     let groups = groups(w);
-    let ctls = groups.iter().flat_map(|g| g.rows.iter()).filter(|r| !matches!(r.ctl, Ctl::Keys(_) | Ctl::Preview));
+    let ctls = groups.iter().flat_map(|g| g.rows.iter()).filter(|r| !matches!(r.ctl, Ctl::Keys(_) | Ctl::Preview) && !r.disabled);
     std::iter::once(Focus::Pages).chain(ctls.filter_map(|r| r.key).map(Focus::Ctl)).collect()
 }
 

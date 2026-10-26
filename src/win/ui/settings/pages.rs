@@ -10,6 +10,11 @@ use super::*;
 /// The displays are the list kept between display changes, not looked for again on
 /// every rebuild.
 fn display_row() -> Option<Row> {
+    let hidden = app::store(|s| s.d.settings.deck_hidden);
+    display_choice().map(|r| r.disabled_if(hidden))
+}
+
+fn display_choice() -> Option<Row> {
     if display_away() {
         return Some(row_sub(Key::DeckDisplay, t!("settings_deck_display"), t!("settings_deck_display_away"), Ctl::Choice));
     }
@@ -59,25 +64,30 @@ pub(super) fn page(i: usize, edit: &Edit) -> Vec<Group> {
                 rows: vec![row_sub(Key::HideUnpinned, t!("settings_hide_unpinned"), t!("settings_hide_unpinned_sub"), Ctl::Toggle)],
                 footer: None,
             },
-            Group { header: Some(t!("settings_group_preview")), rows: vec![Row { key: None, label: "", sub: None, ctl: Ctl::Preview, off: false }], footer: None },
+            Group { header: Some(t!("settings_group_preview")), rows: vec![Row { key: None, label: "", sub: None, ctl: Ctl::Preview, off: false, hint: None, disabled: false }], footer: None },
         ],
-        2 => vec![
-            Group {
-                header: None,
-                rows: with_display_row(vec![
-                    row_sub(Key::ShowDeck, t!("settings_show_deck"), t!("settings_show_deck_sub"), Ctl::Toggle),
-                    row(Key::Edge, t!("settings_screen_edge"), Ctl::Seg(vec![t!("edge_left"), t!("edge_right")])),
-                    row_sub(Key::Cards, t!("settings_cards"), t!("settings_cards_sub"), Ctl::Seg(vec!["5", "8", "12"])),
-                    row_sub(Key::NewAt, t!("settings_new_notes"), t!("settings_new_notes_sub"), Ctl::Seg(vec![t!("new_notes_top"), t!("new_notes_bottom")])),
-                ]),
-                footer: None,
-            },
-            Group {
-                header: None,
-                rows: vec![row_sub(Key::Fullscreen, t!("settings_fullscreen"), t!("settings_fullscreen_sub"), Ctl::Toggle)],
-                footer: Some(t!("settings_deck_footer").into()),
-            },
-        ],
+        2 => {
+            // With the deck hidden, where and how it shows does nothing: greyed out. Where new
+            // notes go still counts in All Notes.
+            let hidden = app::store(|s| s.d.settings.deck_hidden);
+            vec![
+                Group {
+                    header: None,
+                    rows: with_display_row(vec![
+                        row_sub(Key::ShowDeck, t!("settings_show_deck"), t!("settings_show_deck_sub"), Ctl::Toggle),
+                        row(Key::Edge, t!("settings_screen_edge"), Ctl::Seg(vec![t!("edge_left"), t!("edge_right")])).disabled_if(hidden),
+                        row_sub(Key::Cards, t!("settings_cards"), t!("settings_cards_sub"), Ctl::Seg(vec!["5", "8", "12"])).disabled_if(hidden),
+                        row_sub(Key::NewAt, t!("settings_new_notes"), t!("settings_new_notes_sub"), Ctl::Seg(vec![t!("new_notes_top"), t!("new_notes_bottom")])),
+                    ]),
+                    footer: None,
+                },
+                Group {
+                    header: None,
+                    rows: vec![row_sub(Key::Fullscreen, t!("settings_fullscreen"), t!("settings_fullscreen_sub"), Ctl::Toggle).disabled_if(hidden)],
+                    footer: Some(t!("settings_deck_footer").into()),
+                },
+            ]
+        }
         3 => vec![
             Group {
                 header: Some(t!("settings_group_anywhere")),
@@ -158,7 +168,8 @@ pub(super) fn page(i: usize, edit: &Edit) -> Vec<Group> {
                     header: Some(t!("settings_group_assistants")),
                     rows: vec![
                         row_sub(Key::Mcp, t!("settings_mcp"), t!("settings_mcp_sub"), Ctl::Toggle),
-                        row_sub(Key::McpSetup, t!("settings_mcp_setup"), t!("settings_mcp_setup_sub"), Ctl::Button(t!("button_connect"))),
+                        // Nothing to connect to while assistants aren't let in.
+                        row_sub(Key::McpSetup, t!("settings_mcp_setup"), t!("settings_mcp_setup_sub"), Ctl::Button(t!("button_connect"))).disabled_if(!app::store(|s| s.d.settings.mcp)),
                     ],
                     footer: Some(t!("settings_mcp_footer").into()),
                 },

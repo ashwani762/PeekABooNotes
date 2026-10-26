@@ -115,6 +115,19 @@ struct Row {
     ctl: Ctl,
     /// Greyed out: a shortcut that's off (its `sub` says why).
     off: bool,
+    /// What a row says for a moment beside its control, on its one line (a shortcut
+    /// waiting for keys: how to cancel, why keys pressed won't do), so it never grows.
+    hint: Option<String>,
+    /// Greyed out and out of reach (clicks and Tab pass it by): a setting that does
+    /// nothing while another is off (the deck's while the deck is hidden).
+    disabled: bool,
+}
+
+impl Row {
+    fn disabled_if(mut self, d: bool) -> Row {
+        self.disabled = d;
+        self
+    }
 }
 
 struct Group {
@@ -124,15 +137,15 @@ struct Group {
 }
 
 fn row(key: Key, label: &'static str, ctl: Ctl) -> Row {
-    Row { key: Some(key), label, sub: None, ctl, off: false }
+    Row { key: Some(key), label, sub: None, ctl, off: false, hint: None, disabled: false }
 }
 
 fn row_sub(key: Key, label: &'static str, sub: &str, ctl: Ctl) -> Row {
-    Row { key: Some(key), label, sub: Some(sub.into()), ctl, off: false }
+    Row { key: Some(key), label, sub: Some(sub.into()), ctl, off: false, hint: None, disabled: false }
 }
 
 fn keys(label: &'static str, k: &'static [&'static str]) -> Row {
-    Row { key: None, label, sub: None, ctl: Ctl::Keys(k), off: false }
+    Row { key: None, label, sub: None, ctl: Ctl::Keys(k), off: false, hint: None, disabled: false }
 }
 
 /// Shortcut `i`'s name in Settings.
@@ -151,16 +164,20 @@ fn hotkey_label(i: usize) -> &'static str {
 
 /// Shortcut `i`, which works anywhere: its keys, which a click asks new ones for; greyed
 /// out, saying why, while it's off; while it waits for keys, how to cancel or turn it off;
-/// and for a moment, why keys pressed for it won't do.
+/// and for a moment, why keys pressed for it won't do. A row is as tall as why it's off
+/// makes it: what it says for a moment goes in that line when there is one, else beside
+/// the keys, so the rows below never jump.
 fn hotkey(i: usize, edit: &Edit) -> Row {
     let waiting = edit.rec == Some(i);
-    let why = app::hotkey_off(i).filter(|_| !waiting).map(|off| match off {
+    let off = app::hotkey_off(i);
+    let why = off.filter(|_| !waiting).map(|off| match off {
         app::HotkeyOff::Types => t!("shortcut_off_types").to_string(),
         app::HotkeyOff::Taken => t!("shortcut_off_taken").to_string(),
     });
     let said = edit.say.as_ref().filter(|(j, _)| *j == i).map(|(_, text)| text.clone());
-    let sub = said.or_else(|| waiting.then(|| t!("shortcut_recording").to_string())).or_else(|| why.clone());
-    Row { key: Some(Key::Hotkey(i)), label: hotkey_label(i), off: why.is_some(), sub, ctl: Ctl::Hotkey(i) }
+    let passing = said.or_else(|| waiting.then(|| t!("shortcut_recording").to_string()));
+    let (sub, hint) = if off.is_some() { (passing.or_else(|| why.clone()), None) } else { (None, passing) };
+    Row { key: Some(Key::Hotkey(i)), label: hotkey_label(i), off: why.is_some(), sub, ctl: Ctl::Hotkey(i), hint, disabled: false }
 }
 
 /// The shortcut waiting for new keys, and the one saying why keys pressed for it won't do.
@@ -488,8 +505,15 @@ fn choose_display() {
     let list = displays::list();
     let (current, saved) = app::store(|s| (s.d.settings.deck_display.clone(), s.d.settings.deck_display_name.clone()));
     let at = displays::index_of(&list, &current);
-    let mut items = vec![menu::check(1, t!("display_main"), "", current.is_empty()), menu::Item::Separator];
-    for (i, d) in list.iter().enumerate() {
+    // The main display once, by what it is and its name ("Main display (DELL U2720Q)"),
+    // then the others; the main one chosen by name counts as the main display.
+    let main = list.iter().position(|d| d.main);
+    let main_label = match main {
+        Some(m) => t!("display_main_named", list[m].name),
+        None => t!("display_main").to_string(),
+    };
+    let mut items = vec![menu::check(1, &main_label, "", current.is_empty() || (at.is_some() && at == main)), menu::Item::Separator];
+    for (i, d) in list.iter().enumerate().filter(|(i, _)| Some(*i) != main) {
         items.push(menu::check(100 + i as u32, &d.name, "", at == Some(i)));
     }
     if !current.is_empty() && at.is_none() {
@@ -667,7 +691,15 @@ fn recorded_key(hwnd: HWND, i: usize, vk: u16) {
             anim::wake(Client::Settings);
         }
         _ => match app::set_hotkey(i, mods, u8::try_from(vk).unwrap_or(0)) {
-            Ok(()) => stop_recording(),
+            Ok(()) => {
+                // Taken: why keys pressed before wouldn't do no longer holds.
+                with(|w| {
+                    if w.edit.say.as_ref().is_some_and(|(j, _)| *j == i) {
+                        w.edit.say = None;
+                    }
+                });
+                stop_recording();
+            }
             Err(r @ (hotkey::Refusal::Modifiers | hotkey::Refusal::Key)) => say(hwnd, i, refusal_text(r)),
             Err(r) => {
                 stop_recording();
@@ -960,6 +992,44 @@ const SWATCH_GAP: f32 = 6.0;
 
 // ---------------------------------------------------------------- input
 
+/// A tooltip for what's under the pointer at (`x`, `y`), on `hit`: a colour swatch's
+/// name, or the notes folder's whole path where the row shows it shortened.
+fn tip(w: &Win, hit: Hit, x: i32, y: i32) {
+    use crate::win::ui::tooltip;
+    let groups = groups(w);
+    let placed = place(w, &groups);
+    let row_of = |k: Key| {
+        placed.iter().find_map(|it| match it {
+            Item::Row(pl) if pl.row.key == Some(k) => Some(pl),
+            _ => None,
+        })
+    };
+    if let Hit::Ctl(Key::NewColor, i) = hit
+        && let Some(pl) = row_of(Key::NewColor)
+    {
+        let (sx, sy) = swatch_x(w, &pl.r, i);
+        let d = (SWATCH * w.s) as i32;
+        let name = if i == 0 { t!("color_automatic") } else { theme::color_name(theme::ORDER[i - 1]) };
+        tooltip::hover(w.hwnd, rect(sx as i32, sy as i32, d, d), name, "");
+        return;
+    }
+    if hit == Hit::None
+        && let Some(pl) = row_of(Key::Folder)
+        && let Some(path) = &pl.row.sub
+    {
+        let f = &w.fonts.sub;
+        let lx = pl.r.left + (INSET * w.s) as i32;
+        let shown = f.fit_path(path, sub_width(w, pl.row, &pl.r).max(10));
+        let base = pl.r.top + (ROW_SUB_H * w.s / 2.0) as i32 + (15.0 * w.s) as i32;
+        let r = rect(lx, base - f.ascent, f.measure(&shown).0, f.ascent + f.descent);
+        if shown != *path && pt_in(&r, x, y) {
+            tooltip::hover(w.hwnd, r, path, "");
+            return;
+        }
+    }
+    tooltip::leave(w.hwnd);
+}
+
 fn set_hover(w: &mut Win, hit: Hit) {
     if w.hover == hit {
         return;
@@ -1043,6 +1113,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_MOUSEWHEEL => {
+                crate::win::ui::tooltip::leave(hwnd);
                 let notches = ((wp >> 16) as i16) as f32 / 120.0;
                 with(|w| {
                     let max = max_scroll(w);
@@ -1064,10 +1135,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     }
                     let hit = hit_test(w, x, y);
                     set_hover(w, hit);
+                    tip(w, hit, x, y);
                 });
                 return 0;
             }
             WM_MOUSELEAVE => {
+                crate::win::ui::tooltip::leave(hwnd);
                 with(|w| {
                     w.tracking = false;
                     set_hover(w, Hit::None);
@@ -1075,6 +1148,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_LBUTTONDOWN => {
+                crate::win::ui::tooltip::mute();
                 let (x, y) = (x_of(lp), y_of(lp));
                 // A click anywhere but the keys of the shortcut waiting for keys cancels.
                 if let Some((Some(i), hit)) = with(|w| (w.edit.rec, hit_test(w, x, y)))
@@ -1267,6 +1341,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return 0;
             }
             WM_DESTROY => {
+                crate::win::ui::tooltip::leave(hwnd);
                 // Closed while a shortcut waited for keys: the shortcuts come back.
                 stop_recording();
                 WIN.with(|w| {

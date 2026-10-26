@@ -161,11 +161,12 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
     }
     let row = pl.row;
     let mid = (r.top + r.bottom) / 2;
+    let label_ink = if row.off || row.disabled { p.sub } else { p.text };
     match &row.sub {
         Some(sub) => {
             // As on a row of one subtitle line, however many lines it wraps onto.
             let mid1 = r.top + (ROW_SUB_H * s / 2.0) as i32;
-            c.line_ct(row.label, &f.label, lx, mid1 - (4.0 * s) as i32, (r.right - lx) - px_ctl(w, row, &r), None, if row.off { p.sub } else { p.text }, DT_LEFT);
+            c.line_ct(row.label, &f.label, lx, mid1 - (4.0 * s) as i32, (r.right - lx) - px_ctl(w, row, &r), None, label_ink, DT_LEFT);
             let sw = sub_width(w, row, &r);
             if sub_wraps(row) {
                 let top = mid1 + (15.0 * s) as i32 - f.sub.ascent;
@@ -192,7 +193,17 @@ pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32)
         None => {
             let lw = (r.right - lx) - px_ctl(w, row, &r) - (12.0 * s) as i32;
             let label = f.label.fit(row.label, lw.max(10));
-            c.line_ct(&label, &f.label, lx, mid + f.label.cap / 2, lw.max(10), None, p.text, DT_LEFT);
+            c.line_ct(&label, &f.label, lx, mid + f.label.cap / 2, lw.max(10), None, label_ink, DT_LEFT);
+            // What the row says for a moment, between its label and its control.
+            if let Some(hint) = &row.hint {
+                let x = lx + f.label.measure(&label).0 + (16.0 * s) as i32;
+                let room = lx + lw - x;
+                if room > (24.0 * s) as i32 {
+                    let fitted = f.sub.fit(hint, room);
+                    let hw = f.sub.measure(&fitted).0;
+                    c.line_ct(&fitted, &f.sub, lx + lw - hw, mid + f.sub.cap / 2, hw + 2, None, p.sub, DT_LEFT);
+                }
+            }
         }
     }
     draw_ctl(w, c, p, pl, &r, mid);
@@ -206,6 +217,9 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
     let pressed = |sub: usize| row.key.is_some_and(|k| w.pressed == Hit::Ctl(k, sub) && w.hover == w.pressed);
     let hovered = |sub: usize| row.key.is_some_and(|k| w.hover == Hit::Ctl(k, sub));
     let focused = row.key.is_some_and(|k| ring_on(w) == Some(Focus::Ctl(k)));
+    // A greyed-out setting's control, faded into its group.
+    let fade = if row.disabled { 0.4 } else { 1.0 };
+    let dim = |ink: u32| mix(p.group, ink, fade);
     let ring = |c: &mut Canvas, sh: &Shape| {
         if focused {
             focus::ring(c, sh, p.accent, 1.0, s);
@@ -215,28 +229,28 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
         Ctl::Toggle => {
             let t = clamp01(knob);
             let sh = toggle_shape(w, &r);
-            c.shape(&sh, mix(p.track, p.accent, t), 1.0, 1.0, 0.0);
+            c.shape(&sh, mix(p.track, p.accent, t), fade, 1.0, 0.0);
             ring(c, &sh);
             // The knob stretches while pressed, like a finger squashing it.
             let d = sh.h - 4.0 * s;
             let kw = d + if pressed(0) { 6.0 * s * clamp01(w.press.value) } else { 0.0 };
             let kx = sh.x + 2.0 * s + t * (sh.w - 4.0 * s - kw);
             let k = Shape::new(kx, sh.y + 2.0 * s, kw, d, d / 2.0);
-            c.card(&k, 0xFFFFFF, 1.0, 0x000000, 0.04, 0.5, s);
+            c.card(&k, dim(0xFFFFFF), 1.0, 0x000000, 0.04 * fade, 0.5 * fade, s);
         }
         Ctl::Seg(labels) => {
             let (sh, item) = seg_metrics(w, labels, &r);
-            c.shape(&sh, p.field.0, p.field.1, 1.0, 0.0);
+            c.shape(&sh, p.field.0, p.field.1 * fade, 1.0, 0.0);
             ring(c, &sh);
             let pos = knob.clamp(0.0, labels.len() as f32 - 1.0);
             let pill = Shape::new(sh.x + 2.0 * s + pos * item, sh.y + 2.0 * s, item, sh.h - 4.0 * s, 6.5 * s);
-            c.card(&pill, p.pill, 1.0, 0x000000, 0.04, 0.35, s);
+            c.card(&pill, dim(p.pill), 1.0, 0x000000, 0.04 * fade, 0.35 * fade, s);
             let on = row.key.map(|k| value(w, k)).unwrap_or(0);
             for (i, l) in labels.iter().enumerate() {
                 let x = (sh.x + 2.0 * s + i as f32 * item) as i32;
                 let font = if i == on { &f.seg_on } else { &f.seg };
                 let ink = if i == on || hovered(i) { p.text } else { mix(p.group, p.text, 0.78) };
-                c.line_ct(l, font, x, mid + font.cap / 2, item as i32, None, ink, DT_CENTER);
+                c.line_ct(l, font, x, mid + font.cap / 2, item as i32, None, dim(ink), DT_CENTER);
             }
         }
         Ctl::Swatches => {
@@ -293,6 +307,7 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
                 (true, true) => (p.field.0, p.field.1, p.sub),
                 (true, false) if hovered(0) => (p.danger.0, if pressed(0) { 0.82 } else { 1.0 }, 0xFFFFFF),
                 (true, false) => (p.danger.0, 0.10, p.danger.1),
+                _ if row.disabled => (p.field.0, p.field.1 * fade, dim(p.text)),
                 _ => (p.field.0, p.field.1 * k, p.text),
             };
             c.shape(&sh, fill, fa, 1.0, 0.0);
@@ -321,14 +336,14 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             let key = row.key.unwrap_or(Key::Language);
             let sh = choice_shape(w, key, &r);
             let k = if pressed(0) { 2.4 } else if hovered(0) { 1.6 } else { 1.0 };
-            c.shape(&sh, p.field.0, p.field.1 * k, 1.0, 0.0);
+            c.shape(&sh, p.field.0, p.field.1 * k * fade, 1.0, 0.0);
             ring(c, &sh);
             let label = choice_label(key);
             // A chosen display that isn't connected reads as out of reach.
             let ink = if key == Key::DeckDisplay && display_away() { p.sub } else { p.text };
-            c.line_ct(&label, &f.button, (sh.x + 12.0 * s) as i32, mid + f.button.cap / 2, (sh.w - 36.0 * s) as i32, None, ink, DT_LEFT);
+            c.line_ct(&label, &f.button, (sh.x + 12.0 * s) as i32, mid + f.button.cap / 2, (sh.w - 36.0 * s) as i32, None, dim(ink), DT_LEFT);
             let chev = rect((sh.x + sh.w - 26.0 * s) as i32, sh.y as i32, (16.0 * s) as i32, sh.h as i32);
-            c.text_ct("\u{E70D}", &f.chrome, chev, None, p.sub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            c.text_ct("\u{E70D}", &f.chrome, chev, None, dim(p.sub), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
         Ctl::Keys(ks) => draw_caps(w, c, p, ks, row.off, r.right as f32 - INSET * s, mid),
         Ctl::Hotkey(i) => {

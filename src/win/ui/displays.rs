@@ -39,6 +39,8 @@ pub struct Display {
     pub name: String,
     pub work: RECT,
     pub s: f32,
+    /// Windows' main display.
+    pub main: bool,
 }
 
 thread_local! {
@@ -246,7 +248,7 @@ fn enumerate() -> Vec<Display> {
     let found: Vec<(&Monitor, &Target)> = mons.iter().filter_map(|m| targets.iter().find(|t| t.gdi.eq_ignore_ascii_case(&m.gdi)).map(|t| (m, t))).collect();
     let raw: Vec<Option<String>> = found.iter().map(|(_, t)| t.name.clone().or_else(|| t.builtin.then(|| t!("display_builtin").to_string()))).collect();
     let shown = names(&raw, |i| t!("display_numbered", i));
-    found.into_iter().zip(shown).map(|((m, t), name)| Display { id: t.path.clone(), name, work: m.work, s: m.s }).collect()
+    found.into_iter().zip(shown).map(|((m, t), name)| Display { id: t.path.clone(), name, work: m.work, s: m.s, main: m.primary }).collect()
 }
 
 #[cfg(test)]

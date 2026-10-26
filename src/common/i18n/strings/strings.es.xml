@@ -246,6 +246,7 @@
     <string name="settings_deck_display">Mostrar el mazo en</string>
     <string name="settings_deck_display_away">Hasta que vuelva a conectarse, el mazo está en la pantalla principal</string>
     <string name="display_main">Pantalla principal</string>
+    <string name="display_main_named">Pantalla principal (%1$s)</string>
     <string name="display_builtin">Pantalla integrada</string>
     <string name="display_numbered">Pantalla %d</string>
     <string name="display_not_connected">%s (sin conexión)</string>
