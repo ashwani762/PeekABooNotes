@@ -88,13 +88,36 @@ pub fn startup() {
         os::system_description(),
         if portable() { "portable" } else { "installed" },
         os::display_scale(),
-        data_dir().display(),
+        redacted(&data_dir()),
     ));
     let marker = dir().join(MARKER);
     if marker.exists() {
         warn("the previous session didn't exit cleanly (crash, forced close or power loss)");
     }
     let _ = std::fs::write(&marker, b"");
+}
+
+/// `path` for the log, without the user's name: their own folder as `%USERPROFILE%`, and
+/// their user name anywhere else in it (a redirected Documents on a server) as
+/// `%USERNAME%`.
+pub fn redacted(path: &Path) -> String {
+    let var = |k: &str| std::env::var(k).ok().map(|v| v.trim_end_matches(['\\', '/']).to_string()).filter(|v| !v.is_empty());
+    redact(&path.display().to_string(), var("USERPROFILE").as_deref(), var("USERNAME").as_deref())
+}
+
+fn redact(p: &str, home: Option<&str>, user: Option<&str>) -> String {
+    let mut out = p.to_string();
+    if let Some(home) = home
+        && let (Some(head), Some(rest)) = (p.get(..home.len()), p.get(home.len()..))
+        && head.eq_ignore_ascii_case(home)
+        && (rest.is_empty() || rest.starts_with(['\\', '/']))
+    {
+        out = format!("%USERPROFILE%{rest}");
+    }
+    if let Some(user) = user {
+        out = out.split_inclusive(['\\', '/']).map(|part| if part.trim_end_matches(['\\', '/']).eq_ignore_ascii_case(user) { part.replacen(part.trim_end_matches(['\\', '/']), "%USERNAME%", 1) } else { part.to_string() }).collect();
+    }
+    out
 }
 
 static START: OnceLock<Instant> = OnceLock::new();
@@ -130,6 +153,16 @@ mod tests {
         let files = std::fs::read_dir(&dir).unwrap().count();
         assert_eq!(files, 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn paths_are_logged_without_the_users_name() {
+        let (home, user) = (Some(r"C:\Users\Ashwani"), Some("Ashwani"));
+        assert_eq!(redact(r"C:\Users\ashwani\OneDrive\Documents\PeekABoo Notes", home, user), r"%USERPROFILE%\OneDrive\Documents\PeekABoo Notes");
+        assert_eq!(redact(r"\\files\home\Ashwani\Documents\PeekABoo Notes", home, user), r"\\files\home\%USERNAME%\Documents\PeekABoo Notes");
+        assert_eq!(redact(r"C:\Users\Ashwanix\Notes", home, user), r"C:\Users\Ashwanix\Notes", "only the whole folder");
+        assert_eq!(redact(r"E:\PeekABooData", home, user), r"E:\PeekABooData");
+        assert_eq!(redact(r"E:\Données", Some(r"E:\Donn"), None), r"E:\Données");
     }
 
 }

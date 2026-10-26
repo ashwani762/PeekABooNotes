@@ -213,8 +213,9 @@ fn item_rtf(name: &str) -> String {
 /// its own. Folders are skipped. Returns how many went in.
 pub(super) fn add(e: HWND, cp: i32, paths: &[PathBuf]) -> usize {
     let mut names = Vec::new();
+    let mut copies = attach::Copies::default();
     for p in paths.iter().filter(|p| p.is_file()) {
-        match attach::copy_in(p) {
+        match copies.copy_in(p) {
             Ok(name) => names.push(name),
             // The kind of file and of failure, not the user's path.
             Err(err) => {
@@ -313,10 +314,11 @@ pub(super) fn flush_pending(h: HWND) {
 /// shows); one inside a sentence keeps its words and points at the copy.
 pub fn adopt_files(e: HWND, base: &Path, allowed: &attach::Allowed) {
     let t = rich::text(e);
+    let mut copies = attach::Copies::default();
     // From the end, so what's changed never moves what's still to do.
     for (at, name_at, link) in rich::instructions(&t, 0, t.len()).into_iter().rev() {
         let Some(file) = attach::local_file(&link, base).filter(|f| allowed.admits(f)) else { continue };
-        let Ok(name) = attach::copy_in(&file) else { continue };
+        let Ok(name) = copies.copy_in(&file) else { continue };
         let t = rich::text(e);
         let Some((a, b, _)) = rich::link_at(e, name_at as i32) else { continue };
         let line_start = t[..at].iter().rposition(|&c| c == 13).map_or(0, |i| i + 1);
@@ -546,7 +548,8 @@ pub(super) fn file_of(url: &str) -> Option<PathBuf> {
     attach::path_of(url).filter(|p| p.is_file())
 }
 
-/// Drag the file at `path` out of the note (Explorer, the desktop, a mail): a copy.
+/// Drag the file at `path` out of the note (Explorer, the desktop, a mail): a copy, never
+/// a shortcut, which the start-up sweep couldn't see linking the file.
 pub(super) fn drag_out(e: HWND, path: &Path, url: &str) {
     use windows::Win32::UI::Shell::{BHID_DataObject, IShellItem, SHCreateItemFromParsingName, SHDoDragDrop};
     unsafe {
@@ -556,7 +559,7 @@ pub(super) fn drag_out(e: HWND, path: &Path, url: &str) {
         let Ok(data) = item.BindToHandler::<_, IDataObject>(None, &BHID_DataObject) else { return };
         DRAGGING.with(|d| *d.borrow_mut() = Some((e, path.to_path_buf(), url.to_string())));
         // The shell's own drag image and drop source.
-        let _ = SHDoDragDrop(Some(windows::Win32::Foundation::HWND(e as _)), &data, None, DROPEFFECT_COPY | windows::Win32::System::Ole::DROPEFFECT_LINK);
+        let _ = SHDoDragDrop(Some(windows::Win32::Foundation::HWND(e as _)), &data, None, DROPEFFECT_COPY);
         DRAGGING.with(|d| d.borrow_mut().take());
         // Dropped back on its own note: ask now, with the drag over.
         if PENDING.with(|p| p.borrow().iter().any(|(pe, _, _, own)| *pe == e && own.is_some()))

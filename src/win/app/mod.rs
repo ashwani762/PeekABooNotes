@@ -160,6 +160,24 @@ pub fn save_now() {
             unsafe { InvalidateRect(w, std::ptr::null(), 0) };
         }
     }
+    // After that: what the store says (why nothing is saved, a copy set aside) is the
+    // more telling, and takes the toast's place.
+    tell_notices();
+}
+
+/// What the store has to tell about the notes file (the backup opened in its place,
+/// another writer's copy set aside), in a toast, once each.
+fn tell_notices() {
+    use crate::common::store::Notice;
+    for n in store_mut(|s| s.take_notices()) {
+        let text = match n {
+            Notice::SetAside(name) => t!("notice_notes_set_aside", name),
+            Notice::Locked => t!("notice_notes_locked").to_string(),
+            Notice::Missing => t!("notice_notes_missing").to_string(),
+            Notice::Conflict(name) => t!("notice_notes_conflict", name),
+        };
+        toast::notice(text);
+    }
 }
 
 /// Whether the last save failed (notes.json is locked, unwritable, or wasn't readable
@@ -450,6 +468,10 @@ pub fn run() -> i32 {
         theme::allow_dark_menus();
 
         STORE.with(|s| *s.borrow_mut() = Some(Store::load(data_dir())));
+        // Notes lost with an earlier notes file can still have versions: a new note never
+        // takes one of their ids, or it would show their versions as its own.
+        let versioned = note::versions::max_id();
+        store_mut(|s| s.d.next_id = s.d.next_id.max(versioned));
         crate::common::i18n::init(&store(|s| s.d.settings.language.clone()));
         log::info(&format!("language {}", crate::common::i18n::tag()));
         crate::win::crash::test_from_env();
@@ -512,6 +534,9 @@ pub fn run() -> i32 {
         if !quiet && ui(|u| u.notes.is_empty()) {
             show_all_notes(false);
         }
+        // The notes file read at start in an unusual way (its backup opened instead): said
+        // once the deck is up.
+        tell_notices();
         share::cleanup();
         sweep_attachments();
         upgrade_startup();

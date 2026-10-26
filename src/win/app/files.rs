@@ -89,12 +89,15 @@ fn export_attachments(md: &str, dir: &std::path::Path) -> String {
         from = end;
         let Some(name) = attach::name_of(&format!("{}{}", attach::SCHEME, &out[start..end])) else { continue };
         let src = attach::dir().join(&name);
-        let Ok(meta) = std::fs::metadata(&src) else { continue };
+        if !src.is_file() {
+            continue;
+        }
         let target_dir = dir.join(attach::EXPORT_DIR);
         if std::fs::create_dir_all(&target_dir).is_err() {
             continue;
         }
-        let same = std::fs::metadata(target_dir.join(&name)).is_ok_and(|m| m.len() == meta.len());
+        // The same file there already (an earlier export of these notes): not copied again.
+        let same = attach::same_content(&src, &target_dir.join(&name));
         let used = if same { name.clone() } else { attach::free_name(&target_dir, &name) };
         if !same && let Err(e) = std::fs::copy(&src, target_dir.join(&used)) {
             log::warn(&format!("export: couldn't copy attachment: {e}"));
@@ -150,6 +153,10 @@ fn pick_folder(owner: HWND, title: &str, start: &str) -> Option<std::path::PathB
     path
 }
 
+/// The largest file import reads: a full note of four-byte characters, with room for
+/// its front matter. Anything larger can't be a note.
+const MAX_IMPORT_BYTES: u64 = crate::common::store::MAX_NOTE_CHARS as u64 * 4 + 64 * 1024;
+
 pub fn import(owner: HWND) -> Outcome {
     let mut buf = vec![0u16; 65536];
     let filter: Vec<u16> = format!("{} (*.md, *.txt)\0*.md;*.markdown;*.txt\0{}\0*.*\0\0", t!("dialog_filter_text"), t!("dialog_filter_all")).encode_utf16().collect();
@@ -183,6 +190,11 @@ pub fn import(owner: HWND) -> Outcome {
     // and folder are the user's.
     let ext = |f: &std::path::Path| f.extension().map(|e| format!(".{}", e.to_string_lossy().to_lowercase())).unwrap_or_else(|| "no extension".into());
     for f in files {
+        // Checked before it's read: a huge file is never taken into memory whole.
+        if std::fs::metadata(&f).is_ok_and(|m| m.len() > MAX_IMPORT_BYTES) {
+            failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
+            continue;
+        }
         let bytes = match std::fs::read(&f) {
             Ok(b) => b,
             Err(e) => {

@@ -93,6 +93,32 @@ pub fn clipboard_text() -> Option<String> {
     }
 }
 
+/// The names (without their folders) of the files on the clipboard, as Explorer copies
+/// or cuts them.
+pub fn clipboard_file_names() -> Vec<String> {
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard};
+    use windows_sys::Win32::UI::Shell::DragQueryFileW;
+    const CF_HDROP: u32 = 15;
+    unsafe {
+        if IsClipboardFormatAvailable(CF_HDROP) == 0 || OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Vec::new();
+        }
+        let h = GetClipboardData(CF_HDROP);
+        let mut out = Vec::new();
+        if !h.is_null() {
+            for i in 0..DragQueryFileW(h as _, u32::MAX, std::ptr::null_mut(), 0) {
+                let len = DragQueryFileW(h as _, i, std::ptr::null_mut(), 0) as usize;
+                let mut buf = vec![0u16; len + 1];
+                DragQueryFileW(h as _, i, buf.as_mut_ptr(), buf.len() as u32);
+                let path = std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]));
+                out.extend(path.file_name().and_then(|n| n.to_str()).map(str::to_string));
+            }
+        }
+        CloseClipboard();
+        out
+    }
+}
+
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }

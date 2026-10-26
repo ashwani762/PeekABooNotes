@@ -68,6 +68,10 @@
     <string name="note_edited">Bearbeitet %1$s</string>
     <string name="note_full">Diese Notiz ist voll</string>
     <string name="note_save_failed">Notizen können nicht gespeichert werden</string>
+    <string name="notice_notes_set_aside">Sicherung geöffnet. Unlesbare Datei behalten als %1$s</string>
+    <string name="notice_notes_locked">Sicherung geöffnet: Notizdatei nicht lesbar, nichts wird gespeichert</string>
+    <string name="notice_notes_missing">Die Notizdatei fehlte, daher ist die Sicherung geöffnet</string>
+    <string name="notice_notes_conflict">Anderswo geändert. Diese Kopie ist behalten als %1$s</string>
     <string name="file_untitled">Ohne Titel</string>
 
     <!-- Times -->

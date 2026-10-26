@@ -145,7 +145,7 @@ fn report(what: &str, ep: *const EXCEPTION_POINTERS, stack: impl FnOnce() -> Str
         return;
     }
     let dump = match write_dump(ep) {
-        Some(p) => format!("minidump: {}", p.display()),
+        Some(p) => format!("minidump: {}", crate::common::log::redacted(&p)),
         None => "minidump: not written".into(),
     };
     let text = format!("{what}\n{dump}\n{}", stack());

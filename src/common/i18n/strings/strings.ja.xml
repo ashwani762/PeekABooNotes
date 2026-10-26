@@ -67,6 +67,10 @@
     <string name="note_edited">%1$sに編集</string>
     <string name="note_full">このメモはいっぱいです</string>
     <string name="note_save_failed">メモを保存できません</string>
+    <string name="notice_notes_set_aside">バックアップを開きました。読めないファイルは %1$s として残しました</string>
+    <string name="notice_notes_locked">バックアップを開きました。メモのファイルを読めないため、保存されません</string>
+    <string name="notice_notes_missing">メモのファイルがないため、バックアップを開きました</string>
+    <string name="notice_notes_conflict">別の場所でメモが変更されました。そのコピーは %1$s として残しました</string>
     <string name="file_untitled">無題</string>
 
     <!-- Times -->

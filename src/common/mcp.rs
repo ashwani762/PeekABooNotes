@@ -141,7 +141,7 @@ const TOOLS: &str = r#"[
  {
   "name": "update_note",
   "title": "Replace a note's content",
-  "description": "Replaces a note's whole content with this Markdown (same format as create_note). Read the note first and keep what should stay: what isn't in the new Markdown is gone.",
+  "description": "Replaces a note's whole content with this Markdown (same format as create_note), which can't be empty. Read the note first and keep what should stay: what isn't in the new Markdown is gone.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -272,7 +272,15 @@ fn call(notes: &mut dyn Notes, name: &str, args: &Value) -> Result<Value, String
             }
             notes.create(md, color_arg(args)?, args.get("pinned").and_then(Value::as_bool).unwrap_or(false))
         }
-        "update_note" => notes.write(id_arg(args)?, text_arg(args, "markdown")?, false),
+        "update_note" => {
+            let md = text_arg(args, "markdown")?;
+            // Emptying a note is erasing it, which assistants can't do: archiving is as far
+            // as it goes.
+            if md.trim().is_empty() {
+                return Err("The note would be empty, and notes can't be erased from here. To put a note away, archive it with set_note_state.".into());
+            }
+            notes.write(id_arg(args)?, md, false)
+        }
         "append_to_note" => notes.write(id_arg(args)?, text_arg(args, "markdown")?, true),
         "set_note_state" => {
             let b = |k: &str| args.get(k).and_then(Value::as_bool);
@@ -447,6 +455,12 @@ mod tests {
         call_tool(&mut f, "set_note_state", json!({ "id": 4, "archived": true }));
         assert_eq!(call_tool(&mut f, "create_note", json!({ "markdown": "x", "color": "plaid" }))["isError"], true);
         assert_eq!(call_tool(&mut f, "set_note_state", json!({ "id": 4 }))["isError"], true);
+        // A note can't be blanked: that would be erasing it.
+        for blank in ["", "  \n\t "] {
+            let r = call_tool(&mut f, "update_note", json!({ "id": 4, "markdown": blank }));
+            assert_eq!(r["isError"], true);
+            assert!(r["content"][0]["text"].as_str().unwrap().contains("archive"), "{r}");
+        }
         assert_eq!(
             f.calls,
             [
