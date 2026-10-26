@@ -241,10 +241,14 @@ pub fn circle(e: HWND, cp: i32, next: Option<u16>) -> (f32, f32, f32) {
 
 /// One box onto canvas `c`, whose top-left is at (`ox`, `oy`) in the editor: a disc around
 /// the circle cleared to the paper (the last frame's circle goes, while a table's border
-/// or a line just above stays as RichEdit drew it), then the circle.
+/// or a line just above stays as RichEdit drew it), then the circle. In a selection
+/// (`under` its colour), the circle is drawn in the selection's text colour, as the
+/// item's text is: in the note's ink, an open circle vanished into the blue.
 #[allow(clippy::too_many_arguments)]
 fn draw_box(c: &mut Canvas, ox: i32, oy: i32, text_x: i32, cy: f32, d: f32, gap: f32, under: u32, st: Style, v: f32, hot: bool) {
     let s = st.s;
+    let selected = under == highlight().0;
+    let (ink, tick) = if selected { (highlight().1, under) } else { (st.ink, 0xFFFFFF) };
     let k = clamp01(v);
     // A brief pop while the state changes (either way), springing back to size.
     let pop = 1.0 + 0.10 * (std::f32::consts::PI * k).sin() + (v - 1.0).max(0.0) * 0.6;
@@ -254,17 +258,26 @@ fn draw_box(c: &mut Canvas, ox: i32, oy: i32, text_x: i32, cy: f32, d: f32, gap:
     let clear = d * 1.16 + 2.0 * s;
     c.shape(&Shape::new(cx - clear / 2.0, ly - clear / 2.0, clear, clear, clear / 2.0), under, 1.0, 1.0, 0.0);
     let circle = Shape::new(cx - dd / 2.0, ly - dd / 2.0, dd, dd, dd / 2.0);
-    let ring = if hot { mix(st.ink, under, 0.15) } else { mix(st.ink, under, 0.42) };
+    let ring = if hot { mix(ink, under, 0.15) } else { mix(ink, under, 0.42) };
     c.shape(&circle, ring, 1.0 - k * 0.6, 1.0, 1.5 * s);
     if k > 0.001 {
         // The fill grows from the centre.
         let fd = dd * k;
-        c.shape(&Shape::new(cx - fd / 2.0, ly - fd / 2.0, fd, fd, fd / 2.0), st.ink, 1.0, 1.0, 0.0);
+        c.shape(&Shape::new(cx - fd / 2.0, ly - fd / 2.0, fd, fd, fd / 2.0), ink, 1.0, 1.0, 0.0);
         let ca = clamp01((k - 0.35) / 0.65);
         if ca > 0.0 {
-            check(c, cx, ly, dd, 0xFFFFFF, ca, s);
+            check(c, cx, ly, dd, tick, ca, s);
         }
     }
+}
+
+/// The selection's colour and its text's, as the system has them (RGB).
+fn highlight() -> (u32, u32) {
+    use windows_sys::Win32::Graphics::Gdi::GetSysColor;
+    const COLOR_HIGHLIGHT: i32 = 13;
+    const COLOR_HIGHLIGHTTEXT: i32 = 14;
+    let rgb = |c: u32| ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF);
+    unsafe { (rgb(GetSysColor(COLOR_HIGHLIGHT)), rgb(GetSysColor(COLOR_HIGHLIGHTTEXT))) }
 }
 
 /// A rounded checkmark from two strokes.
@@ -301,4 +314,29 @@ fn fonts(s: f32) -> Metrics {
     let r = ((sym.ascent as f32, sym.cap as f32), (body.ascent as f32, body.cap as f32));
     METRICS.with(|m| *m.borrow_mut() = Some((s, size, face, r)));
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An open circle in a selection is drawn in the selection's text colour, so it shows
+    /// on the selection's blue; on the paper, in the note's ink.
+    #[test]
+    fn a_selected_circle_shows_on_the_selection() {
+        let st = Style { ink: 0x404040, bg: 0xF0E6C8, s: 1.0 };
+        let (hl, hl_text) = highlight();
+        let light = |c: u32| ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
+        for (under, want) in [(hl, hl_text), (st.bg, st.ink)] {
+            let mut c = Canvas::new(60, 40);
+            c.clear(0xFF00_0000 | under);
+            // The circle's centre at x = 40 - 6 - 7.5, its left edge 7.5 left of that.
+            draw_box(&mut c, 0, 0, 40, 20.0, 15.0, 6.0, under, st, 0.0, false);
+            c.make_opaque();
+            let ring = c.copy_out(RECT { left: 19, top: 20, right: 20, bottom: 21 })[0] & 0xFF_FFFF;
+            let (r, u, w) = (light(ring), light(under), light(want));
+            assert!(r.abs_diff(w) < r.abs_diff(u) + 1, "ring {ring:06x} on {under:06x}: towards {want:06x}");
+            assert!(r.abs_diff(u) > 60, "ring {ring:06x} stands out of {under:06x}");
+        }
+    }
 }

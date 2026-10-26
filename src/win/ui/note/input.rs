@@ -413,6 +413,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             if ctrl && !alt && ((shift && vk == b'Z' as u16) || (!shift && vk == b'Y' as u16)) {
                 if !rich::redo_group(e) {
                     unsafe { DefSubclassProc(e, rich::EM_REDO, 0, 0) };
+                    selection_off_boxes(e);
                 }
                 st.swallow = true;
                 return 0;
@@ -423,6 +424,12 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     st.swallow = true;
                     return 0;
                 }
+                // RichEdit's own undo, which selects what it put back.
+                const EM_UNDO: u32 = 0x00C7;
+                unsafe { DefSubclassProc(e, EM_UNDO, 0, 0) };
+                selection_off_boxes(e);
+                st.swallow = true;
+                return 0;
             } else if !matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU) {
                 rich::forget_groups();
             }

@@ -501,6 +501,25 @@ pub(super) fn caret_off_box(e: HWND, left: bool) {
     rich::set_sel(e, to, to);
 }
 
+/// After RichEdit's own undo or redo, which selects what it put back: a selection holding a
+/// checklist box (a tick undone or redone a step at a time) is let go, the caret after it.
+/// Selected, the box's glyph showed beside its circle as a block of the selection's colour,
+/// and the circle sat in a halo of it.
+pub(super) fn selection_off_boxes(e: HWND) {
+    let (a, b) = rich::sel(e);
+    if a == b {
+        return;
+    }
+    let (a, b) = (a.min(b).max(0) as usize, a.max(b).max(0) as usize);
+    let from = a.saturating_sub(1);
+    let t = rich::raw_text(e, from, b);
+    let boxed = (a..b).any(|i| t.get(i - from).copied().is_some_and(is_task) && (i == 0 || t.get(i - 1 - from) == Some(&rich::CR)));
+    if boxed {
+        rich::set_sel(e, b as i32, b as i32);
+        caret_off_box(e, false);
+    }
+}
+
 /// Delete at the end of a line whose next line is a checklist item: the item's text joins
 /// this line, without its box (which would sit in the middle of the line, invisible).
 pub(super) fn delete_into_item(e: HWND) -> bool {
@@ -987,6 +1006,32 @@ mod tests {
         }
         let enter = t0.elapsed() / n;
         eprintln!("PROBE 2,000 items: tick {tick:?}, Enter {enter:?}");
+    }
+
+    /// Two ticks undone: the first by its group, the second by RichEdit's own undo, which
+    /// selects what it put back; with a box in it, the selection goes and the caret is after it.
+    #[test]
+    fn undoing_ticks_leaves_no_box_selected() {
+        let h = editor("T\r\u{2610} task");
+        rich::style_boxes(h);
+        rich::send(h, rich::EM_EMPTYUNDOBUFFER, 0, 0);
+        let end = rich::text(h).len() as i32;
+        rich::set_sel(h, end, end);
+        toggle_check_at_caret(h);
+        toggle_check_at_caret(h);
+        assert!(rich::undo_group(h));
+        assert!(!rich::undo_group(h), "one group a time");
+        const EM_UNDO: u32 = 0x00C7;
+        assert_eq!(rich::send(h, EM_UNDO, 0, 0), 1);
+        assert_eq!(plain(h).replace('^', ""), "T/\u{2610} task");
+        selection_off_boxes(h);
+        let (a, b) = rich::sel(h);
+        assert_eq!(a, b, "no selection");
+        assert!(a >= 4, "after the box: {a}");
+        // A selection of text alone stays.
+        rich::set_sel(h, 4, 6);
+        selection_off_boxes(h);
+        assert_eq!(rich::sel(h), (4, 6));
     }
 
     /// Ticking a box up the note while the caret is far below keeps the view where it is.
