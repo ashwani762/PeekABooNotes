@@ -355,8 +355,12 @@ pub fn color_named_links(h: HWND) {
 /// range goes from link to link, a handful of questions each (a link already blue, as
 /// nearly all are, costs no more).
 fn color_links_in(h: HWND, t: &[u16], a: usize, b: usize) {
+    color_links_listed(h, t, &instructions(t, a, b));
+}
+
+/// `color_named_links` for `links`, the instructions of `t` as `instructions` gives them.
+pub(super) fn color_links_listed(h: HWND, t: &[u16], links: &[(usize, usize, String)]) {
     use windows::Win32::UI::Controls::RichEdit::{tomLink, tomResume, tomSuspend};
-    let links = instructions(t, a, b);
     if links.is_empty() {
         return;
     }
@@ -364,7 +368,7 @@ fn color_links_in(h: HWND, t: &[u16], a: usize, b: usize) {
     let Some(r) = range(h, 0, 0) else { return };
     let want = crate::win::util::cref(LINK_BLUE) as i32;
     let mut suspended = false;
-    for (_, name, _) in links {
+    for &(_, name, _) in links {
         // A picture's or file's link has a zero-width name: nothing to colour.
         if t.get(name) == Some(&(ITEM_LINK_NAME as u16)) {
             continue;
@@ -576,6 +580,12 @@ pub fn instructions(t: &[u16], a: usize, b: usize) -> Vec<(usize, usize, String)
     let mut out = Vec::new();
     let mut i = a;
     while i + key.len() <= b {
+        // On to the next "H" at once: comparing the whole key at every character was most
+        // of a long note's restyle after typing.
+        match t[i..=b - key.len()].iter().position(|&c| c == key[0]) {
+            Some(k) => i += k,
+            None => break,
+        }
         if t[i..i + key.len()] == key[..]
             && let Some(q) = t[i + key.len()..b].iter().position(|&c| c == quote)
         {

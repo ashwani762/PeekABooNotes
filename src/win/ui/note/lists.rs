@@ -1216,9 +1216,7 @@ mod tests {
             rich::set_sel(h, end, end);
             rich::replace_sel(h, &format!(" w{k}"));
             // What the note does after a burst of typing, then when it saves.
-            rich::style_title(h);
-            rich::color_named_links(h);
-            rich::fix_caret_indent(h);
+            rich::restyle(h);
             let rtf = rich::get_rtf(h);
             rich::set_rtf(worker, &rtf);
             let _ = rich::to_markdown(worker, false);

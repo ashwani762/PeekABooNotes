@@ -975,14 +975,10 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 if let Some(st) = state(h) {
                     let was = st.loading;
                     st.loading = true;
-                    rich::style_title(st.edit);
-                    rich::color_named_links(st.edit);
-                    rich::fix_caret_indent(st.edit);
-                    let t = rich::text(st.edit);
-                    // Links and tables added or taken away change what the note holds out
-                    // of sight, which doesn't count toward its length.
-                    rich::limit_length_of(st.edit, &t);
-                    if rich::has_selectors(&t) {
+                    // The title, the links' colour, the length limit (links and tables added
+                    // or taken away change what the note holds out of sight, which doesn't
+                    // count toward its length).
+                    if rich::restyle(st.edit) {
                         unselect(h);
                     }
                     st.loading = was;

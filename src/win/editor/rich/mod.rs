@@ -423,14 +423,39 @@ pub fn limit_length_of(h: HWND, t: &[u16]) {
 
 /// The most characters RichEdit may hold, given what it holds now (`t`).
 fn length_limit(t: &[u16]) -> usize {
-    t.len().max(crate::common::store::MAX_NOTE_CHARS + hidden_len(t))
+    length_limit_with(t, &instructions(t, 0, t.len()))
+}
+
+/// `length_limit`, with `t`'s link instructions in hand.
+fn length_limit_with(t: &[u16], links: &[(usize, usize, String)]) -> usize {
+    t.len().max(crate::common::store::MAX_NOTE_CHARS + hidden_len_with(t, links))
+}
+
+/// What follows from the text after a burst of edits: the title's look, the links'
+/// colour, a checklist indent left behind, and the length limit (see `limit_length`).
+/// Each read the text for itself, and the links twice: done together, they read it
+/// once. True when the text has emoji variation selectors to hide (see `selectors`).
+pub fn restyle(h: HWND) -> bool {
+    let t = text(h);
+    style_title_in(h, &t);
+    let links = instructions(&t, 0, t.len());
+    color_links_listed(h, &t, &links);
+    fix_caret_indent_in(h, &t);
+    // None of these moves or changes a character: `t` is still the text.
+    send(h, EM_EXLIMITTEXT, 0, length_limit_with(&t, &links).min(i32::MAX as usize) as isize);
+    has_selectors(&t)
 }
 
 /// How many characters of `t` (the editor's text) never show: named links' hidden
 /// `HYPERLINK "url"` instructions, and the marks (each with its paragraph mark) that
 /// start and end a table row.
 pub fn hidden_len(t: &[u16]) -> usize {
-    let links: usize = instructions(t, 0, t.len()).iter().map(|(at, name, _)| name - at).sum();
+    hidden_len_with(t, &instructions(t, 0, t.len()))
+}
+
+/// `hidden_len`, with `t`'s link instructions in hand.
+fn hidden_len_with(t: &[u16], links: &[(usize, usize, String)]) -> usize {
+    let links: usize = links.iter().map(|(at, name, _)| name - at).sum();
     let mut rows = 0;
     for (i, &c) in t.iter().enumerate() {
         if c == ROW_START || c == ROW_END {

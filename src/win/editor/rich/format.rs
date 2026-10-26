@@ -187,11 +187,15 @@ pub(super) fn face_is(cf: &CharFormat2, face: &str) -> bool {
 pub fn style_title(h: HWND) {
     // Follows from the text: no step for Ctrl+Z (which would otherwise first take back
     // the title's look, then the letter typed).
-    unrecorded(h, || style_title_now(h));
+    unrecorded(h, || style_title_now(h, &text(h)));
 }
 
-fn style_title_now(h: HWND) {
-    let t = text(h);
+/// `style_title`, with the editor's text (`t`) in hand.
+pub(super) fn style_title_in(h: HWND, t: &[u16]) {
+    unrecorded(h, || style_title_now(h, t));
+}
+
+fn style_title_now(h: HWND, t: &[u16]) {
     let end = t.iter().position(|&c| c == CR).unwrap_or(t.len());
     if end == 0 || t[..end].iter().any(|&c| is_task(c)) {
         return;
