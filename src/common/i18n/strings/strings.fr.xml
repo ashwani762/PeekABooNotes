@@ -30,6 +30,7 @@
     <string name="menu_reopen_last">Rouvrir la dernière note</string>
     <string name="menu_undo_delete">Annuler la suppression</string>
     <string name="menu_undo_archive">Annuler l’archivage</string>
+    <string name="menu_undo_restore">Annuler la restauration</string>
     <string name="menu_show_deck">Afficher la pile</string>
     <string name="menu_move_deck">Déplacer la pile sur l’autre bord</string>
     <string name="menu_settings">Réglages</string>
@@ -94,6 +95,10 @@
     <plurals name="toast_deleted">
         <item quantity="one">Note supprimée</item>
         <item quantity="other">%d notes supprimées</item>
+    </plurals>
+    <plurals name="toast_restored">
+        <item quantity="one">Note restaurée</item>
+        <item quantity="other">%d notes restaurées</item>
     </plurals>
     <string name="toast_undo">Annuler</string>
 

@@ -633,7 +633,7 @@ fn perform_inner(hwnd: HWND, a: Action) {
             }
         }
         Action::Archive(ids, true) => app::archive(&ids),
-        Action::Archive(ids, false) => app::set_archived(&ids, false),
+        Action::Archive(ids, false) => app::restore(&ids),
         Action::Delete(ids) => {
             if !ids.is_empty() {
                 app::delete(ids)

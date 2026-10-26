@@ -267,22 +267,24 @@ pub(super) fn toggle_pin(id: u64) {
     }
 }
 
+/// Note `id`'s window, if it's open, saved and gone (the note archived or deleted).
+fn put_away(id: u64) {
+    if let Some(h) = note_hwnd(id) {
+        note::flush(h);
+        note::dissolve(h);
+        note::discard(h);
+    }
+}
+
+/// Archive or restore notes. A note keeps its place in the deck while it's archived
+/// (`Store::reorder` keeps it among the others), so restored it comes back where it was.
 pub fn set_archived(ids: &[u64], archived: bool) {
-    for &id in ids {
-        if let Some(h) = note_hwnd(id)
-            && archived {
-                note::flush(h);
-                note::dissolve(h);
-                note::discard(h);
-            }
+    if archived {
+        ids.iter().for_each(|&id| put_away(id));
     }
     store_mut(|s| {
-        let top = s.d.notes.iter().filter(|n| !n.archived).map(|n| n.order).min().unwrap_or(0);
         for &id in ids {
             if let Some(n) = s.note_mut(id) {
-                if n.archived && !archived {
-                    n.order = top - 1;
-                }
                 n.archived = archived;
             }
         }
@@ -297,6 +299,8 @@ pub enum Undo {
     Deleted(Vec<(usize, Note)>),
     /// Notes archived, with their places in the deck.
     Archived(Vec<(u64, i64)>),
+    /// Notes restored from the archive.
+    Restored(Vec<u64>),
 }
 
 impl crate::common::undo::Action for Undo {
@@ -307,6 +311,10 @@ impl crate::common::undo::Action for Undo {
                 None
             }
             (Undo::Archived(a), Undo::Archived(b)) => {
+                a.extend(b);
+                None
+            }
+            (Undo::Restored(a), Undo::Restored(b)) => {
                 a.extend(b);
                 None
             }
@@ -321,6 +329,7 @@ impl Undo {
         match self {
             Undo::Deleted(v) => tn!("toast_deleted", v.len()),
             Undo::Archived(v) => tn!("toast_archived", v.len()),
+            Undo::Restored(v) => tn!("toast_restored", v.len()),
         }
     }
 
@@ -329,6 +338,7 @@ impl Undo {
         match self {
             Undo::Deleted(_) => t!("menu_undo_delete"),
             Undo::Archived(_) => t!("menu_undo_archive"),
+            Undo::Restored(_) => t!("menu_undo_restore"),
         }
     }
 }
@@ -359,14 +369,19 @@ pub fn archive(ids: &[u64]) {
     done(Undo::Archived(before));
 }
 
-pub fn delete(ids: Vec<u64>) {
-    for &id in &ids {
-        if let Some(h) = note_hwnd(id) {
-            note::flush(h);
-            note::dissolve(h);
-            note::discard(h);
-        }
+/// Bring notes back from the archive, to their places in the deck, with the Undo toast,
+/// as archiving has.
+pub fn restore(ids: &[u64]) {
+    let back: Vec<u64> = store(|s| ids.iter().copied().filter(|id| s.note(*id).is_some_and(|n| n.archived)).collect());
+    if back.is_empty() {
+        return;
     }
+    set_archived(&back, false);
+    done(Undo::Restored(back));
+}
+
+pub fn delete(ids: Vec<u64>) {
+    ids.iter().for_each(|&id| put_away(id));
     let removed: Vec<(usize, Note)> = store_mut(|s| ids.iter().filter_map(|id| s.remove(*id)).collect());
     if removed.is_empty() {
         return;
@@ -405,7 +420,8 @@ pub fn can_undo() -> bool {
 
 /// The toast's Undo (its button, Ctrl+Z in All Notes, the tray menu): the newest action
 /// still in time is taken back, and the toast shows the one before it, if any. Notes
-/// deleted come back where they were, notes archived return to the deck where they were.
+/// deleted come back where they were, notes archived return to the deck where they were,
+/// and notes restored go back to the archive.
 pub fn undo() {
     let Some(a) = ui(|u| u.undo.pop()) else { return };
     show_undo();
@@ -420,6 +436,17 @@ pub fn undo() {
                 }
             });
             v.iter().map(|e| e.0).collect()
+        }
+        Undo::Restored(v) => {
+            v.iter().for_each(|&id| put_away(id));
+            store_mut(|s| {
+                for id in &v {
+                    if let Some(n) = s.note_mut(*id) {
+                        n.archived = true;
+                    }
+                }
+            });
+            v
         }
         Undo::Deleted(v) => {
             let ids = v.iter().map(|(_, n)| n.id).collect();
@@ -660,7 +687,7 @@ pub fn note_command(id: u64, cmd: u32) {
         }
         NC_ARCHIVE => {
             if store(|s| s.note(id).is_some_and(|n| n.archived)) {
-                set_archived(&[id], false);
+                restore(&[id]);
             } else {
                 archive(&[id]);
             }

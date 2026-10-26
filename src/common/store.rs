@@ -869,11 +869,22 @@ impl Store {
         }
     }
 
+    /// The notes `ids` (the deck's, or All Notes' list) in a new order. They take the
+    /// places they held between them, in that order, and every other note (an archived
+    /// one) keeps its own among them: restored, it comes back where it was before it was
+    /// archived. Every note's place is numbered afresh, from 0.
     pub fn reorder(&mut self, ids: &[u64]) {
-        for (i, id) in ids.iter().enumerate() {
-            if let Some(n) = self.note_mut(*id) {
-                n.order = i as i64;
-            }
+        let at: std::collections::HashMap<u64, usize> = self.d.notes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let moved: std::collections::HashSet<u64> = ids.iter().copied().filter(|id| at.contains_key(id)).collect();
+        let mut places: Vec<usize> = (0..self.d.notes.len()).collect();
+        places.sort_by(|&a, &b| {
+            let (a, b) = (&self.d.notes[a], &self.d.notes[b]);
+            a.order.cmp(&b.order).then(b.created.cmp(&a.created))
+        });
+        let mut next = ids.iter().filter(|id| moved.contains(id)).map(|id| at[id]);
+        let order: Vec<usize> = places.into_iter().filter_map(|i| if moved.contains(&self.d.notes[i].id) { next.next() } else { Some(i) }).collect();
+        for (k, i) in order.into_iter().enumerate() {
+            self.d.notes[i].order = k as i64;
         }
     }
 }
@@ -1548,6 +1559,33 @@ mod tests {
             s.put_back(removed);
             assert_eq!(ids(&s), [1, 2, 3, 4], "deleted in the order {order:?}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reordering the deck keeps an archived note's place among the others, so restoring
+    /// it puts it back between the notes it was among, not at the top.
+    #[test]
+    fn an_archived_note_keeps_its_place_through_a_reorder() {
+        let dir = folder("reorder");
+        let mut s = Store::load(dir.clone());
+        s.d.notes = [(1, 0, false), (2, 1, false), (3, 2, true), (4, 3, false), (5, 4, false)]
+            .into_iter()
+            .map(|(id, order, archived)| Note { id, order, archived, ..Default::default() })
+            .collect();
+        // Note 5 dragged to the top of the deck.
+        s.reorder(&[5, 1, 2, 4]);
+        assert_eq!(s.active_ids(), [5, 1, 2, 4]);
+        s.note_mut(3).unwrap().archived = false;
+        assert_eq!(s.active_ids(), [5, 1, 3, 2, 4]);
+        // A note left out (as a list of a few) keeps its place too, and every place is new.
+        s.reorder(&[4, 5]);
+        assert_eq!(s.active_ids(), [4, 1, 3, 2, 5]);
+        let mut orders: Vec<i64> = s.d.notes.iter().map(|n| n.order).collect();
+        orders.sort_unstable();
+        assert_eq!(orders, [0, 1, 2, 3, 4]);
+        // Ids it doesn't have are passed over.
+        s.reorder(&[99, 5, 4]);
+        assert_eq!(s.active_ids(), [5, 1, 3, 2, 4]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -40,6 +40,7 @@
     <string name="menu_reopen_last">Reopen Last Note</string>
     <string name="menu_undo_delete">Undo Delete</string>
     <string name="menu_undo_archive">Undo Archive</string>
+    <string name="menu_undo_restore">Undo Restore</string>
     <string name="menu_show_deck">Show Deck</string>
     <string name="menu_move_deck">Move Deck to Other Edge</string>
     <string name="menu_settings">Settings</string>
@@ -104,6 +105,10 @@
     <plurals name="toast_deleted">
         <item quantity="one">Note deleted</item>
         <item quantity="other">%d notes deleted</item>
+    </plurals>
+    <plurals name="toast_restored">
+        <item quantity="one">Note restored</item>
+        <item quantity="other">%d notes restored</item>
     </plurals>
     <string name="toast_undo">Undo</string>
 
