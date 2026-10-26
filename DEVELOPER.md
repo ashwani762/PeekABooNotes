@@ -157,7 +157,8 @@ Ctrl+Alt is also AltGr, and on many keyboards AltGr and a letter types a charact
 | Ctrl+Shift+8 / 7 | Bulleted / numbered list |
 | Ctrl+Shift+L | Checklist |
 | Ctrl+Enter | Tick or untick the checklist item |
-| Tab / Shift+Tab | Indent / outdent a list item; in a table, next / previous cell (Tab in the last cell adds a row); in a code block, indent / outdent the line |
+| Tab / Shift+Tab | Indent / outdent a list item (Backspace at a nested item's start outdents it too; at the top level it takes the bullet off); in a table, next / previous cell (Tab in the last cell adds a row); in a code block, indent / outdent the line; on other lines Shift+Tab takes a tab off the line's start, and never types one |
+| Enter in a code block | A new line with the same indent; an empty line stays, and a second empty line at the block's end leaves it (both go) |
 | Ctrl+L / E / R | Align left / centre / right |
 | Ctrl+' | Quote |
 | Ctrl+Shift+M | Code block |

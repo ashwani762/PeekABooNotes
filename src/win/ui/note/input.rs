@@ -439,6 +439,13 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                     st.swallow = true;
                     return 0;
                 }
+                // At a nested item's start: out a level first; only at the top level does
+                // the bullet go.
+                if vk == VK_BACK && !ctrl && !shift && rich::backspace_outdents(e) {
+                    st.swallow = true;
+                    mark_dirty(h);
+                    return 0;
+                }
                 // A tab character has no place in the title, and a note window has nothing
                 // else for Tab to move on to (in All Notes it leaves the note, see
                 // `allnotes::pre_translate`).
@@ -454,6 +461,15 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 if vk == VK_TAB && !ctrl && rich::nest(e, if shift { -1 } else { 1 }) {
                     st.swallow = true;
                     mark_dirty(h);
+                    return 0;
+                }
+                // Shift+Tab anywhere else but a table (the cell before) takes a tab back off
+                // the line's start, if it has one, and never types one.
+                if vk == VK_TAB && !ctrl && shift && !matches!(rich::cell_at(e, &rich::text(e), rich::sel(e).0), Some((rich::Block::Table, ..))) {
+                    st.swallow = true;
+                    if rich::untab_lines(e) {
+                        mark_dirty(h);
+                    }
                     return 0;
                 }
                 if vk == VK_DELETE && !ctrl && delete_into_item(e) {

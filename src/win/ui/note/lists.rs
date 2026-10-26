@@ -281,15 +281,24 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
             });
             return Some(true);
         }
-        if blank && pe as usize == cb {
+        // Code keeps empty lines: only an empty last line after another empty one leaves
+        // the block, and both go (one Enter for a gap in the code, two to be done).
+        let from = if kind == Block::Code && ps as usize > ca {
+            let pp = rich::para_start(&t, ps - 1);
+            let line = if pp as usize == ca { rich::past_tag(e, &t, ca, cb) } else { pp as usize };
+            t[line..(ps - 1) as usize].iter().all(|&c| c == b' ' as u16).then_some(pp)
+        } else {
+            Some(ps)
+        };
+        if let Some(from) = from.filter(|_| blank && pe as usize == cb) {
             rich::still(e, || {
-                if ps as usize == ca {
+                if from as usize == ca {
                     rich::delete_block(e, a);
                 } else {
-                    // The empty line goes, and the caret moves on below the block.
-                    rich::set_sel(e, ps - 1, pe);
+                    // The empty lines go, and the caret moves on below the block.
+                    rich::set_sel(e, from - 1, pe);
                     rich::replace_sel(e, "");
-                    let end = rows.last().map_or(0, |r| r.end) as i32 - (pe - ps + 1);
+                    let end = rows.last().map_or(0, |r| r.end) as i32 - (pe - from + 1);
                     rich::set_sel(e, end, end);
                 }
             });
@@ -601,6 +610,43 @@ mod tests {
         assert_eq!(plain(h).replace('^', ""), "Title/one/two/end");
     }
 
+    /// Shift+Tab on a plain line takes a tab off its start and never types one; Backspace
+    /// at a nested item's start steps it out a level, and only at the top level is it
+    /// left to take the bullet.
+    #[test]
+    fn shift_tab_and_backspace_step_out() {
+        let h = editor("T\r\tone\r\t\ttwo\rthree");
+        caret(h, "one");
+        assert!(rich::untab_lines(h));
+        assert_eq!(plain(h), "T/^one/\t\ttwo/three");
+        // Every line of a selection, one tab each.
+        let (a, _) = rich::sel(h);
+        rich::set_sel(h, a, rich::text(h).len() as i32);
+        assert!(rich::untab_lines(h));
+        assert_eq!(plain(h).replace('^', ""), "T/one/\ttwo/three");
+        caret(h, "three");
+        assert!(!rich::untab_lines(h), "no tab: nothing");
+        assert_eq!(plain(h).replace('^', ""), "T/one/\ttwo/three");
+        for md in ["T\n- a\n  - b\n    - c", "T\n1. a\n  1. b\n    1. c", "T\n- [ ] a\n  - [ ] b\n    - [ ] c"] {
+            let h = editor("");
+            rich::load_markdown(h, md);
+            rich::style_boxes(h);
+            let t = rich::text(h);
+            let c = t.iter().rposition(|&ch| ch == b'c' as u16).unwrap() as i32;
+            rich::set_sel(h, c, c);
+            assert_eq!(rich::list_level(h), Some(2), "{md}");
+            assert!(rich::backspace_outdents(h), "{md}");
+            assert_eq!(rich::list_level(h), Some(1), "{md}");
+            assert!(rich::backspace_outdents(h), "{md}");
+            assert_eq!(rich::list_level(h), Some(0), "{md}");
+            assert!(!rich::backspace_outdents(h), "{md}: at the top, the bullet goes");
+            // Not at the item's start: a letter goes, as ever.
+            rich::set_sel(h, c + 1, c + 1);
+            assert!(!rich::backspace_outdents(h), "{md}");
+            assert_eq!(rich::text(h), t, "{md}: no text changed");
+        }
+    }
+
     #[test]
     fn keys_in_blocks() {
         let h = editor("Title\r    a\rend");
@@ -617,7 +663,10 @@ mod tests {
         assert_eq!(plain(h), "Title/[/    a/        ^|]/end");
         assert!(block_tab(h, true));
         assert_eq!(plain(h), "Title/[/    a/    ^|]/end");
-        // A last line with nothing but its indent: Enter leaves the block.
+        // A last line with nothing but its indent: Enter makes a gap in the code; a second
+        // empty line at the end leaves the block, and both go.
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/    a/    /    ^|]/end");
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h), "Title/[/    a|]/^end");
         // Backspace at the start of the block takes it apart.
@@ -632,6 +681,30 @@ mod tests {
         // Enter in an empty block takes it away.
         assert_eq!(block_enter(h), Some(true));
         assert_eq!(plain(h).replace('^', ""), "Title/");
+        // Empty lines in the middle of code stay, however many.
+        let h = editor("Title\ra\rb\rend");
+        caret(h, "a");
+        let (s, _) = rich::sel(h);
+        rich::set_sel(h, s, s + 3);
+        block_command(h, Block::Code);
+        caret(h, "a/b");
+        let at = rich::sel(h).0 + 1;
+        rich::set_sel(h, at, at);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/a//^/b|]/end");
+        // Two empty lines that end the block, the caret on the second: out, and both go.
+        let h = editor("Title\ra\rend");
+        caret(h, "a");
+        block_command(h, Block::Code);
+        caret(h, "a|");
+        let at = rich::sel(h).0 + 1;
+        rich::set_sel(h, at, at);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/a//^|]/end");
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(plain(h), "Title/[/a|]/^end");
     }
 
     /// Backspace takes a block apart wherever it did when it looked through the whole

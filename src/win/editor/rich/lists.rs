@@ -228,6 +228,55 @@ pub fn nest(h: HWND, delta: i32) -> bool {
     any
 }
 
+/// Backspace at the very start of a nested list item's text (just after a checklist item's
+/// box): the item steps out a level, as Shift+Tab does, rather than losing its bullet.
+/// False at the top level, where Backspace takes the bullet off, and anywhere else.
+pub fn backspace_outdents(h: HWND) -> bool {
+    let (a, b) = sel(h);
+    if a != b || a <= 0 {
+        return false;
+    }
+    // The caret's paragraph tells whether it's at an item's start; only then the rest.
+    let s = paras_around(h, a as usize, a as usize);
+    let ps = s.from + para_start(&s.t, a - s.from as i32) as usize;
+    let gap = match s.get(ps) {
+        Some(c) if is_task(c) => 1 + (s.get(ps + 1) == Some(b' ' as u16)) as usize,
+        _ => 0,
+    };
+    a as usize == ps + gap && list_level(h).is_some_and(|l| l > 0) && nest(h, -1)
+}
+
+/// Shift+Tab on lines that aren't a list, a quote, code or a table: a tab at the start of
+/// each line in the selection goes, and nothing else happens (RichEdit typed a tab). True
+/// when one went.
+pub fn untab_lines(h: HWND) -> bool {
+    let (a, b) = sel(h);
+    let t = text(h);
+    let mut starts = vec![para_start(&t, a)];
+    for (i, &c) in t.iter().enumerate().take(b.max(a) as usize).skip(a as usize) {
+        if c == CR && i + 1 < t.len() {
+            starts.push(i as i32 + 1);
+        }
+    }
+    starts.retain(|&ps| t.get(ps as usize) == Some(&(b'\t' as u16)));
+    if starts.is_empty() {
+        return false;
+    }
+    still(h, || {
+        let (mut na, mut nb) = (a, b);
+        // Last first, so the lines before keep their places.
+        for &ps in starts.iter().rev() {
+            set_sel(h, ps, ps + 1);
+            replace_sel(h, "");
+            let moved = |p: i32| if p > ps { p - 1 } else { p };
+            na = moved(na);
+            nb = moved(nb);
+        }
+        set_sel(h, na, nb);
+    });
+    true
+}
+
 /// The caret's paragraph lost its checklist marker but kept the hanging indent: reset.
 /// `t`: the editor's text.
 pub(super) fn fix_caret_indent(h: HWND, t: &[u16]) {
