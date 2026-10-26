@@ -591,7 +591,8 @@ impl Store {
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if s.open_backup(&dir) {
+                if let Some((d, _)) = from_backup(&dir) {
+                    s.d = d;
                     // Gone from beside its backup (deleted, or a sync client part way):
                     // the backup's notes are used and saved as notes.json; should the file
                     // come back meanwhile, it's set aside before a save (see `write`).
