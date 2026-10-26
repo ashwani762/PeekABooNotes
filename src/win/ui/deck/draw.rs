@@ -52,22 +52,33 @@ pub(super) fn render(d: &mut Deck) {
     let ring = ring_hit(d);
     let mut c = d.canvas.take().unwrap();
     c.clear(0);
-    // Keep the tab column hoverable (alpha 1 is invisible but hit-testable).
+    // Keep the tab column hoverable (alpha 1 is invisible but hit-testable). Folded, only
+    // the pill catches the pointer, with the sliver between it and the screen edge (where a
+    // pointer thrown at the edge lands): the rest of the small window lets it through, to
+    // the scroll bar of a maximized window, say.
     let col = ((TAB_W + BULGE + 10.0) * s) as i32;
+    let pill_zone = {
+        let (zx, zw) = span(&g, ww, 0.0, (PILL_INSET + PILL_W + 3.0) * s);
+        let top = g.pill_top() - wy as f32 - 3.0 * s;
+        rect(zx.floor() as i32, top.floor() as i32, zw.ceil() as i32, (g.pill_h() + 6.0 * s).ceil() as i32)
+    };
     if d.wide {
         let (x0, x1) = if g.left { (0, col) } else { (ww - col, ww) };
         c.fill_raw(x0, 0, x1, wh, 0x0100_0000);
     } else {
-        c.fill_raw(0, 0, ww, wh, 0x0100_0000);
+        c.fill_raw(pill_zone.left, pill_zone.top, pill_zone.right, pill_zone.bottom, 0x0100_0000);
     }
 
-    // The pill.
+    // The pill, with a shadow close about it (a wide soft one would reach past where it
+    // takes the pointer).
     let pa = clamp01(d.pill.value);
     if pa > 0.01 {
         let (px, pw) = span(&g, ww, PILL_INSET * s, (PILL_INSET + PILL_W) * s);
         let pt = g.pill_top() - wy as f32;
         let shape = Shape::new(px, pt, pw, g.pill_h(), pw / 2.0);
-        c.soft_shadow(&shape, s, 0.7 * pa);
+        let mut drop = shape;
+        drop.y += 1.0 * s;
+        c.shape(&drop, 0x000000, 0.12 * pa, 3.0 * s, 0.0);
         c.shape(&shape, mat.fill, mat.alpha * pa, 1.0, 0.0);
         c.shape(&shape, mat.edge, mat.edge_alpha * pa, 1.0, 1.0);
         if d.tabs.is_empty() {
@@ -135,6 +146,14 @@ pub(super) fn render(d: &mut Deck) {
         }
     }
 
+    if !d.wide {
+        // Nothing outside the pill's zone is left hit-testable, not even a shadow's edge.
+        let z = pill_zone;
+        c.fill_raw(0, 0, ww, z.top, 0);
+        c.fill_raw(0, z.bottom, ww, wh, 0);
+        c.fill_raw(0, z.top, z.left, z.bottom, 0);
+        c.fill_raw(z.right, z.top, ww, z.bottom, 0);
+    }
     c.present(d.hwnd, wx, wy);
     d.canvas = Some(c);
     unsafe {
