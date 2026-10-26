@@ -257,6 +257,12 @@ pub fn arrive() {
     });
 }
 
+/// Whether `h` is the deck while it has the keys (Ctrl+Alt+K): the window they came from
+/// isn't left for good, as they go back to it on Esc.
+pub fn holds_keys(h: HWND) -> bool {
+    !h.is_null() && with(|d| d.hwnd == h && d.kbd.is_some()).unwrap_or(false)
+}
+
 /// Whether the foreground window is on the deck's monitor (true when there is none).
 fn front_on_deck_monitor() -> bool {
     let fg = unsafe { GetForegroundWindow() };
@@ -815,6 +821,12 @@ fn menu_closed(hwnd: HWND) {
     .unwrap_or(false);
     if frozen {
         unsafe { SetTimer(hwnd, T_COLLAPSE, motion::COLLAPSE_GRACE_MS, None) };
+    }
+    // The menu gave the keys back to the deck, which let them go meanwhile (Ctrl+Alt+K
+    // again while the menu was up): typing would go nowhere, so they go on to the window
+    // that had them before.
+    if front == hwnd && with(|d| d.kbd.is_none()) == Some(true) {
+        unsafe { PostMessageW(hwnd, WM_PASS_ON, 0, 0) };
     }
 }
 

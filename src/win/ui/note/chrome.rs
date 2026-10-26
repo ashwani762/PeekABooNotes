@@ -203,7 +203,13 @@ pub(super) fn hide_later(h: HWND, to: HWND) {
 /// rests on the note the timer stops; `pointer_out` starts it again when it leaves.
 pub(super) fn hide_tick(h: HWND) {
     let fg = unsafe { GetForegroundWindow() };
-    let ours = fg == h || (!fg.is_null() && unsafe { GetWindow(fg, GW_OWNER) } == h) || crate::win::ui::menu::is_menu(fg);
+    // The deck holding the keys (Ctrl+Alt+K from this note) or one of our menus has them
+    // for a moment: they come back here (Esc gives them back) or go on elsewhere, so keep
+    // looking until they do.
+    if hides(h) && (crate::win::ui::deck::holds_keys(fg) || crate::win::ui::menu::is_menu(fg)) {
+        return;
+    }
+    let ours = fg == h || (!fg.is_null() && unsafe { GetWindow(fg, GW_OWNER) } == h);
     if ours || !hides(h) {
         unsafe { KillTimer(h, T_HIDE) };
         return;
