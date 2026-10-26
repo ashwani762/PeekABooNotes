@@ -68,6 +68,10 @@
     <string name="note_edited">Editada %1$s</string>
     <string name="note_full">Esta nota está llena</string>
     <string name="note_save_failed">No se pueden guardar las notas</string>
+    <string name="notice_notes_set_aside">Copia abierta. El archivo ilegible se guarda como %1$s</string>
+    <string name="notice_notes_locked">Copia abierta: no se puede leer el archivo de notas y no se guarda nada</string>
+    <string name="notice_notes_missing">Faltaba el archivo de notas, así que se abrió la copia de seguridad</string>
+    <string name="notice_notes_conflict">Cambiadas en otro sitio. Esa copia se guarda como %1$s</string>
     <string name="file_untitled">Sin título</string>
 
     <!-- Times -->

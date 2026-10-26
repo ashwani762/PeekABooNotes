@@ -68,6 +68,10 @@
     <string name="note_edited">Modifiée %1$s</string>
     <string name="note_full">Cette note est pleine</string>
     <string name="note_save_failed">Impossible d'enregistrer les notes</string>
+    <string name="notice_notes_set_aside">Sauvegarde ouverte. Fichier illisible gardé sous %1$s</string>
+    <string name="notice_notes_locked">Sauvegarde ouverte : notes illisibles, rien n'est enregistré</string>
+    <string name="notice_notes_missing">Le fichier des notes manquait : la sauvegarde est ouverte</string>
+    <string name="notice_notes_conflict">Modifiées ailleurs. Cette copie est gardée sous %1$s</string>
     <string name="file_untitled">Sans titre</string>
 
     <!-- Times -->

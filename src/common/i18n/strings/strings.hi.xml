@@ -68,6 +68,10 @@
     <string name="note_edited">संपादित %1$s</string>
     <string name="note_full">यह नोट भर गया है</string>
     <string name="note_save_failed">नोट्स सहेजे नहीं जा सकते</string>
+    <string name="notice_notes_set_aside">बैकअप खोला गया। न पढ़ी जा सकी फ़ाइल %1$s नाम से रखी गई</string>
+    <string name="notice_notes_locked">बैकअप खोला गया: नोट्स फ़ाइल पढ़ी नहीं जा सकी, इसलिए कुछ सहेजा नहीं जाएगा</string>
+    <string name="notice_notes_missing">नोट्स फ़ाइल नहीं मिली, इसलिए बैकअप खोला गया</string>
+    <string name="notice_notes_conflict">नोट्स कहीं और भी बदले गए। वह कॉपी %1$s नाम से रखी गई</string>
     <string name="file_untitled">बिना शीर्षक</string>
 
     <!-- Times -->

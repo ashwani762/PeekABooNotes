@@ -4,9 +4,9 @@
 //! The note database: one ordinary JSON file, written atomically.
 
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,7 @@ use crate::common::util::now;
 
 /// notes.json, retrying briefly: a sync client or a virus scanner can hold it open for a
 /// moment, and that must not look like an unreadable (let alone missing) file.
-fn read_patiently(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+fn read_patiently(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut tries = 0;
     loop {
         match std::fs::read(path) {
@@ -28,18 +28,162 @@ fn read_patiently(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-/// The copy of the last good notes.json, for when notes.json itself won't do.
-fn from_backup(backup: &std::path::Path) -> Data {
-    match std::fs::read(backup).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<Data>(&b).map_err(|e| format!("{:?} error", e.classify()))) {
-        Ok(d) => {
-            log::warn(&format!("restored {} notes from notes.backup.json", d.notes.len()));
-            d
-        }
-        Err(e) => {
-            log::error(&format!("notes.backup.json didn't help either ({e}); starting empty"));
-            Data::default()
+/// The newest copy of the notes the backups hold that can be read, and which file it was:
+/// `notes.backup.json`, then the daily ones, then those kept from being replaced (newest
+/// first). None when there's none.
+fn from_backup(dir: &Path) -> Option<(Data, String)> {
+    let mut names = vec![BACKUP.to_string()];
+    names.extend(backups(dir, true));
+    names.extend(backups(dir, false));
+    for name in names {
+        let read = std::fs::read(dir.join(&name)).map_err(|e| e.kind()).map(|b| serde_json::from_slice::<Data>(&b));
+        match read {
+            Ok(Ok(d)) => {
+                log::warn(&format!("restored {} notes from {name}", d.notes.len()));
+                return Some((d, name));
+            }
+            Ok(Err(e)) => log::error(&format!("{name} is unreadable too ({:?} error)", e.classify())),
+            Err(std::io::ErrorKind::NotFound) => {}
+            Err(kind) => log::error(&format!("couldn't read {name} ({kind:?})")),
         }
     }
+    None
+}
+
+/// How many notes the notes file at `path` holds; None when it can't be read.
+fn count_notes(path: &Path) -> Option<usize> {
+    #[derive(Deserialize)]
+    struct Count {
+        #[serde(default)]
+        notes: Vec<serde::de::IgnoredAny>,
+    }
+    serde_json::from_slice::<Count>(&std::fs::read(path).ok()?).ok().map(|c| c.notes.len())
+}
+
+/// Whether a file of `new` notes holds far fewer than a backup of `old`: then it isn't
+/// allowed to take that backup's place (it's kept under another name first).
+fn far_fewer(new: usize, old: usize) -> bool {
+    old >= 4 && new * 2 < old
+}
+
+/// Whether `dir` is a new notes folder, with nothing in it notes would have left: no
+/// notes file or backup of any kind, no attachments, no versions. Only then is a missing
+/// notes.json a fresh start; otherwise it's a folder whose notes can't be seen right now
+/// (a drive or share not there yet, a sync client part way), which must not be written.
+fn folder_is_new(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_lowercase();
+        if name.starts_with("notes.") || name == "versions.json" {
+            return false;
+        }
+        if name == "attachments" && std::fs::read_dir(e.path()).map_or(true, |mut d| d.next().is_some()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// A quick 64-bit fingerprint of bytes, the same however they're fed in: for telling
+/// whether notes.json still holds what this session wrote, and for content stamps. Not
+/// for anything an adversary picks.
+#[derive(Clone, Copy)]
+pub struct Fingerprint {
+    h: u64,
+    buf: [u8; 8],
+    n: usize,
+    len: u64,
+}
+
+const MIX: u64 = 0x517c_c1b7_2722_0a95;
+
+impl Default for Fingerprint {
+    fn default() -> Self {
+        Fingerprint { h: 0x9e37_79b9_7f4a_7c15, buf: [0; 8], n: 0, len: 0 }
+    }
+}
+
+impl Fingerprint {
+    fn word(&mut self, w: u64) {
+        self.h = (self.h.rotate_left(5) ^ w).wrapping_mul(MIX);
+    }
+
+    pub fn update(&mut self, mut bytes: &[u8]) {
+        self.len += bytes.len() as u64;
+        if self.n > 0 {
+            let take = (8 - self.n).min(bytes.len());
+            self.buf[self.n..self.n + take].copy_from_slice(&bytes[..take]);
+            self.n += take;
+            bytes = &bytes[take..];
+            if self.n < 8 {
+                return;
+            }
+            self.word(u64::from_le_bytes(self.buf));
+            self.n = 0;
+        }
+        let (words, rest) = bytes.as_chunks::<8>();
+        for w in words {
+            self.word(u64::from_le_bytes(*w));
+        }
+        self.buf[..rest.len()].copy_from_slice(rest);
+        self.n = rest.len();
+    }
+
+    pub fn finish(mut self) -> u64 {
+        let mut last = [0u8; 8];
+        last[..self.n].copy_from_slice(&self.buf[..self.n]);
+        self.word(u64::from_le_bytes(last));
+        self.word(self.len);
+        self.h
+    }
+
+    pub fn of(bytes: &[u8]) -> u64 {
+        let mut f = Fingerprint::default();
+        f.update(bytes);
+        f.finish()
+    }
+}
+
+/// A writer that fingerprints what goes through it.
+struct Fingerprinting<W> {
+    inner: W,
+    print: Fingerprint,
+}
+
+impl<W: std::io::Write> std::io::Write for Fingerprinting<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.print.update(&buf[..n]);
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Replace the file at `path` with `bytes`, atomically and onto the disk: a temp file,
+/// flushed, then renamed over it. A temp file left by a failure is removed.
+pub fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = tmp_of(path);
+    let written = (|| {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        rename_patiently(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
+}
+
+/// `path` with `.tmp` added: where a new copy of it is written before it takes its place.
+fn tmp_of(path: &Path) -> PathBuf {
+    let mut p = path.as_os_str().to_owned();
+    p.push(".tmp");
+    PathBuf::from(p)
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -227,11 +371,77 @@ pub struct Store {
     /// notes.json was read and understood at start: these are all the notes there are,
     /// not the backup's or none. Only then may anything be judged unused by every note.
     pub read_whole: bool,
+    /// The session began in a new folder, without a notes.json: one that appears later
+    /// (a sync client bringing the notes down) is never written over.
+    fresh: bool,
+    /// notes.json as this session last read or wrote it; None while it hasn't.
+    disk: Option<Seen>,
     /// The notes' content (see `content_stamp`) as the file last got it.
     saved_stamp: Option<u64>,
     /// Saves since the backup was last refreshed, and when that was.
     saves_since_backup: u32,
     backup_at: Option<Instant>,
+    /// How many notes notes.backup.json holds, once known.
+    backup_notes: Option<usize>,
+    /// What the user is to be told, for the platform to show (`take_notices`).
+    notices: Vec<Notice>,
+    /// Another writer's notes.json has been set aside this session (the user is told once).
+    told_conflict: bool,
+}
+
+/// notes.json as seen on disk: its size and last change, and its bytes' fingerprint.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Seen {
+    len: u64,
+    modified: Option<SystemTime>,
+    print: u64,
+}
+
+/// What happened to the notes file that the user should hear about.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Notice {
+    /// notes.json couldn't be read: the backup is open, and the file was kept under this
+    /// name.
+    SetAside(String),
+    /// notes.json couldn't be read (another program holds it, say): the backup is open,
+    /// and nothing is saved this session.
+    Locked,
+    /// notes.json was missing, with a backup beside it: the backup is open.
+    Missing,
+    /// notes.json was changed by another program or computer since this session last read
+    /// or wrote it: that copy was kept under this name before the notes were saved.
+    Conflict(String),
+}
+
+const NOTES: &str = "notes.json";
+const BACKUP: &str = "notes.backup.json";
+/// Daily backups, `notes.backup-2026-10-26.json`: the backup as it was when the app first
+/// started that day. The newest `DAILY_KEEP` stay.
+const DAILY_KEEP: usize = 3;
+/// A backup that a file of far fewer notes would have replaced, kept under this name
+/// (`notes.backup-kept-<time>.json`) instead and never removed by the app.
+const KEPT: &str = "notes.backup-kept-";
+/// Another writer's notes.json, set aside before this session's notes were saved.
+pub const CONFLICT: &str = "notes.conflict-";
+/// A notes.json that couldn't be read at start, set aside.
+pub const UNREADABLE: &str = "notes.unreadable-";
+
+/// A free name `<prefix><unix time>.json` in `dir` (with `-2`, `-3` when taken): set-aside
+/// files must never land on one another.
+fn aside_name(dir: &Path, prefix: &str) -> String {
+    let t = now();
+    let mut name = format!("{prefix}{t}.json");
+    let mut k = 2;
+    while dir.join(&name).exists() {
+        name = format!("{prefix}{t}-{k}.json");
+        k += 1;
+    }
+    name
+}
+
+/// Size and last change of the file at `path`.
+fn stat(path: &Path) -> std::io::Result<(u64, Option<SystemTime>)> {
+    std::fs::metadata(path).map(|m| (m.len(), m.modified().ok()))
 }
 
 /// The backup is refreshed every so many saves, or after an hour of them, whichever comes
@@ -258,36 +468,90 @@ fn rename_patiently(from: &std::path::Path, to: &std::path::Path) -> std::io::Re
 
 /// Write `d` to `path` as JSON and see it onto the disk before returning: a power cut
 /// right after the rename then can't leave an empty notes.json. It goes out through a
-/// small buffer, so a save never holds a second copy of all the notes in memory.
-fn write_synced(path: &std::path::Path, d: &Data) -> std::io::Result<()> {
+/// small buffer, so a save never holds a second copy of all the notes in memory. Gives
+/// the written bytes' fingerprint.
+fn write_synced(path: &Path, d: &Data) -> std::io::Result<u64> {
     use std::io::Write;
-    let mut w = std::io::BufWriter::with_capacity(64 * 1024, std::fs::File::create(path)?);
+    let file = Fingerprinting { inner: std::fs::File::create(path)?, print: Fingerprint::default() };
+    let mut w = std::io::BufWriter::with_capacity(64 * 1024, file);
     serde_json::to_writer_pretty(&mut w, d).map_err(std::io::Error::other)?;
     w.flush()?;
-    w.into_inner().map_err(std::io::IntoInnerError::into_error)?.sync_all()
+    let file = w.into_inner().map_err(std::io::IntoInnerError::into_error)?;
+    file.inner.sync_all()?;
+    Ok(file.print.finish())
+}
+
+/// Copy `from` over `to` the way `replace_file` writes: a temp copy, flushed, renamed.
+fn copy_synced(from: &Path, to: &Path) -> std::io::Result<()> {
+    let tmp = tmp_of(to);
+    let copied = (|| {
+        std::fs::copy(from, &tmp)?;
+        std::fs::OpenOptions::new().write(true).open(&tmp)?.sync_all()?;
+        rename_patiently(&tmp, to)
+    })();
+    if copied.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    copied
+}
+
+/// The backups in `dir`: the daily ones (`daily`) or those kept from being replaced,
+/// newest first.
+fn backups(dir: &Path, daily: bool) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .map(|d| {
+            d.flatten()
+                .filter_map(|e| e.file_name().to_str().map(str::to_string))
+                .filter(|n| n.starts_with("notes.backup-") && n.ends_with(".json") && n.starts_with(KEPT) != daily)
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort_unstable_by(|a, b| b.cmp(a));
+    v
+}
+
+/// Whether notes set aside unread, or another writer's notes.json set aside, are kept
+/// in `dir`: notes that may come back, with the files they link. True when it can't be
+/// told.
+pub fn others_kept(dir: &Path) -> bool {
+    std::fs::read_dir(dir).map_or(true, |d| d.flatten().any(|e| e.file_name().to_str().is_none_or(|n| n.starts_with(UNREADABLE) || n.starts_with(CONFLICT))))
 }
 
 impl Store {
     pub fn load(dir: PathBuf) -> Store {
-        let path = dir.join("notes.json");
-        let backup = dir.join("notes.backup.json");
-        let mut frozen = false;
-        let mut read_whole = false;
-        let d = match read_patiently(&path) {
+        let mut s = Store {
+            path: dir.join(NOTES),
+            d: Data::default(),
+            frozen: false,
+            read_whole: false,
+            fresh: false,
+            disk: None,
+            saved_stamp: None,
+            saves_since_backup: 0,
+            backup_at: Some(Instant::now()),
+            backup_notes: None,
+            notices: Vec::new(),
+            told_conflict: false,
+        };
+        // What a save that failed part way left.
+        let _ = std::fs::remove_file(tmp_of(&s.path));
+        // When it last changed, from before it's read: a change made while it's being read
+        // then shows at the first save.
+        let modified = stat(&s.path).ok().and_then(|m| m.1);
+        match read_patiently(&s.path) {
             Ok(bytes) => match serde_json::from_slice::<Data>(&bytes) {
                 Ok(d) => {
-                    read_whole = true;
+                    s.read_whole = true;
+                    s.disk = Some(Seen { len: bytes.len() as u64, modified, print: Fingerprint::of(&bytes) });
                     log::info(&format!("loaded {} notes ({} KB)", d.notes.len(), bytes.len().div_ceil(1024)));
                     // A copy of the last good file from the previous session.
-                    if let Err(e) = std::fs::write(dir.join("notes.backup.json"), &bytes) {
-                        log::warn(&format!("couldn't write notes.backup.json: {e}"));
-                    }
-                    d
+                    s.back_up(&dir, Some(&bytes), d.notes.len(), true);
+                    s.d = d;
                 }
                 Err(e) => {
                     // Never overwrite a file we failed to understand.
-                    let aside = format!("notes.unreadable-{}.json", now());
-                    let moved = std::fs::rename(&path, dir.join(&aside));
+                    let aside = aside_name(&dir, UNREADABLE);
+                    let moved = std::fs::rename(&s.path, dir.join(&aside));
                     // Category and position only: serde's message can quote note text.
                     log::error(&format!(
                         "notes.json is unreadable ({:?} error at line {}, column {}); {}",
@@ -296,24 +560,39 @@ impl Store {
                         e.column(),
                         match &moved {
                             Ok(()) => format!("moved aside as {aside}"),
-                            Err(e) => format!("moving it aside failed ({e}), so it won't be written this session"),
+                            Err(e) => format!("moving it aside failed ({:?}), so it won't be written this session", e.kind()),
                         }
                     ));
-                    frozen = moved.is_err();
-                    from_backup(&backup)
+                    s.frozen = moved.is_err();
+                    s.open_backup(&dir);
+                    s.notices.push(if moved.is_ok() { Notice::SetAside(aside) } else { Notice::Locked });
                 }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                log::info("no notes.json yet, starting fresh");
-                Data::default()
+                if s.open_backup(&dir) {
+                    // Gone from beside its backup (deleted, or a sync client part way):
+                    // the backup's notes are used and saved as notes.json; should the file
+                    // come back meanwhile, it's set aside before a save (see `write`).
+                    log::warn("notes.json is missing: the backup is open instead");
+                    s.notices.push(Notice::Missing);
+                } else if folder_is_new(&dir) {
+                    log::info("no notes.json yet, starting fresh");
+                    s.fresh = true;
+                } else {
+                    // A drive, share or synced folder that isn't there yet, or notes.json
+                    // gone from a folder notes were kept in: writing would start the notes
+                    // over on top of the real ones when they come back.
+                    log::error("notes.json is missing from a folder that held notes (or the folder can't be reached), so it won't be written this session");
+                    s.frozen = true;
+                }
             }
             Err(e) => {
-                log::error(&format!("couldn't read notes.json ({e}), so it won't be written this session"));
-                frozen = true;
-                from_backup(&backup)
+                log::error(&format!("couldn't read notes.json ({:?}, code {:?}), so it won't be written this session", e.kind(), e.raw_os_error()));
+                s.frozen = true;
+                s.open_backup(&dir);
+                s.notices.push(Notice::Locked);
             }
-        };
-        let mut s = Store { path, d, frozen, read_whole, saved_stamp: None, saves_since_backup: 0, backup_at: Some(Instant::now()) };
+        }
         let max = s.d.notes.iter().map(|n| n.id).max().unwrap_or(0);
         s.d.next_id = s.d.next_id.max(max);
         // Early builds stored the deck at 42% height; the deck is now centred by default.
@@ -321,6 +600,59 @@ impl Store {
             s.d.settings.deck_pos = 0.5;
         }
         s
+    }
+
+    /// The newest backup that can be read, in place of notes.json. False when there's none
+    /// (the notes start empty).
+    fn open_backup(&mut self, dir: &Path) -> bool {
+        match from_backup(dir) {
+            Some((d, _)) => {
+                self.d = d;
+                true
+            }
+            None => {
+                log::warn("no backup could be read");
+                false
+            }
+        }
+    }
+
+    /// Refresh notes.backup.json with the notes just read (`bytes`) or just written (the
+    /// file at `path`), which hold `count` notes. At the day's first start the backup there
+    /// is kept first as that day's; and a backup of far more notes than these isn't
+    /// replaced but kept under a name of its own.
+    fn back_up(&mut self, dir: &Path, bytes: Option<&[u8]>, count: usize, starting: bool) {
+        let main = dir.join(BACKUP);
+        let old = self.backup_notes.or_else(|| count_notes(&main));
+        if let Some(old) = old.filter(|&old| far_fewer(count, old)) {
+            let kept = aside_name(dir, KEPT);
+            if let Err(e) = rename_patiently(&main, &dir.join(&kept)) {
+                log::warn(&format!("notes.backup.json holds {old} notes and the notes now {count}; it stays, as it couldn't be kept aside ({:?})", e.kind()));
+                return;
+            }
+            log::warn(&format!("notes.backup.json held {old} notes and the notes now {count}: kept it as {kept}"));
+        } else if starting && old.is_some() {
+            let t = crate::os::local_time(now());
+            let daily = format!("notes.backup-{:04}-{:02}-{:02}.json", t.year, t.month, t.day);
+            if !dir.join(&daily).exists() {
+                match rename_patiently(&main, &dir.join(&daily)) {
+                    Ok(()) => {
+                        for gone in backups(dir, true).into_iter().skip(DAILY_KEEP) {
+                            let _ = std::fs::remove_file(dir.join(gone));
+                        }
+                    }
+                    Err(e) => log::warn(&format!("couldn't keep the day's backup ({:?})", e.kind())),
+                }
+            }
+        }
+        let written = match bytes {
+            Some(b) => replace_file(&main, b),
+            None => copy_synced(&self.path, &main),
+        };
+        match written {
+            Ok(()) => self.backup_notes = Some(count),
+            Err(e) => log::warn(&format!("couldn't refresh notes.backup.json ({:?})", e.kind())),
+        }
     }
 
     /// Write the notes (atomically: a synced temp file, then a rename). Err when they
@@ -342,22 +674,75 @@ impl Store {
         if self.frozen {
             return Err(std::io::Error::other("notes.json couldn't be read at start, so it isn't written this session"));
         }
-        let tmp = self.path.with_extension("json.tmp");
-        write_synced(&tmp, &self.d)?;
-        rename_patiently(&tmp, &self.path)?;
+        self.set_aside_others()?;
+        let tmp = tmp_of(&self.path);
+        let written = write_synced(&tmp, &self.d).and_then(|print| rename_patiently(&tmp, &self.path).map(|()| print));
+        let print = match written {
+            Ok(print) => print,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        };
+        let (len, modified) = stat(&self.path).unwrap_or((0, None));
+        self.disk = Some(Seen { len, modified, print });
+        self.fresh = false;
         self.saved_stamp = Some(self.content_stamp());
         self.saves_since_backup += 1;
         if self.saves_since_backup >= BACKUP_EVERY || self.backup_at.is_none_or(|t| t.elapsed() >= BACKUP_AGE) {
             // A copy of the file just written, so the backup is always one that was whole.
-            match std::fs::copy(&self.path, self.path.with_file_name("notes.backup.json")) {
-                Ok(_) => {
-                    self.saves_since_backup = 0;
-                    self.backup_at = Some(Instant::now());
-                }
-                Err(e) => log::warn(&format!("couldn't refresh notes.backup.json ({:?})", e.kind())),
-            }
+            // Tried again only when the next is due, should it fail.
+            let dir = self.path.parent().map(Path::to_path_buf).unwrap_or_default();
+            self.back_up(&dir, None, self.d.notes.len(), false);
+            self.saves_since_backup = 0;
+            self.backup_at = Some(Instant::now());
         }
         Ok(())
+    }
+
+    /// Before a write: a notes.json that isn't the one this session last read or wrote
+    /// (another program or computer wrote it, or it appeared) is never written over. It's
+    /// moved aside as `notes.conflict-<time>.json`, and the user told; in a session that
+    /// began without one, the notes there are the real ones, and this session stops
+    /// writing instead. Err when the file couldn't be moved aside.
+    fn set_aside_others(&mut self) -> std::io::Result<()> {
+        // None there, or none to be seen (the write will show why).
+        let Ok((len, modified)) = stat(&self.path) else { return Ok(()) };
+        if let Some(seen) = self.disk {
+            if modified.is_some() && (seen.len, seen.modified) == (len, modified) {
+                return Ok(());
+            }
+            // Touched, but holding what was written (a sync client marking it as synced).
+            if read_patiently(&self.path).is_ok_and(|b| Fingerprint::of(&b) == seen.print) {
+                self.disk = Some(Seen { len, modified, ..seen });
+                return Ok(());
+            }
+        }
+        if self.fresh {
+            self.frozen = true;
+            log::error("a notes.json appeared after this session began without one; it won't be written this session");
+            return Err(std::io::Error::other("notes.json appeared since the start, so it isn't written this session"));
+        }
+        let dir = self.path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let aside = aside_name(&dir, CONFLICT);
+        rename_patiently(&self.path, &dir.join(&aside))?;
+        log::warn(&format!("notes.json was changed by another program or computer since this session last read or wrote it: kept that copy as {aside}"));
+        if !self.told_conflict {
+            self.told_conflict = true;
+            self.notices.push(Notice::Conflict(aside));
+        }
+        Ok(())
+    }
+
+    /// What the user is to be told since this was last asked, once each.
+    pub fn take_notices(&mut self) -> Vec<Notice> {
+        std::mem::take(&mut self.notices)
+    }
+
+    /// Whether these are all the notes there are and this session writes them: only then
+    /// may a file be judged unused by every note.
+    pub fn whole(&self) -> bool {
+        self.read_whole && !self.frozen
     }
 
     /// A fingerprint of everything in the notes but where the user is in them (window
@@ -1036,6 +1421,211 @@ mod tests {
         frozen.frozen = true;
         assert!(frozen.save().is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A temp folder of the test's own, empty.
+    fn folder(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("peekaboo-store-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A notes file of `n` notes.
+    fn notes_json(n: u64) -> String {
+        let d = Data { notes: (1..=n).map(|id| Note { id, text: format!("note {id}"), ..Default::default() }).collect(), next_id: n, ..Default::default() };
+        serde_json::to_string(&d).unwrap()
+    }
+
+    #[test]
+    fn a_folder_that_held_notes_isnt_started_over() {
+        // A new folder (the log is the only thing in it) starts fresh, and saves.
+        let dir = folder("new");
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        let mut s = Store::load(dir.clone());
+        assert!(s.fresh && !s.frozen && s.d.notes.is_empty());
+        s.create("first", "");
+        s.save().unwrap();
+        assert!(dir.join("notes.json").exists());
+        // Notes were kept here (attachments, versions), but notes.json can't be seen: a
+        // drive or share not there yet. Nothing is written.
+        for (what, make) in [("attachments", "attachments/a.png"), ("versions", "versions.json")] {
+            let dir = folder(what);
+            if let Some(parent) = dir.join(make).parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(dir.join(make), "x").unwrap();
+            let mut s = Store::load(dir.clone());
+            assert!(s.frozen, "{what}");
+            s.create("typed meanwhile", "");
+            assert!(s.save().is_err());
+            assert!(!dir.join("notes.json").exists(), "{what}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        // The folder itself not there (a drive letter missing).
+        let gone = std::env::temp_dir().join(format!("peekaboo-store-nowhere-{}", std::process::id())).join("PeekABoo Notes");
+        let mut s = Store::load(gone.clone());
+        assert!(s.frozen && s.save().is_err() && !gone.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A session that began without notes.json never writes over one that turns up later
+    /// (a sync client bringing the notes down to a new computer).
+    #[test]
+    fn a_fresh_start_never_writes_over_notes_that_appear() {
+        let dir = folder("appear");
+        let mut s = Store::load(dir.clone());
+        s.create("typed before the sync", "");
+        let real = notes_json(5);
+        std::fs::write(dir.join("notes.json"), &real).unwrap();
+        assert!(s.save().is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("notes.json")).unwrap(), real);
+        assert!(s.save().is_err(), "and stays so");
+        assert_eq!(Store::load(dir.clone()).d.notes.len(), 5);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_notes_file_opens_the_backup() {
+        let dir = folder("missing");
+        std::fs::write(dir.join("notes.backup.json"), notes_json(3)).unwrap();
+        let mut s = Store::load(dir.clone());
+        assert_eq!(s.d.notes.len(), 3);
+        assert!(!s.read_whole && !s.whole(), "files aren't judged by the backup's notes");
+        assert_eq!(s.take_notices(), [Notice::Missing]);
+        assert!(s.take_notices().is_empty(), "said once");
+        let id = s.create("more", "");
+        assert!(id > 3);
+        s.save().unwrap();
+        assert_eq!(Store::load(dir.clone()).d.notes.len(), 4);
+        // Only a damaged daily backup is there: the one before it is used.
+        let dir2 = folder("missing-daily");
+        std::fs::write(dir2.join("notes.backup.json"), "{ damaged").unwrap();
+        std::fs::write(dir2.join("notes.backup-2020-01-25.json"), notes_json(2)).unwrap();
+        assert_eq!(Store::load(dir2.clone()).d.notes.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    #[test]
+    fn an_unreadable_notes_file_is_set_aside_and_named() {
+        let dir = folder("unreadable");
+        std::fs::write(dir.join("notes.json"), "{ \"notes\": [ oops").unwrap();
+        std::fs::write(dir.join("notes.backup.json"), notes_json(2)).unwrap();
+        let mut s = Store::load(dir.clone());
+        assert_eq!(s.d.notes.len(), 2);
+        let notices = s.take_notices();
+        let [Notice::SetAside(name)] = notices.as_slice() else { panic!("{notices:?}") };
+        assert!(name.starts_with(UNREADABLE) && dir.join(name).exists());
+        assert!(others_kept(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn backups_go_back_days_and_never_shrink_far() {
+        let dir = folder("backups");
+        // Older days' backups, and the one from the last session.
+        for day in 20..25 {
+            std::fs::write(dir.join(format!("notes.backup-2020-01-{day}.json")), notes_json(10)).unwrap();
+        }
+        std::fs::write(dir.join("notes.backup.json"), notes_json(10)).unwrap();
+        std::fs::write(dir.join("notes.json"), notes_json(9)).unwrap();
+        let s = Store::load(dir.clone());
+        // The last session's backup became today's; the three newest days stay.
+        let t = crate::os::local_time(now());
+        let today = format!("notes.backup-{:04}-{:02}-{:02}.json", t.year, t.month, t.day);
+        assert_eq!(count_notes(&dir.join(&today)), Some(10));
+        let days = backups(&dir, true);
+        assert_eq!(days.len(), DAILY_KEEP, "{days:?}");
+        assert_eq!(days[0], today);
+        assert_eq!(count_notes(&dir.join(BACKUP)), Some(9));
+        drop(s);
+        // A notes file of far fewer notes (a sync client brought back an old one): the
+        // backup of 9 isn't replaced but kept.
+        std::fs::write(dir.join("notes.json"), notes_json(2)).unwrap();
+        let mut s = Store::load(dir.clone());
+        let kept = backups(&dir, false);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(count_notes(&dir.join(&kept[0])), Some(9));
+        assert_eq!(count_notes(&dir.join(BACKUP)), Some(2));
+        // In the session too, and the backup is written whole (no temp file left).
+        s.d.notes.truncate(0);
+        s.backup_at = None;
+        s.save().unwrap();
+        assert_eq!(count_notes(&dir.join(BACKUP)), Some(0));
+        assert!(!dir.join("notes.backup.json.tmp").exists());
+        assert_eq!(backups(&dir, false).len(), 1, "2 to 0 isn't far fewer than 4 notes' worth");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Another program or computer wrote notes.json since this session read it: its copy
+    /// is kept before this one's notes are saved, and the user told once.
+    #[test]
+    fn another_writers_notes_are_set_aside() {
+        let dir = folder("conflict");
+        std::fs::write(dir.join("notes.json"), notes_json(3)).unwrap();
+        let mut s = Store::load(dir.clone());
+        s.create("mine", "");
+        s.save().unwrap();
+        // The same bytes written again (a sync client touching it) isn't a change.
+        let ours = std::fs::read(dir.join("notes.json")).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dir.join("notes.json"), &ours).unwrap();
+        s.save().unwrap();
+        assert!(!others_kept(&dir));
+        // Another computer's notes.
+        let theirs = notes_json(7);
+        std::fs::write(dir.join("notes.json"), &theirs).unwrap();
+        s.create("mine too", "");
+        s.save().unwrap();
+        let notices = s.take_notices();
+        let [Notice::Conflict(name)] = notices.as_slice() else { panic!("{notices:?}") };
+        assert_eq!(std::fs::read_to_string(dir.join(name)).unwrap(), theirs);
+        assert_eq!(Store::load(dir.clone()).d.notes.len(), 5);
+        assert!(others_kept(&dir));
+        // Again: kept again under a name of its own, but said only once.
+        std::fs::write(dir.join("notes.json"), notes_json(1)).unwrap();
+        s.save().unwrap();
+        assert!(s.take_notices().is_empty());
+        let conflicts = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(CONFLICT)).count();
+        assert_eq!(conflicts, 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_save_leaves_no_temp_file() {
+        let dir = folder("failed");
+        let mut s = Store::load(dir.clone());
+        s.create("a", "");
+        s.save().unwrap();
+        let notes = dir.join("notes.json");
+        let mut p = std::fs::metadata(&notes).unwrap().permissions();
+        p.set_readonly(true);
+        std::fs::set_permissions(&notes, p.clone()).unwrap();
+        s.create("b", "");
+        let failed = s.save();
+        p.set_readonly(false);
+        std::fs::set_permissions(&notes, p).unwrap();
+        assert!(failed.is_err());
+        assert!(!dir.join("notes.json.tmp").exists());
+        // And one left from before goes at the next start.
+        std::fs::write(dir.join("notes.json.tmp"), "half").unwrap();
+        drop(Store::load(dir.clone()));
+        assert!(!dir.join("notes.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fingerprints_dont_depend_on_how_bytes_come() {
+        let bytes: Vec<u8> = (0..1000u32).map(|i| (i * 7 % 251) as u8).collect();
+        let whole = Fingerprint::of(&bytes);
+        let mut f = Fingerprint::default();
+        for piece in bytes.chunks(3) {
+            f.update(piece);
+        }
+        assert_eq!(f.finish(), whole);
+        assert_ne!(Fingerprint::of(&bytes[..999]), whole);
+        assert_ne!(Fingerprint::of(b"ab"), Fingerprint::of(b"ba"));
     }
 
     #[test]

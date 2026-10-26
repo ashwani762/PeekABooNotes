@@ -150,6 +150,7 @@ pub fn save_now() {
         unsafe { KillTimer(h, T_VIEW_SAVE) };
     }
     let failed = store_mut(|s| s.save()).is_err();
+    tell_notices();
     if SAVE_FAILED.swap(failed, std::sync::atomic::Ordering::Relaxed) != failed {
         // Saving just broke, or works again: say so once, and let every open note's
         // footer follow.
@@ -159,6 +160,21 @@ pub fn save_now() {
         for w in ui(|u| u.notes.values().copied().collect::<Vec<_>>()) {
             unsafe { InvalidateRect(w, std::ptr::null(), 0) };
         }
+    }
+}
+
+/// What the store has to tell about the notes file (the backup opened in its place,
+/// another writer's copy set aside), in a toast, once each.
+fn tell_notices() {
+    use crate::common::store::Notice;
+    for n in store_mut(|s| s.take_notices()) {
+        let text = match n {
+            Notice::SetAside(name) => t!("notice_notes_set_aside", name),
+            Notice::Locked => t!("notice_notes_locked").to_string(),
+            Notice::Missing => t!("notice_notes_missing").to_string(),
+            Notice::Conflict(name) => t!("notice_notes_conflict", name),
+        };
+        toast::notice(text);
     }
 }
 
@@ -512,6 +528,9 @@ pub fn run() -> i32 {
         if !quiet && ui(|u| u.notes.is_empty()) {
             show_all_notes(false);
         }
+        // The notes file read at start in an unusual way (its backup opened instead): said
+        // once the deck is up.
+        tell_notices();
         share::cleanup();
         sweep_attachments();
         upgrade_startup();
