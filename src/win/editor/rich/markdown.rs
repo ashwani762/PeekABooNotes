@@ -334,9 +334,14 @@ fn light_attachment(h: HWND, t: &[u16], a: usize, b: usize) -> Option<String> {
 }
 
 /// Where a link that starts at a hidden instruction ends: (where its name starts, where
-/// it ends, url), or None when `i` doesn't start one.
-fn link_from(h: HWND, links: &[(usize, usize, String)], i: usize, b: usize) -> Option<(usize, usize, String)> {
-    let (_, name, url) = links.iter().find(|l| l.0 == i)?;
+/// it ends, url), or None when `i` doesn't start one. `next` is where in `links` (in the
+/// text's order) to look from, moved on as `i` goes up: looking through all of them at
+/// each character made a long paragraph with many links take a tenth of a second.
+fn link_from(h: HWND, links: &[(usize, usize, String)], next: &mut usize, i: usize, b: usize) -> Option<(usize, usize, String)> {
+    while links.get(*next).is_some_and(|l| l.0 < i) {
+        *next += 1;
+    }
+    let (_, name, url) = links.get(*next).filter(|l| l.0 == i)?;
     let end = link_at(h, *name as i32).map_or(b, |l| (l.1 as usize).min(b)).max(*name);
     Some((*name, end, url.clone()))
 }
@@ -354,10 +359,11 @@ fn attachment_md(url: &str) -> Option<String> {
 /// `t[a..b]` with links as `[name](url)` and no other marks (the title line).
 fn with_links(h: HWND, t: &[u16], a: usize, b: usize) -> String {
     let links = instructions(t, a, b);
+    let mut next = 0;
     let mut out = String::new();
     let mut i = a;
     while i < b {
-        if let Some((name, end, url)) = link_from(h, &links, i, b) {
+        if let Some((name, end, url)) = link_from(h, &links, &mut next, i, b) {
             let shown = unmark_str(&t[name..end]);
             // An address that links to itself is written as just the address.
             let bare = looks_like_url(&shown) && normalize_url(&shown) == url;
@@ -467,9 +473,10 @@ fn both(a: Marks, b: Marks) -> Marks {
 #[allow(clippy::too_many_arguments)]
 fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, out: &mut String, link: bool) -> Marks {
     let links = instructions(t, a, b);
+    let mut next = 0;
     let mut i = a;
     while i < b {
-        if let Some((name, end, url)) = link_from(h, &links, i, b) {
+        if let Some((name, end, url)) = link_from(h, &links, &mut next, i, b) {
             if let Some(md) = attachment_md(&url) {
                 out.push_str(&md);
                 i = end;

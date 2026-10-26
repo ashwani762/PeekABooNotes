@@ -51,6 +51,12 @@ const T_RECT: usize = 6;
 const RECT_DELAY_MS: u32 = 400;
 const EN_MAXTEXT: u32 = 0x0501;
 const SAVE_DELAY_MS: u32 = 250;
+/// A long note waits longer, up to 1.5 s at 100,000 characters: its save (the RTF, its
+/// text, notes.json) costs a tenth of a second or more there, and typing a key at a time
+/// paid it after every key.
+fn save_delay(edit: HWND) -> u32 {
+    SAVE_DELAY_MS + (rich::text_len(edit).saturating_sub(20_000) / 64).min(1250) as u32
+}
 pub const WM_NOTE_CMD: u32 = WM_APP + 40;
 const WM_RESTYLE: u32 = WM_APP + 41;
 
@@ -693,7 +699,7 @@ fn mark_dirty(h: HWND) {
         if !st.loading {
             st.dirty = true;
             unsafe {
-                SetTimer(h, T_SAVE, SAVE_DELAY_MS, None);
+                SetTimer(h, T_SAVE, save_delay(st.edit), None);
                 PostMessageW(h, WM_RESTYLE, 0, 0);
             }
         }

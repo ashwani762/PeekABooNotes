@@ -564,11 +564,17 @@ pub fn screen_text(h: HWND) -> (Span, usize, usize) {
     let len = text_len(h) as i32;
     let first = char_from_pos(h, 0, 0).clamp(0, len) as usize;
     let last = char_from_pos(h, rc.right, rc.bottom).clamp(0, len) as usize;
-    let s = paras_around(h, first.min(last), last.max(first));
+    let (first, last) = (first.min(last), last.max(first));
+    // No further than this either side of what shows: a paragraph that starts that far
+    // above the top has its first line (and its box) out of sight, and one paragraph of a
+    // whole long note was read, and searched for emoji, at every key.
+    const AROUND: usize = 512;
+    let (lo, hi) = (first.saturating_sub(AROUND), (last + AROUND).min(len as usize));
+    let s = Span { from: lo, t: raw_text(h, lo, hi), len: len as usize };
     // As `on_screen` has them: from the start of the paragraph (or table cell) showing
     // first, to the end of the one showing last.
     let a = s.from + para_start(&s.t, (first - s.from) as i32) as usize;
-    let b = s.t[last - s.from..].iter().position(|&c| c == CR).map_or(s.len, |i| last + i);
+    let b = s.t[(last - s.from).min(s.t.len())..].iter().position(|&c| c == CR).map_or(if hi == len as usize { s.len } else { hi }, |i| last + i);
     (s, a.min(b), b)
 }
 
@@ -794,9 +800,40 @@ mod tests {
         for y in [0, 40, 300, 2000, 100_000] {
             set_scroll_y(h, y);
             let (s, a, b) = screen_text(h);
-            assert_eq!((a, b), on_screen(h, &t), "scrolled to {y}");
+            // As the whole paragraphs on screen are, but for a long one, which is cut a
+            // little past what shows.
+            let (pa, pb) = on_screen(h, &t);
+            let mut rc: RECT = unsafe { std::mem::zeroed() };
+            unsafe { GetClientRect(h, &mut rc) };
+            let (first, last) = (char_from_pos(h, 0, 0) as usize, char_from_pos(h, rc.right, rc.bottom) as usize);
+            assert!(pa <= a && a <= first.max(pa) && last.min(pb) <= b && b <= pb, "scrolled to {y}: {a}..{b} in {pa}..{pb}");
+            assert!((a, b) == (pa, pb) || pb - pa > 512, "scrolled to {y}: short paragraphs are whole");
             assert_eq!(s.t, t[s.from..s.end()]);
             assert!(s.from < a.max(1) && b <= s.end());
+        }
+        unsafe { DestroyWindow(h) };
+    }
+
+    /// In one long paragraph (a 100,000-character note of a single line), what's on screen
+    /// is read with a little either side, not the whole paragraph at every key.
+    #[test]
+    fn screen_text_of_a_long_paragraph_is_what_shows() {
+        let h = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        setup(h);
+        for body in [format!("T\r{}\rend", "word ".repeat(20_000)), format!("{}\rend", "word ".repeat(20_000))] {
+            set_sel(h, 0, -1);
+            insert_text(h, &body);
+            let t = text(h);
+            let (s, a, b) = screen_text(h);
+            let (first, last) = (char_from_pos(h, 0, 0) as usize, char_from_pos(h, 300, 200) as usize);
+            assert!(a <= first && b >= last, "{a}..{b} holds {first}..{last}");
+            assert!(s.t.len() < last - first + 1100, "{} read for {}", s.t.len(), last - first);
+            assert_eq!(s.t, t[s.from..s.end()]);
+            // The note's first character starts its first paragraph, its box's place.
+            assert_eq!(a, 0);
         }
         unsafe { DestroyWindow(h) };
     }
