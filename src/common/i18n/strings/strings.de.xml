@@ -114,6 +114,10 @@
         <item quantity="one">Notiz schon vorhanden</item>
         <item quantity="other">%d Notizen schon vorhanden</item>
     </plurals>
+    <plurals name="toast_unread">
+        <item quantity="one">Datei nicht lesbar</item>
+        <item quantity="other">%d Dateien nicht lesbar</item>
+    </plurals>
     <string name="toast_undo">Widerrufen</string>
 
     <!-- All Notes -->
@@ -168,6 +172,10 @@
     <plurals name="result_already_here">
         <item quantity="one">%d schon vorhanden</item>
         <item quantity="other">%d schon vorhanden</item>
+    </plurals>
+    <plurals name="result_unread">
+        <item quantity="one">%d nicht lesbar</item>
+        <item quantity="other">%d nicht lesbar</item>
     </plurals>
     <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">

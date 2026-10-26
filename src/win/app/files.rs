@@ -157,15 +157,18 @@ fn pick_folder(owner: HWND, title: &str, start: &str) -> Option<std::path::PathB
 /// its front matter. Anything larger can't be a note.
 const MAX_IMPORT_BYTES: u64 = crate::common::store::MAX_NOTE_CHARS as u64 * 4 + 64 * 1024;
 
-/// What an import did: the notes it brought in, and the files it left out because a note
-/// here says the same already (notes exported from here, brought back).
+/// What an import did: the notes it brought in, the files it left out because a note
+/// here says the same already (notes exported from here, brought back), and those it
+/// couldn't read or that hold more than a note can.
 pub struct Imported {
     pub added: usize,
     pub here: usize,
+    pub unread: usize,
 }
 
 /// Bring in the Markdown and text files the user picks, each as a note, with the Undo
-/// toast. `Err` when none of them could be.
+/// toast, which also says what was here already and what couldn't be read. `Err` when the
+/// files were all empty.
 pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
     let mut buf = vec![0u16; 65536];
     let filter: Vec<u16> = format!("{} (*.md, *.txt)\0*.md;*.markdown;*.txt\0{}\0*.*\0\0", t!("dialog_filter_text"), t!("dialog_filter_all")).encode_utf16().collect();
@@ -203,7 +206,7 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
         save();
     }
     let w = ui(|u| u.worker);
-    let (mut added, mut here, mut empty, mut failed) = (Vec::new(), 0, 0, None);
+    let (mut added, mut here, mut empty, mut failed, mut unread) = (Vec::new(), 0, 0, None, 0);
     // One operation: a file the notes share is copied in once, and one the attachments
     // folder holds already (by name and bytes) is linked there.
     let mut copies = crate::common::attach::Copies::reusing();
@@ -215,12 +218,14 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
         // Checked before it's read: a huge file is never taken into memory whole.
         if std::fs::metadata(&f).is_ok_and(|m| m.len() > MAX_IMPORT_BYTES) {
             failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
+            unread += 1;
             continue;
         }
         let bytes = match std::fs::read(&f) {
             Ok(b) => b,
             Err(e) => {
                 failed = Some(format!("{:?} reading a file ({})", e.kind(), ext(&f)));
+                unread += 1;
                 continue;
             }
         };
@@ -236,6 +241,7 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
         rich::load_markdown(w, text);
         if rich::too_long(w) {
             failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
+            unread += 1;
             continue;
         }
         // Links to files beside it (an export's attachments) come in as attachments.
@@ -267,16 +273,17 @@ pub fn import(owner: HWND) -> Option<Result<Imported, ()>> {
         Some(e) => log::warn(&format!("import: added {n} of {total} files{skipped}; last error: {e}")),
         None => log::info(&format!("import: added {n} of {total} files{skipped}")),
     }
-    if n == 0 && here == 0 {
+    if n == 0 && here == 0 && unread == 0 {
         return Some(Err(()));
     }
     if n > 0 {
         save();
         refresh();
     }
-    // A word in the toast either way: what came in (with Undo), and what was here already.
-    imported(added, here);
-    Some(Ok(Imported { added: n, here }))
+    // A word in the toast either way: what came in (with Undo), what was here already, and
+    // what couldn't be read (too long for a note, or not to be read at all).
+    imported(added, here, unread);
+    Some(Ok(Imported { added: n, here, unread }))
 }
 
 /// The startup task declared in the MSIX manifest (`packaging/msix/AppxManifest.xml`).

@@ -114,6 +114,10 @@
         <item quantity="one">Note déjà là</item>
         <item quantity="other">%d notes déjà là</item>
     </plurals>
+    <plurals name="toast_unread">
+        <item quantity="one">Fichier illisible</item>
+        <item quantity="other">%d fichiers illisibles</item>
+    </plurals>
     <string name="toast_undo">Annuler</string>
 
     <!-- All Notes -->
@@ -168,6 +172,10 @@
     <plurals name="result_already_here">
         <item quantity="one">%d déjà là</item>
         <item quantity="other">%d déjà là</item>
+    </plurals>
+    <plurals name="result_unread">
+        <item quantity="one">%d illisible</item>
+        <item quantity="other">%d illisibles</item>
     </plurals>
     <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">

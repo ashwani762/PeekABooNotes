@@ -114,6 +114,10 @@
         <item quantity="one">La nota ya estaba</item>
         <item quantity="other">Las %d notas ya estaban</item>
     </plurals>
+    <plurals name="toast_unread">
+        <item quantity="one">No se pudo leer el archivo</item>
+        <item quantity="other">No se pudieron leer %d archivos</item>
+    </plurals>
     <string name="toast_undo">Deshacer</string>
 
     <!-- All Notes -->
@@ -168,6 +172,10 @@
     <plurals name="result_already_here">
         <item quantity="one">%d ya estaba</item>
         <item quantity="other">%d ya estaban</item>
+    </plurals>
+    <plurals name="result_unread">
+        <item quantity="one">%d no se pudo leer</item>
+        <item quantity="other">%d no se pudieron leer</item>
     </plurals>
     <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">

@@ -124,6 +124,10 @@
         <item quantity="one">Note already here</item>
         <item quantity="other">%d notes already here</item>
     </plurals>
+    <plurals name="toast_unread">
+        <item quantity="one">File couldn't be read</item>
+        <item quantity="other">%d files couldn't be read</item>
+    </plurals>
     <string name="toast_undo">Undo</string>
 
     <!-- All Notes -->
@@ -178,6 +182,10 @@
     <plurals name="result_already_here">
         <item quantity="one">%d already here</item>
         <item quantity="other">%d already here</item>
+    </plurals>
+    <plurals name="result_unread">
+        <item quantity="one">%d couldn't be read</item>
+        <item quantity="other">%d couldn't be read</item>
     </plurals>
     <!-- Both results of an import: "3 imported, 2 already here" -->
     <string name="result_and">%1$s, %2$s</string>

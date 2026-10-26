@@ -573,17 +573,31 @@ fn show_result(hwnd: HWND, k: Key, outcome: app::Outcome, plural: &str) {
     show_text(hwnd, k, r.is_ok(), text);
 }
 
-/// An import's outcome on its button: how many came in, and how many were left out as
-/// notes here already ("3 imported, 2 already here").
+/// An import's outcome on its button: how many came in, how many were left out as notes
+/// here already, and how many couldn't be read ("3 imported, 2 already here, 1 couldn't be
+/// read"). Files that couldn't be read, and nothing else, are a failure.
 fn show_imported(hwnd: HWND, outcome: Option<Result<app::Imported, ()>>) {
     let Some(r) = outcome else { return };
-    let text = match &r {
-        Ok(app::Imported { added, here: 0 }) => tn!("result_imported", *added),
-        Ok(app::Imported { added: 0, here }) => tn!("result_already_here", *here),
-        Ok(app::Imported { added, here }) => t!("result_and", tn!("result_imported", *added), tn!("result_already_here", *here)),
-        Err(()) => t!("result_failed").to_string(),
+    let (ok, text) = match &r {
+        Ok(i) => (i.added + i.here > 0, imported_text(i)),
+        Err(()) => (false, t!("result_failed").to_string()),
     };
-    show_text(hwnd, Key::Import, r.is_ok(), text);
+    show_text(hwnd, Key::Import, ok, text);
+}
+
+fn imported_text(i: &app::Imported) -> String {
+    let mut parts = Vec::new();
+    // "0 imported" only when nothing else is said.
+    if i.added > 0 || i.here + i.unread == 0 {
+        parts.push(tn!("result_imported", i.added));
+    }
+    if i.here > 0 {
+        parts.push(tn!("result_already_here", i.here));
+    }
+    if i.unread > 0 {
+        parts.push(tn!("result_unread", i.unread));
+    }
+    parts.into_iter().reduce(|a, b| t!("result_and", a, b)).unwrap_or_default()
 }
 
 /// Connect's outcome for assistant app `i`, from its own command (Claude Code's).
@@ -1366,5 +1380,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             _ => {}
         }
         DefWindowProcW(hwnd, msg, wp, lp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Import's button says what came in, what was here already and what couldn't be read.
+    #[test]
+    fn import_button_says_what_couldnt_be_read() {
+        crate::common::i18n::init("en");
+        let said = |added, here, unread| imported_text(&app::Imported { added, here, unread });
+        assert_eq!(said(3, 0, 0), "3 imported");
+        assert_eq!(said(3, 2, 0), "3 imported, 2 already here");
+        assert_eq!(said(3, 0, 1), "3 imported, 1 couldn't be read");
+        assert_eq!(said(1, 2, 1), "1 imported, 2 already here, 1 couldn't be read");
+        assert_eq!(said(0, 2, 0), "2 already here");
+        assert_eq!(said(0, 0, 2), "2 couldn't be read");
     }
 }

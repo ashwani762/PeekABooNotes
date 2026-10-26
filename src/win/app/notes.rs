@@ -342,9 +342,10 @@ pub enum Undo {
     Archived(Vec<u64>),
     /// Notes restored from the archive.
     Restored(Vec<u64>),
-    /// Notes an import brought in, and how many files it left out as notes here already.
-    /// Each import is one of its own.
-    Imported(Vec<u64>, usize),
+    /// Notes an import brought in, how many files it left out as notes here already, and
+    /// how many it couldn't read (or held more than a note can). Each import is one of its
+    /// own.
+    Imported(Vec<u64>, usize, usize),
 }
 
 impl crate::common::undo::Action for Undo {
@@ -374,9 +375,7 @@ impl Undo {
             Undo::Deleted(v) => tn!("toast_deleted", v.len()),
             Undo::Archived(v) => tn!("toast_archived", v.len()),
             Undo::Restored(v) => tn!("toast_restored", v.len()),
-            Undo::Imported(v, 0) => tn!("toast_imported", v.len()),
-            // "1 note imported, 2 already here"
-            Undo::Imported(v, here) => t!("result_and", tn!("toast_imported_some", v.len()), tn!("result_already_here", *here)),
+            Undo::Imported(v, here, unread) => import_said(v.len(), *here, *unread),
         }
     }
 
@@ -417,17 +416,35 @@ pub fn archive(ids: &[u64]) {
     done(Undo::Archived(away));
 }
 
-/// Notes `ids` were just imported, and `here` files left out as notes here already: the
-/// toast offers to take them out again, and says what was left out. With none brought in,
-/// it just says so.
-pub(super) fn imported(ids: Vec<u64>, here: usize) {
+/// What an import's toast says: the notes it brought in, the files it left out as notes
+/// here already, and those it couldn't read ("1 note imported, 2 already here, 1 couldn't
+/// be read"); one of them alone is said in full ("3 notes already here").
+fn import_said(added: usize, here: usize, unread: usize) -> String {
+    let alone = |n: usize| n == added + here + unread;
+    let mut parts = Vec::new();
+    if added > 0 {
+        parts.push(if alone(added) { tn!("toast_imported", added) } else { tn!("toast_imported_some", added) });
+    }
+    if here > 0 {
+        parts.push(if alone(here) { tn!("toast_already_here", here) } else { tn!("result_already_here", here) });
+    }
+    if unread > 0 {
+        parts.push(if alone(unread) { tn!("toast_unread", unread) } else { tn!("result_unread", unread) });
+    }
+    parts.into_iter().reduce(|a, b| t!("result_and", a, b)).unwrap_or_default()
+}
+
+/// Notes `ids` were just imported, `here` files left out as notes here already and
+/// `unread` ones that couldn't be read: the toast offers to take the notes out again, and
+/// says what was left out. With none brought in, it just says so.
+pub(super) fn imported(ids: Vec<u64>, here: usize, unread: usize) {
     if ids.is_empty() {
-        if here > 0 {
-            toast::notice(tn!("toast_already_here", here));
+        if here + unread > 0 {
+            toast::notice(import_said(0, here, unread));
         }
         return;
     }
-    done(Undo::Imported(ids, here));
+    done(Undo::Imported(ids, here, unread));
 }
 
 /// Bring notes back from the archive, to their places in the deck, with the Undo toast,
@@ -508,7 +525,7 @@ pub fn undo() {
             store_mut(|s| s.put_back(v));
             ids
         }
-        Undo::Imported(v, _) => {
+        Undo::Imported(v, ..) => {
             v.iter().for_each(|&id| put_away(id));
             let gone: Vec<Note> = store_mut(|s| v.iter().filter_map(|id| s.remove(*id)).map(|(_, n)| n).collect());
             save();
@@ -803,16 +820,23 @@ mod tests {
         assert_eq!(at(cascade(low, &[(1500, 630)], 24, work, false)), (1500, 630));
     }
 
-    /// An import's toast says what was left out as notes here already, beside what came in.
+    /// An import's toast says what was left out as notes here already, and what couldn't be
+    /// read, beside what came in.
     #[test]
     fn an_import_toast_says_what_was_here_already() {
         crate::common::i18n::init("en");
-        assert_eq!(Undo::Imported(vec![1], 0).message(), "Note imported");
-        assert_eq!(Undo::Imported(vec![1, 2, 3], 0).message(), "3 notes imported");
-        assert_eq!(Undo::Imported(vec![1], 2).message(), "1 note imported, 2 already here");
-        assert_eq!(Undo::Imported(vec![1, 2], 1).message(), "2 notes imported, 1 already here");
-        assert_eq!(tn!("toast_already_here", 1), "Note already here");
-        assert_eq!(tn!("toast_already_here", 3), "3 notes already here");
+        assert_eq!(Undo::Imported(vec![1], 0, 0).message(), "Note imported");
+        assert_eq!(Undo::Imported(vec![1, 2, 3], 0, 0).message(), "3 notes imported");
+        assert_eq!(Undo::Imported(vec![1], 2, 0).message(), "1 note imported, 2 already here");
+        assert_eq!(Undo::Imported(vec![1, 2], 1, 0).message(), "2 notes imported, 1 already here");
+        assert_eq!(Undo::Imported(vec![1, 2], 0, 1).message(), "2 notes imported, 1 couldn't be read");
+        assert_eq!(Undo::Imported(vec![1], 2, 3).message(), "1 note imported, 2 already here, 3 couldn't be read");
+        // Nothing came in: what was left out, alone or together.
+        assert_eq!(import_said(0, 1, 0), "Note already here");
+        assert_eq!(import_said(0, 3, 0), "3 notes already here");
+        assert_eq!(import_said(0, 0, 1), "File couldn't be read");
+        assert_eq!(import_said(0, 0, 2), "2 files couldn't be read");
+        assert_eq!(import_said(0, 2, 1), "2 already here, 1 couldn't be read");
     }
 
     /// The sweep's copy of a note leaves its pictures' data out, and every link in.

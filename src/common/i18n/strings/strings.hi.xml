@@ -114,6 +114,10 @@
         <item quantity="one">नोट पहले से है</item>
         <item quantity="other">%d नोट पहले से हैं</item>
     </plurals>
+    <plurals name="toast_unread">
+        <item quantity="one">फ़ाइल पढ़ी नहीं जा सकी</item>
+        <item quantity="other">%d फ़ाइलें पढ़ी नहीं जा सकीं</item>
+    </plurals>
     <string name="toast_undo">पूर्ववत करें</string>
 
     <!-- All Notes -->
@@ -168,6 +172,10 @@
     <plurals name="result_already_here">
         <item quantity="one">%d पहले से है</item>
         <item quantity="other">%d पहले से हैं</item>
+    </plurals>
+    <plurals name="result_unread">
+        <item quantity="one">%d पढ़ी नहीं जा सकी</item>
+        <item quantity="other">%d पढ़ी नहीं जा सकीं</item>
     </plurals>
     <string name="result_and">%1$s, %2$s</string>
     <plurals name="result_exported">
