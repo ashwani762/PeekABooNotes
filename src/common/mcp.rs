@@ -233,7 +233,7 @@ fn id_arg(args: &Value) -> Result<u64, String> {
 
 fn text_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str, String> {
     let s = args.get(name).and_then(Value::as_str).ok_or_else(|| format!("Give \"{name}\" as text."))?;
-    if s.chars().count() > crate::common::store::MAX_NOTE_CHARS {
+    if s.encode_utf16().count() > crate::common::store::MAX_NOTE_CHARS {
         return Err(too_long());
     }
     Ok(s)
@@ -362,6 +362,16 @@ pub fn handle(line: &str, notes: &mut dyn Notes) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The limit counts as the editor does, in UTF-16 units: an emoji is two.
+    #[test]
+    fn the_limit_counts_as_the_editor_does() {
+        let max = crate::common::store::MAX_NOTE_CHARS;
+        let fits = serde_json::json!({ "markdown": "\u{1F600}".repeat(max / 2) });
+        let over = serde_json::json!({ "markdown": "\u{1F600}".repeat(max / 2 + 1) });
+        assert!(super::text_arg(&fits, "markdown").is_ok());
+        assert!(super::text_arg(&over, "markdown").is_err());
+    }
 
     #[test]
     fn batches_and_unknown_statuses_get_errors() {

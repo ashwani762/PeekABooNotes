@@ -209,7 +209,7 @@ pub fn import(owner: HWND) -> Outcome {
             empty += 1;
             continue;
         }
-        if text.chars().count() > crate::common::store::MAX_NOTE_CHARS {
+        if text.encode_utf16().count() > crate::common::store::MAX_NOTE_CHARS {
             failed = Some(format!("a file ({}) longer than a note holds", ext(&f)));
             continue;
         }

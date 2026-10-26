@@ -62,7 +62,7 @@ Settings › Deck › Show the deck on (shown only with more than one display, o
 
 ### Limits
 
-A note holds up to 100,000 characters (`MAX_NOTE_CHARS` in `store.rs`): typing and pasting stop there and the footer says the note is full; import skips longer files and assistants are told the text is too long. A note saved longer (from an older version) opens whole and just can't grow. In the editor the count is of what the note shows: RichEdit's own limit (`rich::limit_length`) lets through on top what it holds out of sight (named links' `HYPERLINK "url"` instructions, table row marks), and is set again after each burst of edits as links and tables come and go.
+A note holds up to 100,000 characters (`MAX_NOTE_CHARS` in `store.rs`): typing and pasting stop there and the footer says the note is full; import skips longer files and assistants are told the text is too long. All of them count as RichEdit does, in UTF-16 units (most emoji are two). A note saved longer (from an older version) opens whole and just can't grow. In the editor the count is of what the note shows: RichEdit's own limit (`rich::limit_length`) lets through on top what it holds out of sight (named links' `HYPERLINK "url"` instructions, table row marks), and is set again after each burst of edits as links and tables come and go.
 
 Measured on the release build with 2,003 notes in a 2.4 MB `notes.json`: start to the deck in 0.16 s, a working set of about 5 MB at rest (once the app has trimmed it, with no note, All Notes or Settings open; the memory it has committed is more), All Notes open in under a second, a 3.6 MB save in 6 ms.
 

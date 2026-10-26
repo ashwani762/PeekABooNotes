@@ -582,7 +582,7 @@ impl mcp::Notes for WinNotes {
     fn write(&mut self, id: u64, markdown: &str, append: bool) -> Result<Value, String> {
         flush_open(id);
         let n = store(|s| s.note(id).cloned()).ok_or_else(|| missing(id))?;
-        if append && n.text.chars().count() + markdown.chars().count() > crate::common::store::MAX_NOTE_CHARS {
+        if append && n.text.encode_utf16().count() + markdown.encode_utf16().count() > crate::common::store::MAX_NOTE_CHARS {
             return Err(crate::common::mcp::too_long());
         }
         let w = ui(|u| u.worker);
