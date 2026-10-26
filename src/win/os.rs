@@ -23,6 +23,8 @@ use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath};
 use crate::common::util::LocalTime;
 use crate::win::util::{from_wide, wide};
 
+// Unused by tests, which keep their data in a temporary folder (util::data_dir).
+#[cfg_attr(test, allow(dead_code))]
 pub fn documents_dir() -> PathBuf {
     unsafe {
         let mut p: *mut u16 = std::ptr::null_mut();
