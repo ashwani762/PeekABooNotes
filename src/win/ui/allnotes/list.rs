@@ -23,6 +23,12 @@ pub(super) fn rebuild(l: &mut Lib) {
     let q = crate::common::search::Query::new(&l.query);
     let searching = !l.query.trim().is_empty();
     let mode = l.mode;
+    // When the selected note goes (archived, deleted), select its neighbour, not the top.
+    let was = primary_index(l);
+    let prev: std::collections::HashMap<u64, usize> = if editor_focused(l) { l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect() } else { Default::default() };
+    // The last list's titles and previews, taken again for the notes they're still right
+    // for: a search keystroke made every row anew (a preview is most of a row's cost).
+    let mut last: std::collections::HashMap<u64, Row> = std::mem::take(&mut l.rows).into_iter().map(|r| (r.id, r)).collect();
     let mut rows: Vec<Row> = app::store(|s| {
         s.d.notes
             .iter()
@@ -31,9 +37,10 @@ pub(super) fn rebuild(l: &mut Lib) {
                 2 => true,
                 _ => !n.archived,
             })
-            .filter_map(|n| row_of(n, &q, searching))
+            .filter_map(|n| row_again(n, &q, searching, last.remove(&n.id)))
             .collect()
     });
+    drop(last);
     if searching && !editor_focused(l) {
         // Best matches first; among equals, the most recently edited.
         rows.sort_by(|a, b| b.score.cmp(&a.score).then(b.updated.cmp(&a.updated)));
@@ -41,7 +48,6 @@ pub(super) fn rebuild(l: &mut Lib) {
         // Notes: the deck's own order, which you arrange by dragging rows here.
         rows.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
     } else if editor_focused(l) {
-        let prev: std::collections::HashMap<u64, usize> = l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
         rows.sort_by_key(|r| prev.get(&r.id).copied().unwrap_or(0));
     } else {
         rows.sort_by_key(|r| std::cmp::Reverse(r.updated));
@@ -52,8 +58,6 @@ pub(super) fn rebuild(l: &mut Lib) {
     } else {
         0
     };
-    // When the selected note goes (archived, deleted), select its neighbour, not the top.
-    let was = primary_index(l);
     l.rows = rows;
     l.sel.retain(|id| l.rows.iter().any(|r| r.id == *id));
     if l.sel.is_empty() {
@@ -77,7 +81,17 @@ pub(super) fn rebuild(l: &mut Lib) {
 
 /// Note `n`'s row, or None when a search is on and it doesn't match.
 pub(super) fn row_of(n: &Note, q: &crate::common::search::Query, searching: bool) -> Option<Row> {
-    let title = without_objects(title_of(&n.text));
+    row_again(n, q, searching, None)
+}
+
+/// `row_of`, with the title and preview of `last` (the note's row in the last list) when
+/// they're still the note's: made the same way from the same text (as long, at the same
+/// last edit). The rest is worked out again: the match, and the time, which moves on.
+pub(super) fn row_again(n: &Note, q: &crate::common::search::Query, searching: bool, last: Option<Row>) -> Option<Row> {
+    let (title, body) = match last.filter(|r| r.updated == n.updated && r.text_len == n.text.len()) {
+        Some(r) => (r.title, Some(r.body)),
+        None => (without_objects(title_of(&n.text)), None),
+    };
     let m = if searching {
         let rest = search_rest(&n.text);
         let m = q.score(&title, &rest)?;
@@ -92,7 +106,8 @@ pub(super) fn row_of(n: &Note, q: &crate::common::search::Query, searching: bool
         title,
         off_deck: n.off_deck,
         order: n.order,
-        body: without_objects(body_of(&n.text)),
+        body: body.unwrap_or_else(|| without_objects(body_of(&n.text))),
+        text_len: n.text.len(),
         time: relative_time(n.updated),
         created: n.created,
         updated: n.updated,

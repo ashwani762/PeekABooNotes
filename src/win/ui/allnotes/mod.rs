@@ -121,6 +121,8 @@ struct Row {
     off_deck: bool,
     order: i64,
     body: String,
+    /// How long the note's text was when `title` and `body` were made from it.
+    text_len: usize,
     time: String,
     created: i64,
     updated: i64,
@@ -1342,6 +1344,34 @@ mod tests {
         notes
     }
 
+    /// Rows that take the last list's title and preview come out as rows made anew, at
+    /// every keystroke of a search and back, and a note edited since gets its own.
+    #[test]
+    fn rows_taken_again_are_as_made() {
+        crate::common::i18n::init("en");
+        let mut notes: Vec<crate::common::store::Note> = (0..60)
+            .map(|i| {
+                let text = format!("{} plan {i}\n- [ ] book the {} hotel\nrelease notes {}\n", ["Trip", "Work", "Café"][i % 3], ["station", "airport"][i % 2], i * 7);
+                crate::common::store::Note { id: i as u64 + 1, text, updated: 1_000 + i as i64, ..Default::default() }
+            })
+            .collect();
+        let row = |r: &Row| (r.id, r.title.clone(), r.body.clone(), r.time.clone(), r.score, r.hits.clone(), r.snippet.clone(), r.snippet_hits.clone());
+        let mut last: std::collections::HashMap<u64, Row> = notes.iter().filter_map(|n| row_of(n, &crate::common::search::Query::new(""), false)).map(|r| (r.id, r)).collect();
+        for (k, typed) in ["r", "re", "rel", "rele", "rel", "", "c", "caf", "café", "x", ""].into_iter().enumerate() {
+            if k == 7 {
+                // Edited while searching: its row is made from its new text.
+                notes[3].text = "Café edited\nnew body".into();
+                notes[3].updated += 1;
+            }
+            let q = crate::common::search::Query::new(typed);
+            let searching = !typed.trim().is_empty();
+            let fresh: Vec<_> = notes.iter().filter_map(|n| row_of(n, &q, searching)).map(|r| row(&r)).collect();
+            let kept: Vec<Row> = notes.iter().filter_map(|n| row_again(n, &q, searching, last.remove(&n.id))).collect();
+            assert_eq!(kept.iter().map(row).collect::<Vec<_>>(), fresh, "typed {typed:?}");
+            last = kept.into_iter().map(|r| (r.id, r)).collect();
+        }
+    }
+
     /// Timing (run with --ignored --nocapture): what each keystroke of a search costs over
     /// 500 notes of about a kilobyte, mixed words and a few accents: all the rows, and the
     /// scoring alone.
@@ -1370,14 +1400,20 @@ mod tests {
             })
             .collect();
         let typed = "relaese chk";
-        let (mut rows, mut scoring) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        let (mut rows, mut again, mut scoring) = (std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO);
         let prepared: Vec<(String, String)> = notes.iter().map(|n| (without_objects(title_of(&n.text)), search_rest(&n.text))).collect();
         let mut found = 0;
+        // The list as it was before the search: its rows are taken again.
+        let mut last: std::collections::HashMap<u64, Row> = notes.iter().filter_map(|n| row_of(n, &crate::common::search::Query::new(""), false)).map(|r| (r.id, r)).collect();
         for k in 1..=typed.len() {
             let q = crate::common::search::Query::new(&typed[..k]);
             let t0 = Instant::now();
             found += std::hint::black_box(notes.iter().filter_map(|n| row_of(n, &q, true)).collect::<Vec<_>>()).len();
             rows += t0.elapsed();
+            let t0 = Instant::now();
+            let kept: Vec<Row> = notes.iter().filter_map(|n| row_again(n, &q, true, last.remove(&n.id))).collect();
+            again += t0.elapsed();
+            last = kept.into_iter().map(|r| (r.id, r)).collect();
             let t0 = Instant::now();
             for (title, rest) in &prepared {
                 std::hint::black_box(q.score(title, rest));
@@ -1385,7 +1421,7 @@ mod tests {
             scoring += t0.elapsed();
         }
         let n = typed.len() as u32;
-        eprintln!("PROBE search over 500 notes, a keystroke: rows {:?}, scoring alone {:?} ({found} rows over {n} keystrokes)", rows / n, scoring / n);
+        eprintln!("PROBE search over 500 notes, a keystroke: rows made anew {:?}, rows with the last list's titles and previews {:?}, scoring alone {:?} ({found} rows over {n} keystrokes)", rows / n, again / n, scoring / n);
     }
 
     /// Timing (run with --ignored --nocapture): what one pause in typing costs with 500
