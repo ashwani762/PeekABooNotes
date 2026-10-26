@@ -6,9 +6,14 @@
 //! Ctrl+Alt is also AltGr, and on many keyboards AltGr and a letter types a character: €
 //! with E on German, French and Spanish ones, ą ę ł ń ó with A, E, L, N and O on Polish
 //! ones. A hotkey would swallow that character in every app, so a shortcut whose keys type
-//! one on any of the user's keyboard layouts is left unregistered, and the layouts are
-//! looked at again when they change. A shortcut another app already has can't be
-//! registered either. Both are logged, and Settings shows them as off.
+//! one that's written every day is left unregistered: any symbol (€), and letters on a
+//! layout for another language than English. An English layout's extra accented letters
+//! (English (India) types ā ē ō ṇ ḥ with AltGr) are rare in English text, so there the
+//! shortcut wins. The layouts are looked at again when they change. A shortcut another app
+//! already has can't be registered either. Both are logged, and Settings shows them as off.
+//!
+//! Stepping aside for other languages' keyboards is a beta: only English layouts (US,
+//! English (India)) have been tried on a real machine.
 
 use std::cell::RefCell;
 
@@ -61,6 +66,20 @@ fn typed(n: i32, buf: &[u16]) -> bool {
     n < 0 || buf.iter().take(n.max(0) as usize).any(|&c| c >= 0x20 && c != 0x7F)
 }
 
+/// Whether what was typed is only letters (with any combining marks on them), as opposed
+/// to a symbol such as €.
+fn only_letters(n: i32, buf: &[u16]) -> bool {
+    n > 0
+        && char::decode_utf16(buf.iter().take(n as usize).copied())
+            .all(|c| c.is_ok_and(|c| c.is_alphabetic() || ('\u{300}'..='\u{36F}').contains(&c)))
+}
+
+/// Whether a character typed with AltGr takes the shortcut's place: a symbol always does;
+/// a letter does unless the layout is for English (`english`), whose text rarely needs it.
+fn takes_place(n: i32, buf: &[u16], english: bool) -> bool {
+    typed(n, buf) && !(english && only_letters(n, buf))
+}
+
 /// Whether Ctrl+Alt (AltGr) and key `vk` types a character on keyboard layout `hkl`.
 fn types_char(hkl: HKL, vk: u8) -> bool {
     let mut keys = [0u8; 256];
@@ -72,7 +91,9 @@ fn types_char(hkl: HKL, vk: u8) -> bool {
         let scan = MapVirtualKeyExW(vk as u32, MAPVK_VK_TO_VSC, hkl);
         // Flag 4: leave the keyboard's state (a dead key pending) as it is.
         let n = ToUnicodeEx(vk as u32, scan, keys.as_ptr(), buf.as_mut_ptr(), buf.len() as i32, 4, hkl);
-        typed(n, &buf)
+        // The layout's language is the low word's primary language (LANG_ENGLISH = 9).
+        let english = (hkl as usize & 0x3FF) == 0x09;
+        takes_place(n, &buf, english)
     }
 }
 
@@ -196,6 +217,23 @@ mod tests {
         assert!(!typed(1, &[0x007F]));
         assert!(typed(2, &[0x0001, 0x00E9]), "anything printable in what was typed");
         assert!(!typed(1, &[0x0005, 0x00E9]), "only what was typed counts");
+    }
+
+    #[test]
+    fn english_layouts_keep_their_shortcuts_over_extra_letters() {
+        // English (India): AltGr+A types ā, AltGr+L types l with a ring below.
+        assert!(!takes_place(1, &[0x0101], true));
+        assert!(!takes_place(2, &[0x006C, 0x0325], true));
+        // A symbol always wins, English layout or not.
+        assert!(takes_place(1, &[0x20AC], true));
+        assert!(takes_place(1, &[0x20AC], false));
+        // Polish: ą is everyday writing.
+        assert!(takes_place(1, &[0x0105], false));
+        // A dead key types the next character, whatever it is.
+        assert!(takes_place(-1, &[0x00B4], true));
+        // Nothing typed, or a control code: no clash.
+        assert!(!takes_place(0, &[0; 8], false));
+        assert!(!takes_place(1, &[0x0005], false));
     }
 
     #[test]

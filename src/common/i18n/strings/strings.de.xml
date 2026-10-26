@@ -276,7 +276,7 @@
     <string name="shortcut_deck_letter">Nächste Karte mit diesem Anfangsbuchstaben</string>
     <string name="shortcut_deck_menu">Kartenmenü</string>
     <string name="shortcut_deck_leave">Zurück zum vorigen Fenster</string>
-    <string name="shortcut_off_types">Aus: Diese Tasten schreiben auf deiner Tastatur ein Zeichen</string>
+    <string name="shortcut_off_types">Aus (Beta): Diese Tasten schreiben auf deiner Tastatur ein Zeichen</string>
     <string name="shortcut_off_taken">Aus: Ein anderes Programm nutzt diese Tasten</string>
 
     <!-- Settings: Data -->

@@ -276,7 +276,7 @@
     <string name="shortcut_deck_letter">Carte suivante commençant par cette lettre</string>
     <string name="shortcut_deck_menu">Menu de la carte</string>
     <string name="shortcut_deck_leave">Revenir à la fenêtre précédente</string>
-    <string name="shortcut_off_types">Désactivé : ces touches tapent un caractère sur votre clavier</string>
+    <string name="shortcut_off_types">Désactivé (bêta) : ces touches tapent un caractère sur votre clavier</string>
     <string name="shortcut_off_taken">Désactivé : une autre application utilise ces touches</string>
 
     <!-- Settings: Data -->
