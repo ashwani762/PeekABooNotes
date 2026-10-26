@@ -484,12 +484,7 @@ fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, o
             // A mark stays open across the link only when all of its text has it: the
             // others close before its `[` and open again inside, and those opened inside
             // close before its `]` (`[**bold link**](url)`, not `[**bold link](url)**`).
-            let mut across = cur;
-            for k in name..shown_end {
-                if !blank(t[k]) && fx.of[k - fx.from] & CFM_HIDDEN == 0 {
-                    across = both(across, marks_at(fx, k, 1, true));
-                }
-            }
+            let across = (name..shown_end).filter(|&k| !blank(t[k]) && fx.of[k - fx.from] & CFM_HIDDEN == 0).fold(cur, |m, k| both(m, marks_at(fx, k, 1, true)));
             close_marks(out, cur, across);
             out.push('[');
             let inside = marks(fx, h, t, name, shown_end, across, out, true);
