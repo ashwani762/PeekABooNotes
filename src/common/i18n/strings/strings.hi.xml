@@ -23,6 +23,7 @@
     <string name="menu_new_note">नया नोट</string>
     <string name="menu_all_notes">सभी नोट्स</string>
     <string name="menu_archive">संग्रह</string>
+    <string name="action_archive">संग्रहित करें</string>
     <string name="menu_reopen_last">आख़िरी नोट फिर खोलें</string>
     <string name="menu_undo_delete">हटाना पूर्ववत करें</string>
     <string name="menu_undo_archive">संग्रहित करना पूर्ववत करें</string>

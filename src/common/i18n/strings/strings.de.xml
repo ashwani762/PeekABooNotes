@@ -23,6 +23,7 @@
     <string name="menu_new_note">Neue Notiz</string>
     <string name="menu_all_notes">Alle Notizen</string>
     <string name="menu_archive">Archiv</string>
+    <string name="action_archive">Archivieren</string>
     <string name="menu_reopen_last">Letzte Notiz wieder öffnen</string>
     <string name="menu_undo_delete">Löschen widerrufen</string>
     <string name="menu_undo_archive">Archivieren widerrufen</string>

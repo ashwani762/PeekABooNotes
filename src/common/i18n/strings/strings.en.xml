@@ -33,6 +33,7 @@
     <string name="menu_new_note">New Note</string>
     <string name="menu_all_notes">All Notes</string>
     <string name="menu_archive">Archive</string>
+    <string name="action_archive">Archive</string>
     <string name="menu_reopen_last">Reopen Last Note</string>
     <string name="menu_undo_delete">Undo Delete</string>
     <string name="menu_undo_archive">Undo Archive</string>

@@ -109,7 +109,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                     keys(t!("shortcut_link"), &["ctrl", "K"]),
                     keys(t!("shortcut_next_color"), &["ctrl", "."]),
                     keys(t!("shortcut_keep_on_top"), &["ctrl", "shift", "P"]),
-                    keys(t!("menu_archive"), &["ctrl", "shift", "A"]),
+                    keys(t!("action_archive"), &["ctrl", "shift", "A"]),
                     keys(t!("menu_delete"), &["ctrl", "shift", "del"]),
                     keys(t!("shortcut_prev_next"), &["ctrl", "[", "/", "]"]),
                 ],
@@ -119,7 +119,7 @@ pub(super) fn page(i: usize) -> Vec<Group> {
                 header: Some(t!("menu_all_notes")),
                 rows: vec![
                     keys(t!("shortcut_search"), &["ctrl", "F"]),
-                    keys(t!("menu_archive"), &["ctrl", "shift", "A"]),
+                    keys(t!("action_archive"), &["ctrl", "shift", "A"]),
                     keys(t!("menu_delete"), &["del", "/", "ctrl", "shift", "del"]),
                     keys(t!("shortcut_undo_toast"), &["ctrl", "Z"]),
                     keys(t!("shortcut_leave_text"), &["ctrl", "tab"]),

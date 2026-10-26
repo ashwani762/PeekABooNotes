@@ -65,7 +65,7 @@ pub(super) fn header_tip(l: &Lib, hit: Hit) {
     {
         let restore = l.rows.iter().filter(|r| l.sel.contains(&r.id)).all(|r| r.archived);
         let (label, keys) = match hit {
-            Hit::Archive => (if restore { t!("menu_restore") } else { t!("menu_archive") }, ["ctrl", "shift", "A"]),
+            Hit::Archive => (if restore { t!("menu_restore") } else { t!("action_archive") }, ["ctrl", "shift", "A"]),
             _ => (t!("menu_delete"), ["ctrl", "shift", "del"]),
         };
         tooltip::hover(l.hwnd, r, label, &crate::common::i18n::keys(&keys));

@@ -83,7 +83,7 @@ pub fn note_menu(id: u64, in_note: bool) -> Vec<menu::Item> {
         v.push(menu::check(NC_DECK, t!("menu_show_in_deck"), "", !off_deck));
     }
     v.push(menu::submenu(t!("menu_previous_versions"), IC_HISTORY, move || versions_items(id)));
-    v.push(action(NC_ARCHIVE, if archived { t!("menu_restore") } else { t!("menu_archive") }, &if archived { String::new() } else { crate::common::i18n::keys(&["ctrl", "shift", "A"]) }, IC_ARCHIVE));
+    v.push(action(NC_ARCHIVE, if archived { t!("menu_restore") } else { t!("action_archive") }, &if archived { String::new() } else { crate::common::i18n::keys(&["ctrl", "shift", "A"]) }, IC_ARCHIVE));
     v.push(danger(NC_DELETE, t!("menu_delete"), &crate::common::i18n::keys(&["ctrl", "shift", "del"]), IC_DELETE));
     if in_note {
         v.push(Item::Separator);
