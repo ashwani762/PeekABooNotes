@@ -76,6 +76,15 @@ pub fn write(m: &Meta) -> String {
     if lines.is_empty() { String::new() } else { format!("---\n{}\n---\n", lines.join("\n")) }
 }
 
+/// A file of `body` with `m`'s block on top. `split` takes a blank line after the block as
+/// the gap a hand-written file leaves, so a note that starts with an empty line gets one
+/// such gap more, to come back with it.
+pub fn join(m: &Meta, body: &str) -> String {
+    let block = write(m);
+    let gap = if !block.is_empty() && body.lines().next().is_some_and(|l| l.trim().is_empty()) { "\n" } else { "" };
+    format!("{block}{gap}{body}")
+}
+
 /// The front matter at the top of `text`, and the text after it. Only a block of this
 /// app's own keys with values it understands counts: another program's front matter (tags,
 /// aliases) or a note that just starts with a `---` line comes back whole, as plain text.
@@ -283,7 +292,13 @@ mod tests {
         let plain = Meta { color: Some(0), ..Meta::default() };
         assert_eq!(write(&plain), "---\ncolor: Yellow\n---\n");
         assert_eq!(write(&Meta::default()), "");
-        assert_eq!(split("---\ncolor: Yellow\n---\nT"), (Some(plain), "T"));
+        assert_eq!(split("---\ncolor: Yellow\n---\nT"), (Some(plain.clone()), "T"));
+        // A note that starts with an empty line comes back with it.
+        for body in ["Title\nbody", "\nTitle on line two  \nbody", "\n\nTwo down", "  \nspaces first", ""] {
+            assert_eq!(split(&join(&plain, body)), (Some(plain.clone()), body), "{body:?}");
+        }
+        assert_eq!(join(&plain, "T"), "---\ncolor: Yellow\n---\nT", "nothing between as before");
+        assert_eq!(join(&Meta::default(), "\nT"), "\nT");
     }
 
     #[test]

@@ -66,7 +66,7 @@ pub(super) fn write_markdown(dir: &std::path::Path, ids: &[u64]) -> (usize, Opti
             k += 1;
         }
         // The state the Markdown can't hold goes in front matter, for import to put back.
-        let md = frontmatter::write(&meta) + &crate::common::store::hard_breaks(&export_attachments(&md, dir));
+        let md = frontmatter::join(&meta, &crate::common::store::hard_breaks(&export_attachments(&md, dir)));
         match std::fs::write(dir.join(name), md + "\n") {
             Ok(()) => written += 1,
             Err(e) => failed = Some(e),
