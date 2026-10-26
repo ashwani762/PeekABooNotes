@@ -607,15 +607,16 @@ pub fn unwrap(h: HWND, cp: i32) -> Option<(i32, i32)> {
 
 /// How far the quote `row` is indented under a list item, in levels (0: at the margin).
 pub fn quote_level(h: HWND, row: Row) -> usize {
-    get(h, row).map_or(0, |(r, _)| if r.indent <= 0 { 0 } else { 1 + ((r.indent - BULLET_TEXT) as f32 / LEVEL as f32).round().max(0.0) as usize })
+    get(h, row).map_or(0, |(r, _)| if r.indent <= 0 { 0 } else { 1 + level_at(r.indent - BULLET_TEXT) as usize })
 }
 
 /// Indent the quote `row` to `level`: level 1 lines its bar up under a list item's text,
-/// each level after that a nesting step further.
+/// each level after that a nesting step further, under an item of the level before (the
+/// deepest, under an item of the deepest list level).
 pub fn set_quote_level(h: HWND, row: Row, level: usize) {
     let Some((mut r, cells)) = get(h, row) else { return };
-    let level = level.min(MAX_LEVEL as usize);
-    r.indent = if level == 0 { 0 } else { BULLET_TEXT + (level as i32 - 1) * LEVEL };
+    let level = level.min(MAX_LEVEL as usize + 1);
+    r.indent = if level == 0 { 0 } else { BULLET_TEXT + level_indent(level as i32 - 1) };
     set(h, row, &r, &cells);
     style_blocks(h);
 }

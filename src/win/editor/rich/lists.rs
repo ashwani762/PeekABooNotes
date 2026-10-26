@@ -34,7 +34,7 @@ pub fn numbering_to_task(h: HWND) {
     set_numbering(h, 0);
     let mut pf = ParaFormat2::new();
     pf.mask = PFM_STARTINDENT | PFM_OFFSET;
-    pf.start_indent = list_base(true) + level * LEVEL;
+    pf.start_indent = list_base(true) + level_indent(level);
     send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
 }
 
@@ -118,8 +118,10 @@ pub(super) fn list_base(checklist: bool) -> i32 {
     if checklist { (LIST_TEXT - mark_w()).max(0) } else { BULLET_START }
 }
 
+/// The nesting level of a list paragraph that starts `start_indent` in, where one at level
+/// 0 starts at `base`.
 pub(super) fn level_of(start_indent: i32, base: i32) -> i32 {
-    ((start_indent - base) as f32 / LEVEL as f32).round().clamp(0.0, MAX_LEVEL as f32) as i32
+    level_at(start_indent - base)
 }
 
 /// Nesting level of the list paragraph holding `cp`, or None if it isn't a list item.
@@ -200,7 +202,7 @@ pub fn nest(h: HWND, delta: i32) -> bool {
         let next = (level + delta).clamp(0, MAX_LEVEL);
         let mut pf = ParaFormat2::new();
         pf.mask = PFM_STARTINDENT;
-        pf.start_indent = list_base(checklist) + next * LEVEL;
+        pf.start_indent = list_base(checklist) + level_indent(next);
         // Numbered lists count each level on its own, styled like Notes: 1. a. i.
         let mut cur = ParaFormat2::new();
         send(h, EM_GETPARAFORMAT, 0, &mut cur as *mut _ as isize);
@@ -237,7 +239,8 @@ pub(super) fn fix_caret_indent(h: HWND, t: &[u16]) {
     let mut pf = ParaFormat2::new();
     send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
     let base = list_base(true);
-    if pf.numbering == 0 && pf.offset == mark_w() && pf.start_indent >= base && (pf.start_indent - base) % LEVEL == 0 {
+    let dx = pf.start_indent - base;
+    if pf.numbering == 0 && pf.offset == mark_w() && dx >= 0 && level_indent(level_at(dx)) == dx {
         // Follows from the box having gone: Ctrl+Z brings the box back, not this first.
         unrecorded(h, || {
             pf = ParaFormat2::new();
@@ -303,5 +306,59 @@ mod tests {
         set_rtf(h2, &get_rtf(h));
         style_bullets(h2);
         assert_eq!(bullets(h2), vec![PFN_BULLET, 0x25E6, 0x25AA, PFN_BULLET, PFN_BULLET]);
+    }
+
+    /// Tab takes a bullet, a number and a checklist item down to the deepest level, each
+    /// level further in than the one before, and no further; Shift+Tab brings it back.
+    #[test]
+    fn tab_to_the_deepest_level_and_back() {
+        for (md, mark) in [("T\n- item", "- "), ("T\n1. item", "1. "), ("T\n- [ ] item", "- [ ] "), ("T\n- [x] item", "- [x] ")] {
+            let h = editor();
+            load_markdown(h, md);
+            let at = String::from_utf16_lossy(&text(h)).find("item").unwrap() as i32;
+            let indent = || {
+                set_sel(h, at, at);
+                let mut pf = ParaFormat2::new();
+                send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+                pf.start_indent
+            };
+            let at_level = |level: i32| {
+                assert_eq!(list_level(h), Some(level), "{md}");
+                assert_eq!(to_markdown(h, true), format!("# T\n{}{mark}item", "  ".repeat(level as usize)), "{md}");
+                // Stored and opened again, at the same level.
+                let h2 = editor();
+                set_rtf(h2, &get_rtf(h));
+                assert_eq!(to_markdown(h2, true), to_markdown(h, true), "stored: {md}");
+            };
+            let mut last = indent();
+            for tab in 1..=MAX_LEVEL + 2 {
+                set_sel(h, at, at);
+                assert!(nest(h, 1));
+                let now = indent();
+                if tab <= MAX_LEVEL {
+                    assert!(now > last, "{md}: level {tab} at {now}, the one before at {last}");
+                } else {
+                    assert_eq!(now, last, "{md}: no deeper than the deepest");
+                }
+                last = now;
+                at_level(tab.min(MAX_LEVEL));
+            }
+            for level in (0..MAX_LEVEL).rev() {
+                set_sel(h, at, at);
+                assert!(nest(h, -1));
+                at_level(level);
+            }
+            assert_eq!(to_markdown(h, true), format!("# {md}"));
+        }
+        // The deepest item's text still leaves a new note (320 DIP wide, a text column of
+        // about 4,000 twips) over 100 DIP for its words.
+        assert!(BULLET_TEXT + level_indent(MAX_LEVEL) + 1500 < 4000);
+        // Each level is told from the ones beside it, and the first five are where they
+        // always were.
+        for l in 0..=MAX_LEVEL {
+            assert_eq!(level_at(level_indent(l)), l);
+            assert_eq!(level_at(level_indent(l) + DEEP_LEVEL / 2 - 1), l);
+        }
+        assert_eq!((0..=FULL_LEVELS).map(level_indent).collect::<Vec<_>>(), vec![0, 320, 640, 960, 1280, 1600]);
     }
 }
