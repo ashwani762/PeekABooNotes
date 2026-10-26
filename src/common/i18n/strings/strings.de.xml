@@ -330,7 +330,6 @@
     <string name="settings_notes_folder_portable">Notizordner · Portabel</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">Erledigt, ins Archiv</string>
     <string name="tip_unpin">Nicht mehr im Vordergrund</string>
     <string name="tip_color">Farbe ändern</string>
     <string name="color_yellow">Gelb</string>

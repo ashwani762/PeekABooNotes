@@ -313,7 +313,6 @@
     <string name="settings_notes_folder_portable">メモのフォルダ · ポータブル</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">完了にしてアーカイブ</string>
     <string name="tip_unpin">手前に表示をやめる</string>
     <string name="tip_color">色を変更</string>
     <string name="color_yellow">イエロー</string>

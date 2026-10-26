@@ -330,7 +330,6 @@
     <string name="settings_notes_folder_portable">Dossier des notes · Portable</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">Terminée : mettre aux archives</string>
     <string name="tip_unpin">Ne plus garder au premier plan</string>
     <string name="tip_color">Changer la couleur</string>
     <string name="color_yellow">Jaune</string>
@@ -355,7 +354,7 @@
     <string name="tip_numbers">Liste numérotée</string>
     <string name="tip_checklist">Liste de tâches</string>
     <string name="tip_align_left">Aligner à gauche</string>
-    <string name="tip_align_center">Centrer</string>
+    <string name="tip_align_center">Aligner au centre</string>
     <string name="tip_align_right">Aligner à droite</string>
     <string name="tip_quote">Citation</string>
     <string name="tip_code">Bloc de code</string>

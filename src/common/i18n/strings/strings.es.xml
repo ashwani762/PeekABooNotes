@@ -330,7 +330,6 @@
     <string name="settings_notes_folder_portable">Carpeta de notas · Portátil</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">Hecha: archivar</string>
     <string name="tip_unpin">Quitar de siempre visible</string>
     <string name="tip_color">Cambiar color</string>
     <string name="color_yellow">Amarillo</string>
@@ -355,7 +354,7 @@
     <string name="tip_numbers">Lista numerada</string>
     <string name="tip_checklist">Lista de tareas</string>
     <string name="tip_align_left">Alinear a la izquierda</string>
-    <string name="tip_align_center">Centrar</string>
+    <string name="tip_align_center">Alinear al centro</string>
     <string name="tip_align_right">Alinear a la derecha</string>
     <string name="tip_quote">Cita</string>
     <string name="tip_code">Bloque de código</string>

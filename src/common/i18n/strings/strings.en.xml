@@ -345,7 +345,6 @@
     <string name="settings_notes_folder_portable">Notes folder · Portable</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">Mark as Done and Archive</string>
     <string name="tip_unpin">Stop Keeping on Top</string>
     <string name="tip_color">Change Colour</string>
     <string name="color_yellow">Yellow</string>
@@ -370,7 +369,7 @@
     <string name="tip_numbers">Numbered List</string>
     <string name="tip_checklist">Checklist</string>
     <string name="tip_align_left">Align Left</string>
-    <string name="tip_align_center">Centre</string>
+    <string name="tip_align_center">Align Centre</string>
     <string name="tip_align_right">Align Right</string>
     <string name="tip_quote">Quote</string>
     <string name="tip_code">Code Block</string>

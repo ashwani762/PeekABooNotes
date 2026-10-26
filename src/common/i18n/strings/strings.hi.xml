@@ -330,7 +330,6 @@
     <string name="settings_notes_folder_portable">नोट्स फ़ोल्डर · पोर्टेबल</string>
 
     <!-- Tooltips on the icon buttons -->
-    <string name="tip_done">पूरा हुआ, संग्रह में भेजें</string>
     <string name="tip_unpin">ऊपर रखना बंद करें</string>
     <string name="tip_color">रंग बदलें</string>
     <string name="color_yellow">पीला</string>

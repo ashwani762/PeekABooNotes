@@ -28,7 +28,7 @@ pub(super) fn tip_for(h: HWND, b: Btn) {
     }
     let pinned = app::store(|s| s.note(st.id).map(|n| n.pinned)).unwrap_or(false);
     let (label, k) = match b {
-        Btn::Done => (t!("tip_done"), keys(&["ctrl", "shift", "A"])),
+        Btn::Done => (t!("action_archive"), keys(&["ctrl", "shift", "A"])),
         Btn::Delete => (t!("menu_delete"), keys(&["ctrl", "shift", "del"])),
         Btn::Pin => (if pinned { t!("tip_unpin") } else { t!("menu_keep_on_top") }, keys(&["ctrl", "shift", "P"])),
         Btn::Color => (t!("tip_color"), keys(&["ctrl", "."])),

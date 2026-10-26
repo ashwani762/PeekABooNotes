@@ -205,6 +205,7 @@ const TOOL: f32 = 30.0;
 /// two where the pointer, crossing over, would be on neither.
 const OVERLAP: f32 = 3.0;
 const CHEVRON: &str = "\u{E76C}";
+const CHEVRON_LEFT: &str = "\u{E76B}";
 
 /// The timer for opening or closing a submenu after the pointer has rested a moment.
 const T_SUB: usize = 1;
@@ -661,7 +662,10 @@ fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, i
                 // The chevron sits where a shortcut would, in the shortcut's colour.
                 let right = (ox + m.w as f32 - 16.0 * s) as i32;
                 if chevron {
-                    c.text_ct(CHEVRON, &m.fonts.chevron, rect(right - (20.0 * s) as i32, y as i32, (20.0 * s) as i32, rh as i32), None, ink2, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                    // Pointing the way its submenu opens: left from a menu that opened
+                    // leftwards (a note's ⋯ menu, at its top right).
+                    let glyph = if m.leftward { CHEVRON_LEFT } else { CHEVRON };
+                    c.text_ct(glyph, &m.fonts.chevron, rect(right - (20.0 * s) as i32, y as i32, (20.0 * s) as i32, rh as i32), None, ink2, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
                 } else if !key.is_empty() {
                     let kx = right - (160.0 * s) as i32;
                     c.line_ct(key, &m.fonts.key, kx, mid + m.fonts.key.cap / 2, (160.0 * s) as i32, None, ink2, DT_RIGHT);
