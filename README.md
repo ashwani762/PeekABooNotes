@@ -17,7 +17,7 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
 ## Always one move away
 
 - **The deck.** A pill of colour capsules on the screen edge that fans out into tabs as you point at it. Peek at any note without opening it. Put it on any of your displays.
-- **Hotkeys from anywhere.** Ctrl+Alt+N writes a new note; Ctrl+Alt+A finds an old one; Ctrl+Alt+K hands the deck to your keyboard, so the arrows walk the cards and Enter opens one. Where AltGr and a letter types €, ą or ł, that shortcut steps aside, so your keyboard still types it. Click one in Settings › Shortcuts to give it other keys.
+- **Hotkeys from anywhere.** Ctrl+Alt+N writes a new note; Ctrl+Alt+A finds an old one; Ctrl+Alt+K hands the deck to your keyboard, so the arrows walk the cards and Enter opens one. On English keyboards (US, UK, India) a shortcut keeps its letter even where AltGr and that letter types an accented one, such as ṇ on English (India). Where AltGr and a key types a symbol such as €, or a letter of another language such as ą or ł, that shortcut steps aside so your keyboard still types it (a beta for keyboards in other languages). Click one in Settings › Shortcuts to give it other keys.
 - **Pin what matters.** A pinned note stays open and on top; everything else tucks itself away when you're done with it.
 - **Exactly where you left it.** Each note reopens in the same spot, scrolled to the same line, caret where you stopped.
 
@@ -47,13 +47,13 @@ Your notes sit on the edge of the screen as a slim strip of colour. Point at it 
   </picture>
 </p>
 
-**All Notes** puts everything in one place, with search that forgives: words in any order, the start of a word, a typo or a missing accent. "relchk" finds your release checklist. Matches are marked, best first, and you can edit right there without opening a window. Archive instead of deleting, and every delete comes with Undo.
+**All Notes** puts everything in one place, with search that forgives: words in any order, the start of a word, a typo or a missing accent. "relchk" finds your release checklist. Matches are marked, best first, and you can edit right there without opening a window. Archive instead of deleting, and every archive, delete or import comes with Undo: archive one note and delete another, and Undo brings back both, newest first.
 
 ## Share it, take it anywhere
 
 - **Share** the notes you pick as one zip, straight to Mail, Teams or Nearby Sharing.
 - **Export** to plain Markdown, pictures and files included. It reads well in Notepad and looks right in VS Code or any Markdown viewer.
-- **Import** Markdown or text files back, formatting and attachments included.
+- **Import** Markdown or text files back, formatting and attachments included. Notes you have already are left out, not doubled.
 
 ## Works with your AI assistant
 
@@ -69,7 +69,7 @@ Turn it on in Settings and **ChatGPT, Claude, Gemini, Copilot, Cursor** and othe
 ## Made to feel at home
 
 - **Light and dark**, following Windows or your choice.
-- **Six languages**: English, German, Spanish, French, Hindi and Japanese.
+- **Six languages**: English, German, Spanish, French, Hindi and Japanese (all but English in beta).
 - **Fluid motion**: everything moves on springs, and Reduce Motion calms it down.
 
 <p align="center">
