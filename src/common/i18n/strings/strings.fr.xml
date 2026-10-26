@@ -106,6 +106,14 @@
         <item quantity="one">Note importée</item>
         <item quantity="other">%d notes importées</item>
     </plurals>
+    <plurals name="toast_imported_some">
+        <item quantity="one">%d note importée</item>
+        <item quantity="other">%d notes importées</item>
+    </plurals>
+    <plurals name="toast_already_here">
+        <item quantity="one">Note déjà là</item>
+        <item quantity="other">%d notes déjà là</item>
+    </plurals>
     <string name="toast_undo">Annuler</string>
 
     <!-- All Notes -->

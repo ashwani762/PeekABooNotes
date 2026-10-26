@@ -315,8 +315,9 @@ pub enum Undo {
     Archived(Vec<u64>),
     /// Notes restored from the archive.
     Restored(Vec<u64>),
-    /// Notes an import brought in. Each import is one of its own.
-    Imported(Vec<u64>),
+    /// Notes an import brought in, and how many files it left out as notes here already.
+    /// Each import is one of its own.
+    Imported(Vec<u64>, usize),
 }
 
 impl crate::common::undo::Action for Undo {
@@ -346,7 +347,9 @@ impl Undo {
             Undo::Deleted(v) => tn!("toast_deleted", v.len()),
             Undo::Archived(v) => tn!("toast_archived", v.len()),
             Undo::Restored(v) => tn!("toast_restored", v.len()),
-            Undo::Imported(v) => tn!("toast_imported", v.len()),
+            Undo::Imported(v, 0) => tn!("toast_imported", v.len()),
+            // "1 note imported, 2 already here"
+            Undo::Imported(v, here) => t!("result_and", tn!("toast_imported_some", v.len()), tn!("result_already_here", *here)),
         }
     }
 
@@ -356,7 +359,7 @@ impl Undo {
             Undo::Deleted(_) => t!("menu_undo_delete"),
             Undo::Archived(_) => t!("menu_undo_archive"),
             Undo::Restored(_) => t!("menu_undo_restore"),
-            Undo::Imported(_) => t!("menu_undo_import"),
+            Undo::Imported(..) => t!("menu_undo_import"),
         }
     }
 }
@@ -387,9 +390,17 @@ pub fn archive(ids: &[u64]) {
     done(Undo::Archived(away));
 }
 
-/// Notes `ids` were just imported: the toast offers to take them out again.
-pub(super) fn imported(ids: Vec<u64>) {
-    done(Undo::Imported(ids));
+/// Notes `ids` were just imported, and `here` files left out as notes here already: the
+/// toast offers to take them out again, and says what was left out. With none brought in,
+/// it just says so.
+pub(super) fn imported(ids: Vec<u64>, here: usize) {
+    if ids.is_empty() {
+        if here > 0 {
+            toast::notice(tn!("toast_already_here", here));
+        }
+        return;
+    }
+    done(Undo::Imported(ids, here));
 }
 
 /// Bring notes back from the archive, to their places in the deck, with the Undo toast,
@@ -470,7 +481,7 @@ pub fn undo() {
             store_mut(|s| s.put_back(v));
             ids
         }
-        Undo::Imported(v) => {
+        Undo::Imported(v, _) => {
             v.iter().for_each(|&id| put_away(id));
             let gone: Vec<Note> = store_mut(|s| v.iter().filter_map(|id| s.remove(*id)).map(|(_, n)| n).collect());
             save();
@@ -746,6 +757,18 @@ pub fn note_command(id: u64, cmd: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An import's toast says what was left out as notes here already, beside what came in.
+    #[test]
+    fn an_import_toast_says_what_was_here_already() {
+        crate::common::i18n::init("en");
+        assert_eq!(Undo::Imported(vec![1], 0).message(), "Note imported");
+        assert_eq!(Undo::Imported(vec![1, 2, 3], 0).message(), "3 notes imported");
+        assert_eq!(Undo::Imported(vec![1], 2).message(), "1 note imported, 2 already here");
+        assert_eq!(Undo::Imported(vec![1, 2], 1).message(), "2 notes imported, 1 already here");
+        assert_eq!(tn!("toast_already_here", 1), "Note already here");
+        assert_eq!(tn!("toast_already_here", 3), "3 notes already here");
+    }
 
     /// The sweep's copy of a note leaves its pictures' data out, and every link in.
     #[test]

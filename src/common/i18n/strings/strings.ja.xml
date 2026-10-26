@@ -100,6 +100,12 @@
     <plurals name="toast_imported">
         <item quantity="other">%d 件のメモを読み込みました</item>
     </plurals>
+    <plurals name="toast_imported_some">
+        <item quantity="other">%d 件のメモを読み込みました</item>
+    </plurals>
+    <plurals name="toast_already_here">
+        <item quantity="other">%d 件のメモは既にあります</item>
+    </plurals>
     <string name="toast_undo">取り消す</string>
 
     <!-- All Notes -->
