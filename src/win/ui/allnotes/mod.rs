@@ -687,8 +687,20 @@ fn in_title(e: HWND) -> bool {
     rich::sel_in_title(e)
 }
 
+/// Whether a key pressed in the note being edited is All Notes' rather than the editor's:
+/// Ctrl+Tab leaves the note, and so does Tab in its title, where a tab character has no
+/// place (elsewhere in the text Tab is the editor's: lists, tables, code); and Ctrl+F goes
+/// to the search box, as the box says it does, from the note too (it was the editor's, which
+/// does nothing with it, so the caret kept blinking in the note). AltGr+F is a character.
+fn editors_key_is_ours(vk: u16, ctrl: bool, alt: bool, in_title: impl FnOnce() -> bool) -> bool {
+    match vk {
+        VK_TAB => ctrl || in_title(),
+        _ => ctrl && !alt && vk == b'F' as u16,
+    }
+}
+
 /// Keys for the search box and list that must be seen before the EDIT consumes them,
-/// and Ctrl+Tab out of the note editor (plain Tab there indents lists).
+/// and Ctrl+Tab and Ctrl+F out of the note editor (plain Tab there indents lists).
 pub fn pre_translate(msg: &MSG) -> bool {
     if msg.message != WM_KEYDOWN {
         return false;
@@ -698,9 +710,7 @@ pub fn pre_translate(msg: &MSG) -> bool {
     let (ctrl, shift) = (key_down(VK_CONTROL), key_down(VK_SHIFT));
     let in_editor = !editor.is_null() && (msg.hwnd == editor || unsafe { IsChild(editor, msg.hwnd) } != 0);
     if in_editor {
-        // Ctrl+Tab leaves the note, and so does Tab in its title, where a tab character
-        // has no place; elsewhere in the text Tab is the editor's (lists, tables, code).
-        if vk != VK_TAB || !(ctrl || in_title(msg.hwnd)) {
+        if !editors_key_is_ours(vk, ctrl, key_down(VK_MENU), || in_title(msg.hwnd)) {
             return false;
         }
     } else if msg.hwnd != hwnd && msg.hwnd != search {
@@ -747,13 +757,9 @@ pub fn pre_translate(msg: &MSG) -> bool {
             // As in a note window: Ctrl+Shift+Del and Ctrl+Shift+A, from the search field too.
             VK_DELETE if own || (ctrl && shift) => Some(Action::Delete(l.sel.clone())),
             _ if ctrl && shift && vk == b'A' as u16 => Some(if l.sel.is_empty() { Action::None } else { click(l, Hit::Archive) }),
-            _ if ctrl && vk == b'F' as u16 => {
-                unsafe {
-                    SetFocus(l.search);
-                    SendMessageW(l.search, EM_SETSEL, 0, -1);
-                }
-                Some(Action::None)
-            }
+            // To the search box, its text selected; from outside this borrow, as the box's
+            // focus notification (it draws as focused) comes back into this window.
+            _ if ctrl && vk == b'F' as u16 => Some(Action::Focus(Focus::Search)),
             _ if ctrl && vk == b'A' as u16 && msg.hwnd == hwnd => {
                 let first = l.rows.first().map(|r| r.id);
                 l.sel = l.rows.iter().map(|r| r.id).filter(|x| Some(*x) != first).collect();
@@ -1347,6 +1353,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 mod tests {
     use super::*;
     use crate::common::theme::contrast;
+
+    /// In the note being edited, Ctrl+F goes to the search box (the editor did nothing
+    /// with it), as do Ctrl+Tab, and Tab in the title; other keys, AltGr+F and plain Tab in
+    /// the text are the editor's.
+    #[test]
+    fn ctrl_f_searches_from_the_note_being_edited() {
+        let f = b'F' as u16;
+        assert!(editors_key_is_ours(f, true, false, || false));
+        assert!(!editors_key_is_ours(f, true, true, || false), "AltGr+F types a character");
+        assert!(!editors_key_is_ours(f, false, false, || true), "F is a letter");
+        assert!(!editors_key_is_ours(b'A' as u16, true, false, || false), "Ctrl+A selects the note's text");
+        assert!(editors_key_is_ours(VK_TAB, true, false, || false));
+        assert!(editors_key_is_ours(VK_TAB, false, false, || true));
+        assert!(!editors_key_is_ours(VK_TAB, false, false, || false), "Tab in the text indents");
+    }
 
     #[test]
     fn quiet_text_still_reads() {
