@@ -21,8 +21,7 @@ const NOTES: [(&str, &str); 8] = [
 
 pub(super) fn deck() -> Deck {
     let work = RECT { left: 0, top: 0, right: 2560, bottom: 1040 };
-    let mut geo = geo_for(NOTES.len(), false, 0.42, 8, work, 1.0);
-    geo.caps = NOTES.len();
+    let geo = with_caps(geo_for(NOTES.len(), false, 0.42, 8, work, 1.0));
     let tabs = NOTES
         .iter()
         .enumerate()
@@ -65,6 +64,14 @@ pub(super) fn deck() -> Deck {
         summoned: false,
         still: None,
     }
+}
+
+/// `g` with a capsule in the pill for every card, as `sync` leaves it.
+fn with_caps(mut g: Geo) -> Geo {
+    g.caps = NOTES.len();
+    g.ch = (g.pill_h() + 36.0 * g.s).round() as i32;
+    g.cy = (g.centre - g.ch / 2).clamp(g.work.top, (g.work.bottom - g.ch).max(g.work.top));
+    g
 }
 
 #[repr(C)]

@@ -636,10 +636,29 @@ impl Canvas {
         let x1 = ((clip.x + clip.w).ceil() as i32).min(ox + img.w).min(self.w);
         let y1 = ((clip.y + clip.h).ceil() as i32).min(oy + img.h).min(self.h);
         let cw = self.w;
+        let k = (alpha.min(1.0) * 256.0) as u32;
         let px = self.px();
         for py in y0..y1 {
             let (row, src_row) = ((py * cw) as usize, ((py - oy) * img.w) as usize);
-            for pxx in x0..x1 {
+            // Rows clear of the rounded corners are whole across, but for a pixel at each
+            // end: no edge to work out there, and an opaque picture at full strength is
+            // just copied.
+            let (mut a, mut b) = (x0, x0);
+            if ((py as f32 + 0.5) - cy).abs() < hy - r - 1.0 {
+                a = ((clip.x + 1.0).ceil() as i32).clamp(x0, x1);
+                b = ((clip.x + clip.w - 1.0).floor() as i32).clamp(a, x1);
+                for pxx in a..b {
+                    let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
+                    if k >= 256 && s >> 24 == 0xFF {
+                        px[row + pxx as usize] = s;
+                        continue;
+                    }
+                    let keep = 256 - k.min(256) * (s >> 24) / 255;
+                    let ch = |sh: u32| ((((s >> sh) & 0xFF) * k.min(256) + ((dst >> sh) & 0xFF) * keep) >> 8) << sh;
+                    px[row + pxx as usize] = ch(24) | ch(16) | ch(8) | ch(0);
+                }
+            }
+            for pxx in (x0..a).chain(b..x1) {
                 let (sx, sy) = (pxx as f32 + 0.5, py as f32 + 0.5);
                 let qx = (sx - cx).abs() - (hx - r);
                 let qy = (sy - cy).abs() - (hy - r);
@@ -882,6 +901,44 @@ pub fn app_icon(size: i32) -> HICON {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A picture clipped to a rounded card comes out the same whether a pixel is worked out
+    /// on its own or, away from the corners, as part of a row.
+    #[test]
+    fn pictures_on_cards_are_drawn_as_worked_out() {
+        let (w, h) = (40, 30);
+        let src: Vec<u32> = (0..w * h).map(|i| if i % 3 == 0 { 0x80402010 } else { 0xFF00_0000 | (i as u32).wrapping_mul(2_654_435_761) >> 8 }).collect();
+        let img = Image::from_pixels(w, h, src.clone());
+        for alpha in [1.0f32, 0.6] {
+            let clip = Shape::new(5.3, 4.6, 36.0, 26.0, 6.0);
+            let mut c = Canvas::new(60, 50);
+            c.clear(0xFF33_6699);
+            c.image(&img, 3.0, 2.0, &clip, alpha);
+            let got = c.copy_out(RECT { left: 0, top: 0, right: 60, bottom: 50 });
+            // Every pixel by itself, as before rows were taken whole.
+            let (hx, hy) = (clip.w / 2.0, clip.h / 2.0);
+            let (cx, cy, r) = (clip.x + hx, clip.y + hy, clip.r);
+            for y in 0..50 {
+                for x in 0..60 {
+                    let (sx, sy) = (x - 3, y - 2);
+                    let mut want = 0xFF33_6699u32;
+                    if (0..w).contains(&sx) && (0..h).contains(&sy) {
+                        let (qx, qy) = ((x as f32 + 0.5 - cx).abs() - (hx - r), (y as f32 + 0.5 - cy).abs() - (hy - r));
+                        let d = if qx > 0.0 && qy > 0.0 { (qx * qx + qy * qy).sqrt() - r } else { qx.max(qy) - r };
+                        let a = alpha * (0.5 - d).clamp(0.0, 1.0);
+                        if a > 0.0 {
+                            let s = src[(sy * w + sx) as usize];
+                            let k = (a * 256.0) as u32;
+                            let keep = 256 - k * (s >> 24) / 255;
+                            let ch = |sh: u32| ((((s >> sh) & 0xFF) * k + ((want >> sh) & 0xFF) * keep) >> 8) << sh;
+                            want = ch(24) | ch(16) | ch(8) | ch(0);
+                        }
+                    }
+                    assert_eq!(got[(y * 60 + x) as usize], want, "({x}, {y}) at {alpha}");
+                }
+            }
+        }
+    }
 
     /// A window Windows hasn't drawn yet comes back black, and isn't used as its picture; a
     /// note, paper with text and a dark picture in it, is.
