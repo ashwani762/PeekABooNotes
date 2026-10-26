@@ -346,6 +346,75 @@ pub fn range_text(h: HWND, a: i32, b: i32) -> Vec<u16> {
     buf
 }
 
+/// Some of an editor's text, as `text` has it: `t[i]` is character `from + i`, of `len`
+/// in all. What the pointer, a key or a paint needs is a paragraph or a screenful, not a
+/// copy of the whole note (2 MB a pointer move in a long one).
+pub struct Span {
+    pub from: usize,
+    pub t: Vec<u16>,
+    pub len: usize,
+}
+
+impl Span {
+    /// Character `cp`, when it's in the span.
+    pub fn get(&self, cp: usize) -> Option<u16> {
+        cp.checked_sub(self.from).and_then(|i| self.t.get(i)).copied()
+    }
+
+    /// Just past the span's last character.
+    #[cfg(test)]
+    fn end(&self) -> usize {
+        self.from + self.t.len()
+    }
+}
+
+/// Characters `a..b` as `text` has them. EM_GETTEXTRANGE (`range_text`) leaves a table's
+/// row marks out, so every position after one would be off; the text object model's
+/// range gives them as they are.
+pub fn raw_text(h: HWND, a: usize, b: usize) -> Vec<u16> {
+    if b <= a {
+        return Vec::new();
+    }
+    range(h, a as i32, b as i32).and_then(|r| unsafe { r.GetText() }.ok()).map_or_else(Vec::new, |s| s.to_vec())
+}
+
+/// The paragraphs from the one holding `a` to the one holding `b`, with the paragraph mark
+/// before them (when there is one) and the one ending them: their text and their marks'
+/// neighbours, as positions in the whole text (`text`) have them.
+pub fn paras_around(h: HWND, a: usize, b: usize) -> Span {
+    let len = text_len(h);
+    let (a, b) = (a.min(len), b.max(a).min(len));
+    // Back to the mark before `a`, and on to the one at or after `b`, a widening piece at
+    // a time.
+    let mut from = 0;
+    let mut back = 256;
+    loop {
+        let lo = a.saturating_sub(back);
+        if let Some(i) = raw_text(h, lo, a).iter().rposition(|&c| c == CR) {
+            from = lo + i;
+            break;
+        }
+        if lo == 0 {
+            break;
+        }
+        back *= 4;
+    }
+    let mut end = len;
+    let mut ahead = 256;
+    loop {
+        let hi = (b + ahead).min(len);
+        if let Some(i) = raw_text(h, b, hi).iter().position(|&c| c == CR) {
+            end = b + i + 1;
+            break;
+        }
+        if hi == len {
+            break;
+        }
+        ahead *= 4;
+    }
+    Span { from, t: raw_text(h, from, end), len }
+}
+
 pub fn sel(h: HWND) -> (i32, i32) {
     let (mut a, mut b) = (0u32, 0u32);
     send(h, EM_GETSEL, &mut a as *mut _ as usize, &mut b as *mut _ as isize);
@@ -440,7 +509,7 @@ pub fn restyle(h: HWND) -> bool {
     style_title_in(h, &t);
     let links = instructions(&t, 0, t.len());
     color_links_listed(h, &t, &links);
-    fix_caret_indent_in(h, &t);
+    fix_caret_indent(h, &t);
     // None of these moves or changes a character: `t` is still the text.
     send(h, EM_EXLIMITTEXT, 0, length_limit_with(&t, &links).min(i32::MAX as usize) as isize);
     has_selectors(&t)
@@ -449,6 +518,7 @@ pub fn restyle(h: HWND) -> bool {
 /// How many characters of `t` (the editor's text) never show: named links' hidden
 /// `HYPERLINK "url"` instructions, and the marks (each with its paragraph mark) that
 /// start and end a table row.
+#[cfg(test)]
 pub fn hidden_len(t: &[u16]) -> usize {
     hidden_len_with(t, &instructions(t, 0, t.len()))
 }
@@ -472,7 +542,9 @@ pub fn char_from_pos(h: HWND, x: i32, y: i32) -> i32 {
 
 /// The text on screen, as a range of `t` (the editor's text): from the start of the first
 /// paragraph showing to just past the last character showing. Overlays that draw over
-/// the text only need to look there, not through a whole long note.
+/// the text only need to look there, not through a whole long note. (They read just that
+/// much of it: `screen_text`.)
+#[cfg(test)]
 pub fn on_screen(h: HWND, t: &[u16]) -> (usize, usize) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(h, &mut rc) };
@@ -481,6 +553,22 @@ pub fn on_screen(h: HWND, t: &[u16]) -> (usize, usize) {
     let a = para_start(t, first) as usize;
     let b = t[last as usize..].iter().position(|&c| c == CR).map_or(t.len(), |i| last as usize + i);
     (a.min(b), b)
+}
+
+/// The paragraphs on screen (`paras_around` them), and the range of them `on_screen`
+/// gives: what the overlays draw over, read without copying the rest of a long note.
+pub fn screen_text(h: HWND) -> (Span, usize, usize) {
+    let mut rc: RECT = unsafe { std::mem::zeroed() };
+    unsafe { GetClientRect(h, &mut rc) };
+    let len = text_len(h) as i32;
+    let first = char_from_pos(h, 0, 0).clamp(0, len) as usize;
+    let last = char_from_pos(h, rc.right, rc.bottom).clamp(0, len) as usize;
+    let s = paras_around(h, first.min(last), last.max(first));
+    // As `on_screen` has them: from the start of the paragraph (or table cell) showing
+    // first, to the end of the one showing last.
+    let a = s.from + para_start(&s.t, (first - s.from) as i32) as usize;
+    let b = s.t[last - s.from..].iter().position(|&c| c == CR).map_or(s.len, |i| last + i);
+    (s, a.min(b), b)
 }
 
 pub fn pos_from_char(h: HWND, cp: i32) -> POINT {
@@ -637,3 +725,56 @@ pub fn test_picture(px_w: u32, px_h: u32, w: i32, h: i32) -> String {
     format!("{{\\pict\\pngblip\\picw{px_w}\\pich{px_h}\\picwgoal{w}\\pichgoal{h} {hex}}}")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, ES_MULTILINE, WS_POPUP};
+
+    fn editor() -> HWND {
+        let h = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 400, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        setup(h);
+        h
+    }
+
+    /// A span is exactly the whole text's characters there, table marks, hidden link
+    /// instructions and emoji marks included, from the paragraph mark before to the one
+    /// after, however long the paragraphs.
+    #[test]
+    fn spans_are_the_text_around() {
+        crate::common::i18n::init("en");
+        let h = editor();
+        let long = "word ".repeat(700);
+        let md = format!(
+            "Title\nplain line\n- [ ] task \u{1F389} party\n| a | b |\n| --- | --- |\n| 1 | 2 |\n> quoted\n```\ncode\n```\nsee [the doc](https://example.com/x) now\n{long}\n\nlast \u{2764}\u{FE0F}"
+        );
+        load_markdown(h, &md);
+        let t = text(h);
+        let n = t.len();
+        assert!(t.contains(&CELL) && t.contains(&ROW_START), "the note has a table");
+        assert_eq!(raw_text(h, 0, n), t);
+        let mark_before = |a: usize| t[..a].iter().rposition(|&c| c == CR).unwrap_or(0);
+        let mark_after = |b: usize| t[b..].iter().position(|&c| c == CR).map_or(n, |i| b + i + 1);
+        for a in (0..=n).step_by(7).chain([0, n, n.saturating_sub(1)]) {
+            for b in [a, a + 1, a + 40, a + 2000] {
+                let s = paras_around(h, a, b);
+                let b = b.min(n);
+                assert_eq!((s.from, s.end(), s.len), (mark_before(a), mark_after(b), n), "around {a}..{b}");
+                assert_eq!(s.t, t[s.from..s.end()], "around {a}..{b}");
+                assert_eq!(s.get(a), t.get(a).copied().filter(|_| a < s.end()));
+            }
+        }
+        // What's on screen, wherever the note is scrolled to.
+        for y in [0, 40, 300, 2000, 100_000] {
+            set_scroll_y(h, y);
+            let (s, a, b) = screen_text(h);
+            assert_eq!((a, b), on_screen(h, &t), "scrolled to {y}");
+            assert_eq!(s.t, t[s.from..s.end()]);
+            assert!(s.from < a.max(1) && b <= s.end());
+        }
+        unsafe { DestroyWindow(h) };
+    }
+}

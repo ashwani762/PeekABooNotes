@@ -660,6 +660,32 @@ impl Canvas {
     }
 }
 
+impl Canvas {
+    /// `img` over the canvas with its top-left at (`x`, `y`), as text is put down (both
+    /// premultiplied): text drawn on a clear canvas and kept as a picture comes out exactly
+    /// as if drawn here.
+    pub fn over(&mut self, img: &Image, x: i32, y: i32) {
+        unsafe { GdiFlush() };
+        let (cw, ch) = (self.w, self.h);
+        let px = self.px();
+        for iy in 0.max(-y)..img.h.min(ch - y) {
+            let (row, src_row) = (((iy + y) * cw) as usize, (iy * img.w) as usize);
+            for ix in 0.max(-x)..img.w.min(cw - x) {
+                let s = img.px[src_row + ix as usize];
+                let sa = s >> 24;
+                if sa == 0 {
+                    continue;
+                }
+                let i = row + (ix + x) as usize;
+                let d = px[i];
+                let inv = 255 - sa;
+                let c = |sh: u32| -> u32 { (((s >> sh) & 0xFF) + (((d >> sh) & 0xFF) * inv + 127) / 255).min(255) << sh };
+                px[i] = c(24) | c(16) | c(8) | c(0);
+            }
+        }
+    }
+}
+
 /// A picture: of a window, for animating it as it opens or closes, or of a note's
 /// attachment, for its preview.
 pub struct Image {

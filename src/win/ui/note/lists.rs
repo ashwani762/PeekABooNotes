@@ -453,17 +453,6 @@ pub(super) fn handle_enter(h: HWND, e: HWND) -> bool {
     false
 }
 
-pub(super) fn checkbox_at(e: HWND, x: i32, y: i32) -> Option<i32> {
-    let cp = rich::char_from_pos(e, x, y);
-    let t = rich::text(e);
-    // The box of the line under the point: the circle is drawn left of the text, over
-    // the glyph and the gap after it.
-    let ps = rich::para_start(&t, cp.max(0));
-    [ps, cp, cp - 1]
-        .into_iter()
-        .find(|&c| c >= 0 && t.get(c as usize).copied().is_some_and(is_task) && (c == 0 || t[c as usize - 1] == rich::CR) && crate::win::editor::checks::hits(e, c, x, y))
-}
-
 /// Whether position `cp` is in a code block or a table, where lists aren't made.
 pub(super) fn lists_refused(e: HWND, t: &[u16], cp: i32) -> bool {
     matches!(rich::cell_at(e, t, cp), Some((rich::Block::Code | rich::Block::Table, ..)))
@@ -477,12 +466,13 @@ pub(super) fn caret_off_box(e: HWND, left: bool) {
     if a != b {
         return;
     }
-    let t = rich::text(e);
-    let ps = rich::para_start(&t, a);
-    if !t.get(ps as usize).copied().is_some_and(is_task) || (ps > 0 && t[ps as usize - 1] != rich::CR) {
+    // Its paragraph is all it takes (a click or an arrow key copied the whole note).
+    let t = rich::paras_around(e, a.max(0) as usize, a.max(0) as usize);
+    let ps = (t.from + rich::para_start(&t.t, a - t.from as i32) as usize) as i32;
+    if !t.get(ps as usize).is_some_and(is_task) || (ps > 0 && t.get(ps as usize - 1) != Some(rich::CR)) {
         return;
     }
-    let gap = if t.get(ps as usize + 1) == Some(&(b' ' as u16)) { 2 } else { 1 };
+    let gap = if t.get(ps as usize + 1) == Some(b' ' as u16) { 2 } else { 1 };
     if a >= ps + gap {
         return;
     }
@@ -1228,5 +1218,115 @@ mod tests {
             assert_eq!(plain(h).replace('^', ""), format!("Title/body{words}"));
         }
         assert_eq!(rich::send(h, EM_UNDO, 0, 0), 0);
+    }
+
+    /// A note with checklist items (one nested, one ticked), links in sentences, a file
+    /// and a table, long enough to scroll.
+    fn pointer_note() -> HWND {
+        let h = editor("");
+        let mut md = String::from("Pointer\n");
+        for i in 0..40 {
+            md.push_str(&match i % 5 {
+                0 => format!("- [ ] task {i} with [a link](https://example.com/{i}) in it\n"),
+                1 => format!("  - [x] done {i}\n"),
+                2 => format!("see https://example.org/{i} and [another](https://x.org/{i}) here\n"),
+                3 => format!("[plan {i}.pdf](attachment:plan%20{i}.pdf)\n"),
+                _ => format!("| a {i} | b |\n| --- | --- |\n| [c](https://c.example) | d |\nplain {i}\n"),
+            });
+        }
+        rich::load_markdown(h, &md);
+        rich::link_addresses(h, 0, rich::text(h).len());
+        rich::style_boxes(h);
+        h
+    }
+
+    /// The checkbox and link under a point, worked out from the paragraphs around it and
+    /// kept while the pointer stays on one character, are what reading the whole text
+    /// for every move found.
+    #[test]
+    fn pointer_finds_what_the_whole_text_did() {
+        crate::common::i18n::init("en");
+        let e = pointer_note();
+        let lh = (rich::body_size() as f32 / 15.0 * 1.45) as i32;
+        // As every pointer move worked it out before.
+        let box_was = |x: i32, y: i32| {
+            let cp = rich::char_from_pos(e, x, y);
+            let t = rich::text(e);
+            let ps = rich::para_start(&t, cp.max(0));
+            [ps, cp, cp - 1].into_iter().find(|&c| {
+                c >= 0 && t.get(c as usize).copied().is_some_and(is_task) && (c == 0 || t[c as usize - 1] == rich::CR) && {
+                    let (cx, cy, r) = crate::win::editor::checks::circle(e, c, t.get(c as usize + 1).copied());
+                    (x as f32 - cx).abs() <= r && (y as f32 - cy).abs() <= r
+                }
+            })
+        };
+        let link_was = |x: i32, y: i32| {
+            let t = rich::text(e);
+            let cp = rich::char_from_pos(e, x, y);
+            let over = |c: i32| {
+                let (p, q) = (rich::pos_from_char(e, c), rich::pos_from_char(e, c + 1));
+                let right = if q.y == p.y && q.x > p.x { q.x } else { p.x };
+                let next_line = t.get(c.max(0) as usize..).and_then(|r| r.iter().position(|&ch| ch == 13)).map(|i| c + i as i32 + 1);
+                let bottom = next_line.filter(|&n| (n as usize) < t.len()).map_or(p.y + lh, |n| rich::pos_from_char(e, n).y);
+                c >= 0 && x >= p.x && x < right && y >= p.y && y < bottom.max(p.y + lh)
+            };
+            let hit = [cp, cp - 1].into_iter().find(|&c| over(c))?;
+            if let Some((a, b, url)) = rich::item_link(e, &t, hit as usize) {
+                return Some((a, b, url, hit));
+            }
+            rich::link_at(e, hit).filter(|l| hit >= l.0 && hit < l.1).map(|(a, b, url)| (a, b, url, hit))
+        };
+        let (mut boxes, mut links) = (0, 0);
+        for scroll in [0, 250] {
+            rich::set_scroll_y(e, scroll);
+            hover_forget();
+            for y in (0..300).step_by(3) {
+                for x in (0..400).step_by(4) {
+                    let b = checkbox_at(e, x, y);
+                    assert_eq!(b, box_was(x, y), "box at {x},{y}");
+                    let l = link_under(e, x, y);
+                    assert_eq!(l, link_was(x, y), "link at {x},{y}");
+                    boxes += b.is_some() as usize;
+                    links += l.is_some() as usize;
+                }
+            }
+        }
+        assert!(boxes > 20 && links > 100, "{boxes} box and {links} link points");
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(e) };
+    }
+
+    /// Timing (run with --ignored --nocapture): what a pointer move over a long note costs
+    /// (the checkbox under it, as WM_MOUSEMOVE and WM_SETCURSOR each ask, and the link
+    /// under it, for its tip), onto another character and within the same one.
+    #[test]
+    #[ignore]
+    fn probe_pointer_moves() {
+        crate::common::i18n::init("en");
+        let e = pointer_note();
+        let md = rich::to_markdown(e, true).repeat(40);
+        rich::load_markdown(e, &md);
+        rich::style_boxes(e);
+        rich::set_scroll_y(e, 20_000);
+        eprintln!("PROBE --- {} characters", rich::text_len(e));
+        let moves: Vec<(i32, i32)> = (0..400).map(|k| (20 + (k * 7) % 360, 10 + (k * 13) % 280)).collect();
+        let (mut new_char, mut same_char) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+        let runs = 5;
+        for _ in 0..runs {
+            for &(x, y) in &moves {
+                hover_forget();
+                // Onto another character, then a pixel on (mostly the same character).
+                for (x, total) in [(x, &mut new_char), (x + 1, &mut same_char)] {
+                    let t0 = std::time::Instant::now();
+                    std::hint::black_box(checkbox_at(e, x, y));
+                    std::hint::black_box(checkbox_at(e, x, y));
+                    std::hint::black_box(link_under(e, x, y));
+                    *total += t0.elapsed();
+                }
+            }
+        }
+        let n = runs * moves.len() as u32;
+        let (new_char, same_char) = (new_char / n, same_char / n);
+        eprintln!("PROBE pointer move: onto another character {new_char:?}, within one {same_char:?}");
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(e) };
     }
 }

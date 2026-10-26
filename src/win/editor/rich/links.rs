@@ -489,20 +489,31 @@ pub fn link_addresses(h: HWND, a: usize, b: usize) {
 /// The word just before the caret (the one a space, Tab or Enter ends) as a link, when
 /// it's an address.
 pub fn link_word_before(h: HWND) {
-    let t = text(h);
     let (caret, _) = sel(h);
-    let mut j = (caret.max(0) as usize).min(t.len());
+    let end = (caret.max(0) as usize).min(text_len(h));
     let blank = |c: u16| matches!(c, 0x20 | 0x09 | 0x0B | 0x0D | 0xA0);
-    while j > 0 && blank(t[j - 1]) {
-        j -= 1;
-    }
-    let mut i = j;
-    while i > 0 && !blank(t[i - 1]) {
-        i -= 1;
-    }
+    // Only the text just before the caret, read further back while the word (or the
+    // blanks after it) runs on past what was read: each space typed copied the whole note.
+    let mut back = 256;
+    let (lo, t, i, j) = loop {
+        let lo = end.saturating_sub(back);
+        let t = raw_text(h, lo, end);
+        let mut j = t.len();
+        while j > 0 && blank(t[j - 1]) {
+            j -= 1;
+        }
+        let mut i = j;
+        while i > 0 && !blank(t[i - 1]) {
+            i -= 1;
+        }
+        if i > 0 || lo == 0 {
+            break (lo, t, i, j);
+        }
+        back *= 4;
+    };
     // In code an address is code.
-    if t[i..j].iter().any(|&c| c == b'.' as u16 || c == b':' as u16) && !matches!(cell_at(h, &t, caret), Some((Block::Code, ..))) {
-        link_addresses(h, i, j);
+    if t[i..j].iter().any(|&c| c == b'.' as u16 || c == b':' as u16) && !matches!(cell_at(h, &text(h), caret), Some((Block::Code, ..))) {
+        link_addresses(h, lo + i, lo + j);
     }
 }
 
@@ -711,10 +722,21 @@ fn para(t: &[u16], cp: usize) -> (usize, usize) {
 
 /// When `cp` is on an attachment's line, before its link: that link.
 pub fn item_link(h: HWND, t: &[u16], cp: usize) -> Option<(i32, i32, String)> {
+    item_link_at(h, t, 0, cp)
+}
+
+/// `item_link`, with `s` holding (at least) `cp`'s paragraph and the marks around it.
+pub fn item_link_in(h: HWND, s: &Span, cp: usize) -> Option<(i32, i32, String)> {
+    item_link_at(h, &s.t, s.from, cp)
+}
+
+/// `item_link` where `t[i]` is character `from + i`.
+fn item_link_at(h: HWND, t: &[u16], from: usize, cp: usize) -> Option<(i32, i32, String)> {
+    let cp = cp.checked_sub(from)?;
     let (start, end) = para(t, cp);
     let last = instructions(t, start, end).pop()?;
     let ends_line = last.1 + 1 == end && t.get(last.1) == Some(&(ITEM_LINK_NAME as u16));
-    (ends_line && cp < last.0).then(|| link_at(h, last.1 as i32)).flatten()
+    (ends_line && cp < last.0).then(|| link_at(h, (from + last.1) as i32)).flatten()
 }
 
 /// What an attachment's line shows before its link ("📎 plan.pdf", or a space for a

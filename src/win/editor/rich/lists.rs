@@ -227,12 +227,8 @@ pub fn nest(h: HWND, delta: i32) -> bool {
 }
 
 /// The caret's paragraph lost its checklist marker but kept the hanging indent: reset.
-pub fn fix_caret_indent(h: HWND) {
-    fix_caret_indent_in(h, &text(h));
-}
-
-/// `fix_caret_indent`, with the editor's text (`t`) in hand.
-pub(super) fn fix_caret_indent_in(h: HWND, t: &[u16]) {
+/// `t`: the editor's text.
+pub(super) fn fix_caret_indent(h: HWND, t: &[u16]) {
     let (a, _) = sel(h);
     let ps = para_start(t, a) as usize;
     if t.get(ps).copied().is_some_and(is_task) {

@@ -114,17 +114,19 @@ pub fn frame(dt: f32) -> bool {
 /// wheel glides, rows came into view bare for a frame), and each box cost its own reads
 /// of the window.
 pub fn paint(e: HWND) {
+    if STYLES.with(|m| m.borrow().contains_key(&(e as isize))) {
+        let (t, a0, b0) = rich::screen_text(e);
+        paint_in(e, &t, a0, b0);
+    }
+}
+
+/// `paint`, with the text on screen in hand: `t` holds it, `a0..b0` is what shows (only
+/// the boxes there: a long checklist has thousands).
+pub fn paint_in(e: HWND, t: &rich::Span, a0: usize, b0: usize) {
     let Some(st) = STYLES.with(|m| m.borrow().get(&(e as isize)).copied()) else { return };
-    let t = rich::text(e);
-    // Only the boxes on screen (a long checklist has thousands).
-    let (a0, b0) = rich::on_screen(e, &t);
-    let boxes: Vec<i32> = t
-        .iter()
-        .enumerate()
-        .take(b0)
-        .skip(a0)
-        .filter(|&(i, &c)| (c == rich::BOX || c == rich::CHECKED) && (i == 0 || t[i - 1] == rich::CR))
-        .map(|(i, _)| i as i32)
+    let boxes: Vec<i32> = (a0..b0)
+        .filter(|&i| t.get(i).is_some_and(|c| c == rich::BOX || c == rich::CHECKED) && (i == 0 || t.get(i - 1) == Some(rich::CR)))
+        .map(|i| i as i32)
         .collect();
     if boxes.is_empty() {
         return;
@@ -142,14 +144,14 @@ pub fn paint(e: HWND) {
         if p0.y > rc.bottom || p0.y < rc.top - (40.0 * s) as i32 {
             continue;
         }
-        let (text_x, cy, d, gap) = place(e, cp, p0, &t, s);
+        let (text_x, cy, d, gap) = place(e, cp, p0, t.get(cp as usize + 1), s);
         let h = (d * 1.2 + 4.0 * s).ceil() as i32;
         let y0 = (cy - h as f32 / 2.0).round() as i32;
         ux0 = ux0.min((text_x as f32 - gap - d - 3.0 * s).floor() as i32);
         ux1 = ux1.max(text_x - 2);
         uy0 = uy0.min(y0);
         uy1 = uy1.max(y0 + h);
-        let checked = t[cp as usize] == rich::CHECKED;
+        let checked = t.get(cp as usize) == Some(rich::CHECKED);
         let v = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 1.0 } else { 0.0 });
         items.push((text_x, cy, d, gap, v, hot == Some((e as isize, cp))));
     }
@@ -207,10 +209,11 @@ const BOX_PT: f32 = 9.0;
 
 /// Where the circle for the box at `cp` goes: (where the item's text starts, the circle's
 /// centre height, its diameter, the gap before the text). Drawing and clicking share it.
-fn place(e: HWND, cp: i32, p0: POINT, t: &[u16], s: f32) -> (i32, f32, f32, f32) {
+/// `next`: the character after the box.
+fn place(e: HWND, cp: i32, p0: POINT, next: Option<u16>, s: f32) -> (i32, f32, f32, f32) {
     let pt = |p: f32| p * 96.0 / 72.0 * s;
     // Where the item's text starts (after the space, if there is one): the list column.
-    let after = if t.get(cp as usize + 1) == Some(&(b' ' as u16)) { cp + 2 } else { cp + 1 };
+    let after = if next == Some(b' ' as u16) { cp + 2 } else { cp + 1 };
     let p1 = rich::pos_from_char(e, after);
     let d = (pt(rich::body_size() as f32 / 20.0) * 1.04).round();
     let gap = 6.0 * s;
@@ -226,16 +229,14 @@ fn place(e: HWND, cp: i32, p0: POINT, t: &[u16], s: f32) -> (i32, f32, f32, f32)
     (text_x, baseline - body.1 * 0.42, d, gap)
 }
 
-/// Whether point (`x`, `y`) in editor `e` is on the circle of the box at `cp`: the drawn
-/// circle and a little around it, not the invisible glyph under it.
-pub fn hits(e: HWND, cp: i32, x: i32, y: i32) -> bool {
+/// Where a point in editor `e` is on the circle of the box at `cp`: (its centre x, y, and
+/// how far from it either way), the drawn circle and a little around it, not the
+/// invisible glyph under it. `next`: the character after the box.
+pub fn circle(e: HWND, cp: i32, next: Option<u16>) -> (f32, f32, f32) {
     let s = STYLES.with(|m| m.borrow().get(&(e as isize)).map(|st| st.s)).unwrap_or(1.0);
-    let t = rich::text(e);
     let p0 = rich::pos_from_char(e, cp);
-    let (text_x, cy, d, gap) = place(e, cp, p0, &t, s);
-    let cx = text_x as f32 - gap - d / 2.0;
-    let r = d / 2.0 + 4.0 * s;
-    (x as f32 - cx).abs() <= r && (y as f32 - cy).abs() <= r
+    let (text_x, cy, d, gap) = place(e, cp, p0, next, s);
+    (text_x as f32 - gap - d / 2.0, cy, d / 2.0 + 4.0 * s)
 }
 
 /// One box onto canvas `c`, whose top-left is at (`ox`, `oy`) in the editor: a disc around

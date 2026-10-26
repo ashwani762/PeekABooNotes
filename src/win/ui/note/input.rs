@@ -9,6 +9,8 @@ thread_local! {
     /// An attachment pressed on: (where, its file), until the pointer moves far enough
     /// to drag it out or comes back up to open it.
     static PRESS: std::cell::RefCell<Option<(POINT, std::path::PathBuf, String)>> = const { std::cell::RefCell::new(None) };
+    /// What lies under the character the pointer was last over (see `Hover`).
+    static HOVER: std::cell::RefCell<Option<Hover>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Editor `e`'s DPI scale: the monitor its note is on.
@@ -22,38 +24,155 @@ fn line_h(e: HWND) -> i32 {
     (rich::body_size() as f32 / 15.0 * 1.45 * scale(e)) as i32
 }
 
+/// A link: (start, end, address).
+type Link = (i32, i32, String);
+
+/// What lies around the character under the pointer, worked out for that character and
+/// kept while the pointer stays on it: the checklist circles a point there can be on, and
+/// the characters a link can be under it at (the one pointed at, then the one before),
+/// with the area each covers, its link and that link's tip, each found when first asked
+/// for. A move within the character only tests the point against these (each move read
+/// the note's whole text four times, 2 MB in a long one, and asked RichEdit where a dozen
+/// characters are). Any message to the editor other than the pointer's own may change
+/// what's where, and lets it go (`hover_forget`).
+struct Hover {
+    e: isize,
+    /// The point last asked about, and the character there.
+    at: (i32, i32),
+    cp: i32,
+    /// Where the view was scrolled to, and how long the text was.
+    view: (i32, usize),
+    /// The paragraphs of the character and the one before it: all any of this looks at.
+    t: rich::Span,
+    /// Circles: (the box, its centre, how far around it counts).
+    boxes: Vec<(i32, f32, f32, f32)>,
+    /// The characters.
+    chars: [Under; 2],
+}
+
+/// A character a link can be under the pointer at: the area it covers, its link and the
+/// link's tip (anchor and label), each found when first asked for.
+struct Under {
+    c: i32,
+    area: OnceCell<RECT>,
+    link: OnceCell<Option<Link>>,
+    tip: OnceCell<(RECT, String)>,
+}
+
+/// A message other than the pointer's came to editor `e`'s window: what `Hover` knows may
+/// be out of date.
+pub(super) fn hover_forget() {
+    HOVER.with(|h| h.borrow_mut().take());
+}
+
+/// Run `f` on what lies around the character under (`x`, `y`) in editor `e`. A move asks
+/// two or three times about the same point (the checkbox for the ring and the cursor,
+/// the link for its tip): only the first asks RichEdit what's there.
+fn hover<R>(e: HWND, x: i32, y: i32, f: impl FnOnce(&Hover) -> R) -> R {
+    HOVER.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.as_ref().is_none_or(|hv| hv.e != e as isize || hv.at != (x, y)) {
+            let cp = rich::char_from_pos(e, x, y);
+            let view = (rich::scroll_y(e), rich::text_len(e));
+            match h.as_mut() {
+                Some(hv) if hv.e == e as isize && hv.cp == cp && hv.view == view => hv.at = (x, y),
+                _ => *h = Some(Hover::new(e, (x, y), cp, view)),
+            }
+        }
+        f(h.as_ref().unwrap())
+    })
+}
+
+impl Hover {
+    fn new(e: HWND, at: (i32, i32), cp: i32, view: (i32, usize)) -> Hover {
+        let t = rich::paras_around(e, (cp - 1).max(0) as usize, cp.max(0) as usize);
+        // The box of the line under the point: the circle is drawn left of the text, over
+        // the glyph and the gap after it.
+        let ps = (t.from + rich::para_start(&t.t, cp.max(0) - t.from as i32) as usize) as i32;
+        let boxes = [ps, cp, cp - 1]
+            .into_iter()
+            .filter(|&c| c >= 0 && t.get(c as usize).is_some_and(is_task) && (c == 0 || t.get(c as usize - 1) == Some(rich::CR)))
+            .map(|c| {
+                let (cx, cy, r) = crate::win::editor::checks::circle(e, c, t.get(c as usize + 1));
+                (c, cx, cy, r)
+            })
+            .collect();
+        let chars = [cp, cp - 1].map(|c| Under { c, area: OnceCell::new(), link: OnceCell::new(), tip: OnceCell::new() });
+        Hover { e: e as isize, at, cp, view, t, boxes, chars }
+    }
+
+    /// The box whose circle (`x`, `y`) is on.
+    fn box_at(&self, x: i32, y: i32) -> Option<i32> {
+        self.boxes.iter().find(|&&(_, cx, cy, r)| (x as f32 - cx).abs() <= r && (y as f32 - cy).abs() <= r).map(|b| b.0)
+    }
+
+    /// Which of the characters (`chars`) (`x`, `y`) is on.
+    fn char_at(&self, x: i32, y: i32) -> Option<usize> {
+        let e = self.e as HWND;
+        (0..2).find(|&k| {
+            let c = self.chars[k].c;
+            c >= 0 && {
+                let r = self.chars[k].area.get_or_init(|| {
+                    let lh = line_h(e);
+                    let (p, q) = (rich::pos_from_char(e, c), rich::pos_from_char(e, c + 1));
+                    let right = if q.y == p.y && q.x > p.x { q.x } else { p.x };
+                    // A line is as tall as what's on it (a picture): down to where the next
+                    // starts.
+                    let next_line = self.t.t.get(c as usize - self.t.from..).and_then(|r| r.iter().position(|&ch| ch == 13)).map(|i| c + i as i32 + 1);
+                    let bottom = next_line.filter(|&n| (n as usize) < self.t.len).map_or(p.y + lh, |n| rich::pos_from_char(e, n).y);
+                    RECT { left: p.x, right, top: p.y, bottom: bottom.max(p.y + lh) }
+                });
+                x >= r.left && x < r.right && y >= r.top && y < r.bottom
+            }
+        })
+    }
+
+    /// The link under (`x`, `y`), and the character pointed at.
+    fn link_at(&self, x: i32, y: i32) -> Option<(&Link, usize)> {
+        let k = self.char_at(x, y)?;
+        let (e, c) = (self.e as HWND, self.chars[k].c);
+        let link = self.chars[k].link.get_or_init(|| rich::item_link_in(e, &self.t, c as usize).or_else(|| rich::link_at(e, c).filter(|l| c >= l.0 && c < l.1)));
+        link.as_ref().map(|l| (l, k))
+    }
+
+    /// The tip for the link under (`x`, `y`): its anchor and its label.
+    fn tip_at(&self, x: i32, y: i32) -> Option<&(RECT, String)> {
+        let (link, k) = self.link_at(x, y)?;
+        Some(self.chars[k].tip.get_or_init(|| tip(self.e as HWND, &self.t, link, self.chars[k].c)))
+    }
+}
+
+/// The checkbox whose circle is at (`x`, `y`) in editor `e`.
+pub(super) fn checkbox_at(e: HWND, x: i32, y: i32) -> Option<i32> {
+    hover(e, x, y, |hv| hv.box_at(x, y))
+}
+
 /// The link under the pointer: (start, end, address, the character pointed at). A
 /// picture counts as its attachment's link.
-fn link_under(e: HWND, x: i32, y: i32) -> Option<(i32, i32, String, i32)> {
-    let lh = line_h(e);
-    let t = rich::text(e);
-    let cp = rich::char_from_pos(e, x, y);
-    let over = |c: i32| {
-        let (p, q) = (rich::pos_from_char(e, c), rich::pos_from_char(e, c + 1));
-        let right = if q.y == p.y && q.x > p.x { q.x } else { p.x };
-        // A line is as tall as what's on it (a picture): down to where the next starts.
-        let next_line = t.get(c.max(0) as usize..).and_then(|r| r.iter().position(|&ch| ch == 13)).map(|i| c + i as i32 + 1);
-        let bottom = next_line.filter(|&n| (n as usize) < t.len()).map_or(p.y + lh, |n| rich::pos_from_char(e, n).y);
-        c >= 0 && x >= p.x && x < right && y >= p.y && y < bottom.max(p.y + lh)
-    };
-    let hit = [cp, cp - 1].into_iter().find(|&c| over(c))?;
-    if let Some((a, b, url)) = rich::item_link(e, &t, hit as usize) {
-        return Some((a, b, url, hit));
-    }
-    rich::link_at(e, hit).filter(|l| hit >= l.0 && hit < l.1).map(|(a, b, url)| (a, b, url, hit))
+pub(super) fn link_under(e: HWND, x: i32, y: i32) -> Option<(i32, i32, String, i32)> {
+    hover(e, x, y, |hv| hv.link_at(x, y).map(|((a, b, url), k)| (*a, *b, url.clone(), hv.chars[k].c)))
 }
 
 /// Over a link, a tooltip shows where it goes.
 fn link_tip(e: HWND, x: i32, y: i32) {
     use crate::win::ui::tooltip;
+    hover(e, x, y, |hv| match hv.tip_at(x, y) {
+        Some((anchor, label)) => tooltip::hover(e, *anchor, label, ""),
+        None => tooltip::leave(e),
+    });
+}
+
+/// The tooltip for `link` at character `cp`, which `t` holds the paragraph of: where it
+/// goes, and what it says.
+fn tip(e: HWND, t: &rich::Span, link: &Link, cp: i32) -> (RECT, String) {
     let (s, lh) = (scale(e), line_h(e));
-    let Some((a, b, url, cp)) = link_under(e, x, y) else {
-        tooltip::leave(e);
-        return;
-    };
+    let (a, b) = (link.0, link.1);
     // Under the part of the link the pointer is on.
-    let t = rich::text(e);
-    let from = rich::name_start(&t, a, b).max(a);
+    let from = match (a as usize).checked_sub(t.from).zip((b as usize).checked_sub(t.from)).filter(|&(_, j)| j <= t.t.len()) {
+        Some((i, j)) => t.from as i32 + rich::name_start(&t.t, i as i32, j as i32),
+        None => a + rich::name_start(&rich::raw_text(e, a as usize, b as usize), 0, b - a),
+    }
+    .max(a);
     let p0 = rich::pos_from_char(e, from);
     let pe = rich::pos_from_char(e, b);
     let p = rich::pos_from_char(e, cp);
@@ -61,27 +180,33 @@ fn link_tip(e: HWND, x: i32, y: i32) {
     let (l, r) = if p0.y == pe.y { (p0.x, pe.x) } else { (p.x - half, p.x + half) };
     let anchor = crate::win::util::rect(l, p.y, (r - l).max(1), lh);
     // An attachment: its name, and what dragging does.
-    if let Some(name) = crate::common::attach::name_of(&url) {
+    if let Some(name) = crate::common::attach::name_of(&link.2) {
         // Under what the line shows. A picture sits on its line's baseline, so that's its
         // bottom edge; where the next line starts can be further down (a gap, an empty
         // line), which put the tip over the text below. A file's chip goes down to there.
-        let anchor = if rich::item_link(e, &t, cp as usize).is_some() {
-            let (s0, s1) = rich::item_shown(&t, cp as usize);
+        let anchor = if rich::item_link_in(e, t, cp as usize).is_some() {
+            let (s0, s1) = item_shown_in(t, cp as usize);
             let (q0, q1) = (rich::pos_from_char(e, s0 as i32), rich::pos_from_char(e, s1 as i32));
-            let next = t[cp as usize..].iter().position(|&c| c == 13).map(|i| cp + i as i32 + 1).filter(|&n| (n as usize) < t.len());
-            let picture = t.get(s0) == Some(&0xFFFC);
+            let next = t.t[cp as usize - t.from..].iter().position(|&c| c == 13).map(|i| cp + i as i32 + 1).filter(|&n| (n as usize) < t.len);
+            let picture = t.get(s0) == Some(0xFFFC);
             let line_end = next.map_or(q0.y + lh, |n| rich::pos_from_char(e, n).y);
             let bottom = if picture { rich::baseline_at(e, s0 as i32).filter(|&b| b > q0.y).unwrap_or(line_end) } else { line_end }.min(q0.y + (600.0 * s) as i32);
             crate::win::util::rect(q0.x, q0.y, (q1.x - q0.x).max(1), (bottom - q0.y).max(lh))
         } else {
             anchor
         };
-        tooltip::hover(e, anchor, &name, "");
-        return;
+        return (anchor, name);
     }
-    let shown = url.strip_prefix("https://").or(url.strip_prefix("http://")).unwrap_or(&url).trim_end_matches('/');
+    let url = link.2.as_str();
+    let shown = url.strip_prefix("https://").or(url.strip_prefix("http://")).unwrap_or(url).trim_end_matches('/');
     let shown: String = if shown.chars().count() > 60 { shown.chars().take(59).chain(std::iter::once('\u{2026}')).collect() } else { shown.to_string() };
-    tooltip::hover(e, anchor, &shown, "");
+    (anchor, shown)
+}
+
+/// `rich::item_shown` for character `cp`, which `t` holds the paragraph of.
+fn item_shown_in(t: &rich::Span, cp: usize) -> (usize, usize) {
+    let (a, b) = rich::item_shown(&t.t, cp - t.from);
+    (t.from + a, t.from + b)
 }
 
 /// The text menu (formatting and editing) at screen point `p`, or under the caret when
@@ -105,6 +230,10 @@ fn text_menu(h: HWND, e: HWND, mut p: POINT) {
 
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
     let h = parent as HWND;
+    // Anything but the pointer moving may change what's under it.
+    if !matches!(msg, WM_MOUSEMOVE | WM_SETCURSOR | WM_NCHITTEST | WM_MOUSELEAVE) {
+        hover_forget();
+    }
     match msg {
         // One scroller for the whole note (see `scrollbar::wheel`), never RichEdit's own.
         WM_MOUSEWHEEL => {
@@ -305,7 +434,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 && let Some((_, b, _, cp)) = link_under(e, at.x, at.y)
             {
                 // Select it, as Explorer does with a file: it can be cut, copied or deleted.
-                let (start, _) = rich::item_shown(&rich::text(e), cp as usize);
+                let (start, _) = item_shown_in(&rich::paras_around(e, cp as usize, cp as usize), cp as usize);
                 rich::set_sel(e, start as i32, b);
             }
             return 0;
@@ -364,7 +493,14 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
     if msg == WM_LBUTTONDOWN {
         rich::picture_pressed(e);
     }
+    // A key may draw nothing (most key-ups, the key-down of a letter, a caret moved by an
+    // arrow): told apart by whether it changed the text, the selection or the view.
+    let key = matches!(msg, WM_KEYDOWN | WM_KEYUP).then(|| view_of(e));
     let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
+    // Selecting by dragging may have scrolled the text under the pointer.
+    if msg == WM_MOUSEMOVE && wp & 0x0001 != 0 {
+        hover_forget();
+    }
     // Resized by its handles (RichEdit may do the whole drag inside the press): an edit,
     // saved like typing.
     if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONUP) && rich::picture_dragged(e, msg == WM_LBUTTONUP) {
@@ -386,8 +522,6 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         msg,
         WM_PAINT
             | WM_CHAR
-            | WM_KEYDOWN
-            | WM_KEYUP
             | WM_LBUTTONDOWN
             | WM_LBUTTONUP
             | WM_LBUTTONDBLCLK
@@ -405,10 +539,13 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             // Scrolled (the wheel's glide sets the position every frame): RichEdit draws the
             // rows coming into view right away, so the circles go on them right away too.
             | rich::EM_SETSCROLLPOS
-    ) || (msg == WM_MOUSEMOVE && wp & 0x0001 != 0);
+    ) || (msg == WM_MOUSEMOVE && wp & 0x0001 != 0)
+        || key.is_some_and(|before| key_drew(msg, wp as u16, before, view_of(e)));
     if drew {
-        crate::win::editor::checks::paint(e);
-        crate::win::editor::emoji::paint(e);
+        // The text on screen, read once for both.
+        let (t, a0, b0) = rich::screen_text(e);
+        crate::win::editor::checks::paint_in(e, &t, a0, b0);
+        crate::win::editor::emoji::paint_in(e, &t, a0, b0);
         if let Some((paper, s)) = crate::win::editor::checks::paper(e) {
             use crate::win::editor::fade;
             // Scrolling may have drawn anywhere. Typing, selecting and the like draw around
@@ -429,4 +566,29 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         super::scrollbar::sync(h);
     }
     r
+}
+
+/// What a key can change that RichEdit draws: the text's length, the selection, the scroll
+/// position.
+fn view_of(e: HWND) -> (usize, (i32, i32), i32) {
+    (rich::text_len(e), rich::sel(e), rich::scroll_y(e))
+}
+
+/// Whether key message `msg` (key `vk`) may have drawn, from what it changed (`before`,
+/// `after`: `view_of`). A key that changed none of it drew nothing, but one with Ctrl
+/// (other than a move, or Ctrl itself) may have changed formatting alone. A caret only
+/// moved, by an arrow or the like, draws nothing either: the caret is Windows' own. The
+/// overlays went on three times a keystroke (down, character, up), each a read of the
+/// window.
+fn key_drew(msg: u32, vk: u16, before: (usize, (i32, i32), i32), after: (usize, (i32, i32), i32)) -> bool {
+    let moved = matches!(vk, VK_HOME | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_PRIOR | VK_NEXT | VK_END);
+    let modifier = matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | VK_CAPITAL);
+    if msg == WM_KEYDOWN && key_down(VK_CONTROL) && !moved && !modifier {
+        return true;
+    }
+    if before == after {
+        return false;
+    }
+    let caret = |s: (i32, i32)| s.0 == s.1;
+    !(moved && before.0 == after.0 && before.2 == after.2 && caret(before.1) && caret(after.1))
 }
