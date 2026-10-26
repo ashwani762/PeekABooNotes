@@ -12,7 +12,10 @@
 //! with (RTF keeps it as `\trgaph`); rows from elsewhere are tables.
 //!
 //! In the editor's text a row reads U+FFF9 CR, then each cell's text ending in U+0007,
-//! then U+FFFB CR.
+//! then U+FFFB CR. A quote can hold blocks of its own (`> > nested`, a fenced code block
+//! in a quote): RichEdit nests their rows in its cell, and a cell's text then reads its
+//! paragraphs with the nested rows among them. A nested row at the end of a cell always
+//! has an empty paragraph after it, as two blocks always have one between them.
 
 use super::*;
 
@@ -85,33 +88,45 @@ pub struct Row {
     pub end: usize,
 }
 
-/// Every row in `t`, in order.
+/// Whether the U+FFF9 at `i` starts a row (it opens a paragraph).
+fn starts_row(t: &[u16], i: usize) -> bool {
+    t[i] == ROW_START && (i == 0 || matches!(t[i - 1], CR | CELL))
+}
+
+/// Every row in `t`, in order, those nested in a cell too: each ends past the rows nested
+/// in it.
 pub fn rows(t: &[u16]) -> Vec<Row> {
     let mut out = Vec::new();
-    let mut i = 0;
-    while i < t.len() {
-        if t[i] == ROW_START
-            && (i == 0 || matches!(t[i - 1], CR | CELL))
-            && let Some(k) = t[i..].iter().position(|&c| c == ROW_END)
+    let mut open = Vec::new();
+    for i in 0..t.len() {
+        if starts_row(t, i) {
+            open.push(i);
+        } else if t[i] == ROW_END
+            && let Some(start) = open.pop()
         {
-            let end = (i + k + 2).min(t.len());
-            out.push(Row { start: i, end });
-            i = end;
-            continue;
+            out.push(Row { start, end: (i + 2).min(t.len()) });
         }
-        i += 1;
     }
+    // A nested row closes before the row around it: back in order of where they start.
+    out.sort_by_key(|r| r.start);
     out
 }
 
-/// The cells of `row`: each one's text, as (start, end) in `t` (end at its U+0007).
+/// The cells of `row`: each one's text, as (start, end) in `t` (end at its U+0007). A row
+/// nested in a cell is part of that cell's text.
 pub fn cells(t: &[u16], row: Row) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut a = row.start + 2;
-    for (i, &c) in t.iter().enumerate().take(row.end).skip(row.start + 2) {
-        if c == CELL {
-            out.push((a, i));
-            a = i + 1;
+    let mut depth = 0;
+    for i in row.start + 2..row.end.min(t.len()) {
+        match t[i] {
+            _ if starts_row(t, i) => depth += 1,
+            ROW_END if depth > 0 => depth -= 1,
+            CELL if depth == 0 => {
+                out.push((a, i));
+                a = i + 1;
+            }
+            _ => {}
         }
     }
     out
@@ -147,23 +162,30 @@ pub fn kind(h: HWND, row: Row) -> Block {
     }
 }
 
-/// Blocks in `t`: a table's rows together, each quote and code block on its own.
+/// Blocks in `t`: a table's rows together, each quote and code block on its own; a block
+/// nested in a cell comes after the one holding it.
 pub fn blocks(h: HWND, t: &[u16]) -> Vec<(Block, Vec<Row>)> {
     let mut out: Vec<(Block, Vec<Row>)> = Vec::new();
     for row in rows(t) {
         let k = kind(h, row);
-        match out.last_mut() {
-            Some((Block::Table, rs)) if k == Block::Table && rs.last().is_some_and(|r| r.end == row.start) => rs.push(row),
-            _ => out.push((k, vec![row])),
+        // The row after a table's last one is more of it (a block nested in the row
+        // before may have come in between).
+        let table = (k == Block::Table).then(|| out.iter_mut().rev().find(|(kk, rs)| *kk == Block::Table && rs.last().is_some_and(|r| r.end == row.start))).flatten();
+        match table {
+            Some((_, rs)) => rs.push(row),
+            None => out.push((k, vec![row])),
         }
     }
     out
 }
 
-/// The block holding `cp`, with its rows.
+/// The block holding `cp`, with its rows: the innermost one, in a block nested in a quote.
 pub fn block_at(h: HWND, t: &[u16], cp: i32) -> Option<(Block, Vec<Row>)> {
     let cp = cp.max(0) as usize;
-    blocks(h, t).into_iter().find(|(_, rs)| rs.first().is_some_and(|r| r.start <= cp) && rs.last().is_some_and(|r| cp < r.end))
+    blocks(h, t)
+        .into_iter()
+        .filter(|(_, rs)| rs.first().is_some_and(|r| r.start <= cp) && rs.last().is_some_and(|r| cp < r.end))
+        .max_by_key(|(_, rs)| rs[0].start)
 }
 
 // ---------------------------------------------------------------- looks
@@ -260,12 +282,28 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
     let total = column_twips(h);
     let (a, b) = sel(h);
     let c = crate::win::util::cref;
+    let all = rows(t);
+    // Each row's cell margin and new cell widths, for the blocks nested in its cells.
+    let mut fitted: std::collections::HashMap<usize, (i32, Vec<i32>)> = std::collections::HashMap::new();
     for (kind, rows) in blocks(h, t) {
         for (i, &row) in rows.iter().enumerate() {
             let Some((r, old)) = get(h, row) else { continue };
+            // A block nested in a cell fills that cell's text, as one in the note fills the
+            // text column (its parent comes first, so its widths are known).
+            let room = all
+                .iter()
+                .filter(|p| p.start < row.start && row.end <= p.end)
+                .max_by_key(|p| p.start)
+                .and_then(|p| {
+                    let n = cells(t, *p).iter().position(|&(a, b)| a <= row.start && row.start <= b)?;
+                    let (margin, widths) = fitted.get(&p.start)?;
+                    Some(widths.get(n)? - 2 * margin)
+                })
+                .unwrap_or(total);
             // The cells' padding reaches out past their edges: keep the right border in view
             // (and an indented quote's start further in).
-            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), (total - 2 * r.margin - r.indent).max(720));
+            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), (room - 2 * r.margin - r.indent).max(720));
+            fitted.insert(row.start, (r.margin, widths.clone()));
             let cells: Vec<CellParms> = widths
                 .iter()
                 .map(|&w| match kind {
@@ -410,6 +448,57 @@ pub(super) fn cell_text_width(h: HWND, t: &[u16], cp: i32) -> Option<i32> {
     cs.get(n).map(|c| c.width - 2 * r.margin)
 }
 
+// ---------------------------------------------------------------- code's language
+
+/// Where a code block's language (the `rust` of ```rust) is in its cell's text `a..b`:
+/// it's kept as hidden text at the cell's start, which the RTF keeps while RichEdit draws
+/// nothing for it, moves the caret past it, never types into it and leaves it out of a
+/// copy. None for code without one. (Emoji selectors' stand-ins are hidden too, and are
+/// not it.)
+pub fn code_tag(h: HWND, t: &[u16], a: usize, b: usize) -> Option<(usize, usize)> {
+    use windows::Win32::UI::Controls::RichEdit::{tomCharFormat, tomTrue};
+    let r = range(h, a as i32, a as i32)?;
+    let mut tag: Option<(usize, usize)> = None;
+    let mut x = a;
+    // A run of formatting at a time: code is mostly one.
+    while x < b.min(t.len()) {
+        let (end, hidden) = unsafe {
+            r.SetRange(x as i32, x as i32).ok()?;
+            r.MoveEnd(tomCharFormat.0, 1).ok()?;
+            let end = (r.GetEnd().ok()?.max(0) as usize).clamp(x + 1, b);
+            (end, r.GetFont().ok()?.GetHidden().ok()? == tomTrue.0)
+        };
+        for (i, &c) in t.iter().enumerate().take(end).skip(x) {
+            if hidden && unmark(c) == c {
+                tag = Some(tag.map_or((i, i + 1), |(s, _)| (s, i + 1)));
+            } else if tag.is_some() {
+                return tag;
+            }
+        }
+        x = end;
+    }
+    tag
+}
+
+/// Where the text of the code cell `a..b` starts, past a language kept at its start.
+pub fn past_tag(h: HWND, t: &[u16], a: usize, b: usize) -> usize {
+    match code_tag(h, t, a, b) {
+        Some((s, e)) if s == a => e,
+        _ => a,
+    }
+}
+
+/// Keep `lang` as the language of the code cell starting at `a` (its text already in).
+pub(super) fn set_code_tag(h: HWND, a: i32, lang: &str) {
+    if lang.is_empty() {
+        return;
+    }
+    set_sel(h, a, a);
+    insert_text(h, lang);
+    set_sel(h, a, a + lang.encode_utf16().count() as i32);
+    set_effect(h, CFM_HIDDEN, true);
+}
+
 /// Put the paragraphs from `a` to `b` (paragraph starts and ends) into a new quote or code
 /// block in their place, formatting and all (code keeps only the text).
 pub fn wrap(h: HWND, a: i32, b: i32, kind: Block) {
@@ -463,10 +552,20 @@ pub fn wrap(h: HWND, a: i32, b: i32, kind: Block) {
 /// Take the quote or code block holding `cp` apart: its text goes back to ordinary
 /// paragraphs where it was. Returns where that text now starts and ends.
 pub fn unwrap(h: HWND, cp: i32) -> Option<(i32, i32)> {
-    let t = text(h);
-    let (kind, rows, ca, cb) = cell_at(h, &t, cp)?;
+    let mut t = text(h);
+    let (kind, mut rows, ca, mut cb) = cell_at(h, &t, cp)?;
     if kind == Block::Table {
         return None;
+    }
+    // Code's language goes with the block: hidden in a paragraph, it would be text nobody
+    // sees that still went out with the note.
+    if kind == Block::Code
+        && let Some((s, e)) = code_tag(h, &t, ca, cb)
+    {
+        set_sel(h, s as i32, e as i32);
+        replace_sel(h, "");
+        t = text(h);
+        (_, rows, _, cb) = cell_at(h, &t, ca as i32)?;
     }
     let row = rows[0];
     let len = (cb - ca) as i32;
@@ -657,6 +756,40 @@ mod tests {
     fn shape(h: HWND) -> Vec<(Block, usize, usize)> {
         let t = text(h);
         blocks(h, &t).into_iter().map(|(k, rs)| (k, rs.len(), cells(&t, rs[0]).len())).collect()
+    }
+
+    /// A quote or code block in a quote is a row nested in the quote's cell, and fills that
+    /// cell's text rather than the note's width, at any width the note is.
+    #[test]
+    fn nested_blocks_fit_their_cell() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;
+        let h = editor();
+        load_markdown(h, "T\n> outer\n> > inner\n> ```\n> code\n> ```");
+        assert_eq!(plain(h), "T/[/outer/[/inner|]//[/code|]/|]/");
+        for w in [400, 260, 600] {
+            unsafe { MoveWindow(h, 0, 0, w, 300, 0) };
+            style_blocks(h);
+            let t = text(h);
+            let all = rows(&t);
+            assert_eq!(all.len(), 3);
+            let (outer, ocells) = get(h, all[0]).unwrap();
+            let room = ocells[0].width - 2 * outer.margin;
+            for &r in &all[1..] {
+                assert!(r.end <= all[0].end, "nested in the quote");
+                let (p, cs) = get(h, r).unwrap();
+                let used = cs.iter().map(|c| c.width).sum::<i32>() + 2 * p.margin + p.indent;
+                assert!((room - used).abs() <= 2, "width {w}: {used} in {room}");
+            }
+            assert!(ocells[0].width + 2 * outer.margin <= column_twips(h) + 2);
+            // Drawn inside it: further in than the quote's own text.
+            let x = |w: &str| pos_from_char(h, plain(h).find(w).unwrap() as i32).x;
+            assert!(x("inner") > x("outer") && x("code") > x("outer"), "width {w}");
+        }
+        // Stored and opened again: the same rows.
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        assert_eq!(plain(h2), plain(h));
+        assert_eq!(shape(h2), vec![(Block::Quote, 1, 1), (Block::Quote, 1, 1), (Block::Code, 1, 1)]);
     }
 
     #[test]

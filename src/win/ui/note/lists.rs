@@ -256,8 +256,10 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
     let t = rich::text(e);
     let (ps, pe) = (rich::para_start(&t, a), rich::para_end(&t, a));
     if let Some((kind, rows, ca, cb)) = rich::cell_at(e, &t, a) {
+        // A code block's first line starts past its language, kept hidden there.
+        let text = if kind == Block::Code && ps as usize == ca { rich::past_tag(e, &t, ca, cb) } else { ps as usize };
         // Empty, or holding just the indent the last Enter gave it.
-        let blank = t[ps as usize..pe as usize].iter().all(|&c| c == b' ' as u16);
+        let blank = t[text..pe as usize].iter().all(|&c| c == b' ' as u16);
         if kind == Block::Table {
             // Only the table's last cell is a way out (Enter elsewhere is a line in a cell):
             // empty, or on an empty line after its text, Enter goes on below the table.
@@ -291,7 +293,7 @@ pub(super) fn block_enter(e: HWND) -> Option<bool> {
             return Some(true);
         }
         if kind == Block::Code {
-            let indent: String = t[ps as usize..pe as usize].iter().take_while(|&&c| c == b' ' as u16).map(|_| ' ').collect();
+            let indent: String = t[text..pe as usize].iter().take_while(|&&c| c == b' ' as u16).map(|_| ' ').collect();
             rich::still(e, || {
                 rich::replace_sel(e, &format!("\r{indent}"));
                 // Only the last line keeps the air below it.
@@ -338,6 +340,8 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
             let (mut na, mut nb) = (a, b);
             rich::still(e, || {
                 for &ps in starts.iter().rev() {
+                    // The first line's text starts past the block's hidden language.
+                    let ps = if ps as usize == ca { rich::past_tag(e, &t, ca, cb) as i32 } else { ps };
                     let n = if shift { t[ps as usize..].iter().take(4).take_while(|&&c| c == b' ' as u16).count() as i32 } else { -4 };
                     if n == 0 {
                         continue;
@@ -374,12 +378,17 @@ pub(super) fn block_tab(e: HWND, shift: bool) -> bool {
 }
 
 /// Backspace at the very start of a quote or code block takes the block apart, leaving
-/// its text as ordinary paragraphs.
+/// its text as ordinary paragraphs. (A code block's text starts past its hidden language,
+/// where the caret is put.)
 pub(super) fn block_backspace(e: HWND) -> bool {
     let (a, b) = rich::sel(e);
     let t = rich::text(e);
     match rich::cell_at(e, &t, a) {
-        Some((rich::Block::Quote | rich::Block::Code, _, ca, _)) if a == b && a as usize == ca => {
+        Some((rich::Block::Quote, _, ca, _)) if a == b && a as usize == ca => {
+            rich::still(e, || rich::unwrap(e, a));
+            true
+        }
+        Some((rich::Block::Code, _, ca, cb)) if a == b && (a as usize == ca || a as usize == rich::past_tag(e, &t, ca, cb)) => {
             rich::still(e, || rich::unwrap(e, a));
             true
         }
@@ -1045,6 +1054,49 @@ mod tests {
         rich::set_sel(h, one, one);
         rich::replace_sel(h, "-");
         assert!(!try_auto_list(null_mut(), h));
+    }
+
+    /// A code block's language is hidden at its start: Enter, Tab and Backspace there work
+    /// as they do without one.
+    #[test]
+    fn code_with_a_language_edits_as_code() {
+        let start = |h: HWND| {
+            let t = rich::text(h);
+            let (_, _, ca, cb) = rich::cell_at(h, &t, 4).unwrap();
+            rich::past_tag(h, &t, ca, cb) as i32
+        };
+        // Tab and Shift+Tab move the first line too, after the language.
+        let h = editor("");
+        rich::load_markdown(h, "T\n```rust\none\ntwo\n```");
+        let a = start(h);
+        rich::set_sel(h, a, a + 6);
+        assert!(block_tab(h, false));
+        assert_eq!(rich::to_markdown(h, true), "# T\n```rust\n    one\n    two\n```");
+        let a = start(h);
+        rich::set_sel(h, a, a + 10);
+        assert!(block_tab(h, true));
+        assert_eq!(rich::to_markdown(h, true), "# T\n```rust\none\ntwo\n```");
+        // Enter on an indented first line keeps its indent.
+        let h = editor("");
+        rich::load_markdown(h, "T\n```py\n  x\n```");
+        let a = start(h);
+        rich::set_sel(h, a + 3, a + 3);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(rich::to_markdown(h, true), "# T\n```py\n  x\n  \n```");
+        // Enter in an empty block takes it away, language and all.
+        let h = editor("");
+        rich::load_markdown(h, "T\n```js\n```\nend");
+        let a = start(h);
+        rich::set_sel(h, a, a);
+        assert_eq!(block_enter(h), Some(true));
+        assert_eq!(rich::to_markdown(h, true), "# T\nend");
+        // Backspace at the start of its text takes the block apart.
+        let h = editor("");
+        rich::load_markdown(h, "T\n```js\nlet a\n```");
+        let a = start(h);
+        rich::set_sel(h, a, a);
+        assert!(block_backspace(h));
+        assert_eq!(rich::to_markdown(h, true), "# T\nlet a");
     }
 
     /// A selection from a line into the quote below it: the line becomes a code block,

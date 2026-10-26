@@ -9,12 +9,37 @@ use super::*;
 /// With `inline` false only list/task markers are produced (cheap: one query per paragraph).
 pub fn to_markdown(h: HWND, inline: bool) -> String {
     let t = text(h);
+    let mut out = body_md(h, &t, 0, t.len(), inline);
+    // Inline mode is for export: plain `-` lists in the light mode are what we store.
+    if !inline {
+        out = out.lines().map(light_task).collect::<Vec<_>>().join("\n");
+    }
+    // A line break within a paragraph (Shift+Enter) goes out as a line: never as the
+    // control character RichEdit keeps it as.
+    out.replace('\u{B}', "\n").trim_end().to_string()
+}
+
+/// What `body_md` wrote last.
+#[derive(Clone, Copy, PartialEq)]
+enum Last {
+    Text,
+    Empty,
+    Block(Block),
+}
+
+/// The paragraphs and blocks from `a` to `b` (the whole note, or a quote's cell) as
+/// Markdown, a line each and each ending in a newline (`inline`: with marks, links and
+/// alignment).
+///
+/// Import takes one blank line on either side of a block as Markdown's way to set it
+/// apart, not as an empty paragraph, so an empty paragraph next to a block goes out with
+/// one more: a note goes out and comes back in with the empty lines it had.
+fn body_md(h: HWND, t: &[u16], a: usize, b: usize, inline: bool) -> String {
     let mut out = String::new();
-    let mut start = 0usize;
+    let mut start = a;
     let mut numbers = [0usize; MAX_LEVEL as usize + 1];
-    // The block just written, while nothing else has come after it.
-    let mut last_block = None;
-    while start <= t.len() {
+    let mut last = None;
+    while start <= b {
         // Two blocks always have an empty paragraph between them (RichEdit won't let two
         // tables touch): that's their gap, not a blank line.
         if t.get(start) == Some(&CR) && start >= 2 && t[start - 2] == ROW_END && t.get(start + 1) == Some(&ROW_START) {
@@ -23,42 +48,47 @@ pub fn to_markdown(h: HWND, inline: bool) -> String {
         }
         // Quotes, code blocks and tables go out whole.
         if t.get(start) == Some(&ROW_START)
-            && let Some((kind, rows)) = block_at(h, &t, start as i32)
+            && let Some((kind, rows)) = block_at(h, t, start as i32)
         {
-            // Two quotes (or tables) in a row would read back as one: a blank line keeps
-            // them two (and import drops it again).
-            if last_block == Some(kind) && kind != Block::Code {
+            if inline && last == Some(Last::Empty) {
                 out.push('\n');
             }
-            last_block = Some(kind);
-            out.push_str(&block_md(h, &t, kind, &rows, inline));
+            // Two quotes (or tables) in a row would read back as one: a blank line keeps
+            // them two (and import drops it again).
+            if last == Some(Last::Block(kind)) && kind != Block::Code {
+                out.push('\n');
+            }
+            last = Some(Last::Block(kind));
+            out.push_str(&block_md(h, t, kind, &rows, inline));
             out.push('\n');
             // A quote under a list item is part of it: the list's count goes on after it.
             if kind != Block::Quote || quote_level(h, rows[0]) == 0 {
                 numbers = [0; MAX_LEVEL as usize + 1];
             }
-            start = rows.last().map_or(t.len(), |r| r.end);
-            if start >= t.len() {
+            start = rows.last().map_or(b, |r| r.end);
+            // (At the end of a quote, the empty paragraph after a block is RichEdit's.)
+            if start >= b {
                 break;
             }
             continue;
         }
-        let end = t[start..].iter().position(|&c| c == CR).map(|i| start + i).unwrap_or(t.len());
-        last_block = None;
-        out.push_str(&para_md(h, &t, start, end, inline, &mut numbers));
+        let end = t[start..b].iter().position(|&c| c == CR).map_or(b, |i| start + i);
+        if start == end {
+            if inline && matches!(last, Some(Last::Block(_))) {
+                out.push('\n');
+            }
+            last = Some(Last::Empty);
+        } else {
+            last = Some(Last::Text);
+        }
+        out.push_str(&para_md(h, t, start, end, inline, &mut numbers));
         out.push('\n');
-        if end >= t.len() {
+        if end >= b {
             break;
         }
         start = end + 1;
     }
-    // Inline mode is for export: plain `-` lists in the light mode are what we store.
-    if !inline {
-        out = out.lines().map(light_task).collect::<Vec<_>>().join("\n");
-    }
-    // A line break within a paragraph (Shift+Enter) goes out as a line: never as the
-    // control character RichEdit keeps it as.
-    out.replace('\u{B}', "\n").trim_end().to_string()
+    out
 }
 
 /// A task line without the `- `, past any indent and quote marks.
@@ -114,8 +144,9 @@ fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: 
             body_start += 1;
         }
     }
-    // A centred or right-aligned line keeps its alignment on the way out.
-    let align = if inline && start > 0 && num == 0 && !task {
+    // A centred or right-aligned line keeps its alignment on the way out (the title and
+    // list items too).
+    let align = if inline {
         match pf.alignment {
             PFA_CENTER => Some("center"),
             PFA_RIGHT => Some("right"),
@@ -124,33 +155,42 @@ fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: 
     } else {
         None
     };
-    let mut out = prefix;
-    // Plain text that only looks like a list or heading ("- not a list", typed and
-    // reverted with Backspace) is escaped, so it comes back as text.
-    let title = inline && start == 0 && out.is_empty() && end > 0;
-    if out.is_empty() && !title && crate::common::store::looks_like_marker(&visible(t, body_start, end)) {
-        out.push('\\');
-    }
-    if title {
-        out.push_str("# ");
-        out.push_str(&with_links(h, t, 0, end));
+    let title = inline && start == 0 && prefix.is_empty() && end > 0;
+    let mut body = if title {
+        with_links(h, t, 0, end)
     } else if let Some(md) = inline.then(|| item_link(h, t, body_start)).flatten().and_then(|l| attachment_md(&l.2)) {
-        out.push_str(&md);
+        md
     } else if inline {
         let body = inline_md(h, t, body_start, end);
         // A ticked item's strikethrough is how it looks, not part of its text (also
         // inside other marks: **~~bread~~**).
         let done = task && t[start] == CHECKED;
-        out.push_str(&if done { body.replace("~~", "") } else { body });
+        if done { body.replace("~~", "") } else { body }
     } else if let Some(md) = light_attachment(h, t, body_start, end) {
-        out.push_str(&md);
+        md
     } else {
-        out.push_str(&visible(t, body_start, end));
+        visible(t, body_start, end)
+    };
+    // Plain text that only looks like a list or heading ("- not a list", typed and
+    // reverted with Backspace) is escaped, so it comes back as text; so is a list item's
+    // text that would read as a quote under it (`- \> text`), or a bullet's that would read
+    // as a checkbox (`- \[ ] text`).
+    let looks_plain = prefix.is_empty() && !title && crate::common::store::looks_like_marker(&visible(t, body_start, end));
+    let looks_item = inline && num != 0 && !task && (body.starts_with('>') || (is_bullet(num) && reads_as_box(&body)));
+    if looks_plain || looks_item {
+        body.insert(0, '\\');
     }
     match align {
-        Some(a) if !out.is_empty() => format!("<p align=\"{a}\">{out}</p>"),
-        _ => out,
+        Some(a) if title => format!("<h1 align=\"{a}\">{body}</h1>"),
+        _ if title => format!("# {body}"),
+        Some(a) if !body.is_empty() => format!("{prefix}<p align=\"{a}\">{body}</p>"),
+        _ => prefix + &body,
     }
+}
+
+/// Whether `s` starts as a checklist item's box is written (`[ ] `, `[x]`).
+fn reads_as_box(s: &str) -> bool {
+    ["[ ]", "[x]", "[X]"].iter().any(|m| s.strip_prefix(m).is_some_and(|r| r.is_empty() || r.starts_with(' ')))
 }
 
 /// The block starting at `cp` as the light text has it: (kind, how many lines, where it
@@ -180,20 +220,34 @@ fn block_md(h: HWND, t: &[u16], kind: Block, rows: &[Row], inline: bool) -> Stri
     match kind {
         Block::Quote => {
             let (a, b) = cells(t, rows[0]).first().copied().unwrap_or((rows[0].start, rows[0].start));
-            // Each paragraph as it would be outside (`> - item`), indented as the quote is.
+            // What it holds as it would be outside (`> - item`, `> > nested`, a fenced code
+            // block a line at a time), indented as the quote is.
             let indent = "  ".repeat(quote_level(h, rows[0]));
-            let mut numbers = [0usize; MAX_LEVEL as usize + 1];
-            let lines: Vec<String> = paras(a, b).into_iter().map(|(x, y)| format!("{indent}> {}", para_md(h, t, x, y, inline, &mut numbers)).trim_end().to_string()).collect();
+            let body = body_md(h, t, a, b, inline);
+            let body = body.strip_suffix('\n').unwrap_or(&body);
+            let lines: Vec<String> = body.split('\n').map(|l| format!("{indent}> {l}").trim_end().to_string()).collect();
             out.push_str(&lines.join("\n"));
         }
         Block::Code => {
             let (a, b) = cells(t, rows[0]).first().copied().unwrap_or((rows[0].start, rows[0].start));
-            out.push_str("```\n");
-            for (x, y) in paras(a, b) {
-                out.push_str(&unmark_str(&t[x..y]).replace('\u{B}', "\n"));
+            // Its language goes on the opening fence (```rust); its text is the rest.
+            let tag = code_tag(h, t, a, b);
+            let lang = tag.filter(|_| inline).map(|(s, e)| unmark_str(&t[s..e])).unwrap_or_default();
+            let code: Vec<u16> = match tag {
+                Some((s, e)) => t[a..s].iter().chain(&t[e..b]).copied().collect(),
+                None => t[a..b].to_vec(),
+            };
+            let lines: Vec<String> = code.split(|&c| c == CR).map(|l| unmark_str(l).replace('\u{B}', "\n")).collect();
+            // A fence longer than any run of backticks starting a line of the code, so none
+            // of them ends it early. (The light text keeps to three, as previews read it.)
+            let most = lines.iter().flat_map(|l| l.split('\n')).map(|l| l.trim_start().bytes().take_while(|&c| c == b'`').count()).max().unwrap_or(0);
+            let fence = "`".repeat(if inline && most >= 3 { most + 1 } else { 3 });
+            out.push_str(&format!("{fence}{lang}\n"));
+            for l in lines {
+                out.push_str(&l);
                 out.push('\n');
             }
-            out.push_str("```");
+            out.push_str(&fence);
         }
         Block::Table => {
             for (n, row) in rows.iter().enumerate() {
@@ -308,9 +362,10 @@ struct Effects {
 /// run at a time: TOM steps from one change of formatting to the next, and each run is
 /// one question to RichEdit. Character by character, a long note took seconds to write
 /// out (export, an assistant reading it).
+/// Hidden too: what's hidden isn't the note's text (see `marks`).
 fn effects(h: HWND, a: usize, b: usize) -> Vec<u32> {
     use windows::Win32::UI::Controls::RichEdit::tomCharFormat;
-    const ALL: u32 = CFM_BOLD | CFM_ITALIC | CFM_STRIKEOUT | CFM_UNDERLINE;
+    const ALL: u32 = CFM_BOLD | CFM_ITALIC | CFM_STRIKEOUT | CFM_UNDERLINE | CFM_HIDDEN;
     let mut out = vec![0; b.saturating_sub(a)];
     let r = super::links::range(h, a as i32, a as i32);
     let mut x = a;
@@ -390,6 +445,12 @@ fn marks(fx: &Effects, h: HWND, t: &[u16], a: usize, b: usize, mut cur: Marks, o
             continue;
         }
         let n = char_len(t, i, b);
+        // Hidden text, but for an emoji selector's stand-in, is nothing the note shows (a
+        // code block's language, come along with its text).
+        if fx.of[i - fx.from] & CFM_HIDDEN != 0 && unmark(t[i]) == t[i] {
+            i += n;
+            continue;
+        }
         // A space carries only the marks on both sides of it: `**bold** _italic_`, never
         // `**bold **_italic_` (a mark that closes after a space isn't one), while a bold
         // phrase stays one run, `**two words**`.
@@ -474,12 +535,39 @@ pub fn load_markdown(h: HWND, md: &str) {
 }
 
 fn load_markdown_now(h: HWND, md: &str) {
-    let mut lines: Vec<Line> = Vec::new();
-    // Quotes, code and tables: an empty line holds each one's place until the text is in.
-    let mut fills: Vec<(usize, Fill)> = Vec::new();
     let norm = md.replace("\r\n", "\n");
     // A file's final newline (and any blank lines after the text) is not an empty item.
     let src: Vec<&str> = norm.trim_end().split('\n').collect();
+    let body = parse_body(&src);
+    set_sel(h, 0, -1);
+    insert_text(h, &body.joined());
+    // Start clean: a reused control keeps the last document's list and character formats.
+    set_sel(h, 0, -1);
+    set_numbering(h, 0);
+    set_alignment(h, PFA_LEFT);
+    set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
+    put_body(h, 0, &body);
+    set_sel(h, 0, 0);
+}
+
+/// Markdown lines as paragraphs (the whole note, or what a quote holds): quotes, code and
+/// tables each have an empty paragraph holding their place until the text is in.
+struct Body {
+    lines: Vec<Line>,
+    /// Which of `lines` holds which block.
+    fills: Vec<(usize, Fill)>,
+}
+
+impl Body {
+    /// The paragraphs' text, as it goes into the editor.
+    fn joined(&self) -> String {
+        self.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\r")
+    }
+}
+
+fn parse_body(src: &[&str]) -> Body {
+    let mut lines: Vec<Line> = Vec::new();
+    let mut fills: Vec<(usize, Fill)> = Vec::new();
     let mut i = 0;
     while i < src.len() {
         // Trailing spaces only ever mean a line break (`hard_breaks`), which a line is anyway.
@@ -501,21 +589,19 @@ fn load_markdown_now(h: HWND, md: &str) {
         }
         lines.push(parse_line(raw));
     }
-    let joined: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
-    set_sel(h, 0, -1);
-    insert_text(h, &joined.join("\r"));
-    // Start clean: a reused control keeps the last document's list and character formats.
-    set_sel(h, 0, -1);
-    set_numbering(h, 0);
-    set_alignment(h, PFA_LEFT);
-    set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
-    let mut pos = 0i32;
+    Body { lines, fills }
+}
+
+/// Give the paragraphs of `body`, their text already in from `at`, their formats, links
+/// and blocks.
+fn put_body(h: HWND, at: i32, body: &Body) {
+    let mut pos = at;
     // Everything that inserts text (links' hidden instructions, blocks), by position.
     let mut later: Vec<(i32, Later)> = Vec::new();
-    let mut fills = fills.into_iter().peekable();
-    for (n, line) in lines.iter().enumerate() {
-        later.extend(line.links.iter().map(|(a, b, url)| (pos + a, Later::Link(pos + b, url.clone()))));
-        if let Some((_, fill)) = fills.next_if(|(at, _)| *at == n) {
+    let mut fills = body.fills.iter().peekable();
+    for (n, line) in body.lines.iter().enumerate() {
+        later.extend(line.links.iter().map(|(a, b, url)| (pos + a, Later::Link(pos + b, url))));
+        if let Some((_, fill)) = fills.next_if(|(k, _)| *k == n) {
             later.push((pos, Later::Block(fill)));
         }
         format_line(h, pos, line);
@@ -526,12 +612,11 @@ fn load_markdown_now(h: HWND, md: &str) {
     for (at, l) in later {
         match l {
             Later::Link(b, url) => {
-                set_link(h, at, b, &url);
+                set_link(h, at, b, url);
             }
-            Later::Block(fill) => put_block(h, at, &fill),
+            Later::Block(fill) => put_block(h, at, fill),
         }
     }
-    set_sel(h, 0, 0);
 }
 
 /// What a Markdown line makes of its paragraph.
@@ -594,6 +679,16 @@ fn parse_line(raw: &str) -> Line {
             Some(r) if d > 0 => (Kind::Number(l[..d].parse().unwrap_or(1)), r),
             _ => (Kind::Plain, raw),
         }
+    };
+    // A list item's alignment is inside its marker (`- <p align="center">item</p>`).
+    let (rest, align) = match aligned(rest) {
+        Some((inner, a)) if !matches!(k, Kind::Plain) => (inner, a),
+        _ => (rest, align),
+    };
+    // A list item's text that would read as a quote or a checkbox is written escaped.
+    let rest = match rest.strip_prefix('\\') {
+        Some(r) if matches!(k, Kind::Bullet | Kind::Number(_)) && (r.starts_with('>') || reads_as_box(r)) => r,
+        _ => rest,
     };
     let (text, mut runs, mut links) = parse_inline(rest);
     let mark = match k {
@@ -662,16 +757,17 @@ type Inline = (String, Runs, Links);
 
 /// A block's content, read from Markdown.
 enum Fill {
-    /// How far it's indented under a list item, and its paragraphs.
-    Quote(usize, Vec<Line>),
-    Code(Vec<String>),
+    /// How far it's indented under a list item, and what it holds (blocks of its own too).
+    Quote(usize, Body),
+    /// Its language (```rust), and its lines.
+    Code(String, Vec<String>),
     /// Rows of cells (each cell's paragraphs), and each column's alignment.
     Table(Vec<Vec<Vec<Inline>>>, Vec<u16>),
 }
 
-enum Later {
-    Link(i32, String),
-    Block(Fill),
+enum Later<'a> {
+    Link(i32, &'a str),
+    Block(&'a Fill),
 }
 
 /// Strip a line's marks and links: its text, (start, end, effect) runs and links.
@@ -703,11 +799,12 @@ fn parse_inline(rest: &str) -> Inline {
     (plain, runs, links)
 }
 
-/// `<p align="center">…</p>` (or right, or left): the inside and its alignment.
+/// `<p align="center">…</p>` (or right, or left), or a heading so (`<h1 align="center">`,
+/// as a centred title goes out): the inside and its alignment.
 fn aligned(l: &str) -> Option<(&str, u16)> {
-    let rest = l.strip_prefix("<p align=\"")?;
+    let (tag, rest) = ["p", "h1", "h2", "h3", "h4", "h5", "h6"].iter().find_map(|&tag| l.strip_prefix('<')?.strip_prefix(tag)?.strip_prefix(" align=\"").map(|r| (tag, r)))?;
     let (word, rest) = rest.split_once("\">")?;
-    let inner = rest.strip_suffix("</p>")?;
+    let inner = rest.strip_suffix(format!("</{tag}>").as_str())?;
     let a = match word {
         "center" => PFA_CENTER,
         "right" => PFA_RIGHT,
@@ -721,14 +818,16 @@ fn aligned(l: &str) -> Option<(&str, u16)> {
 /// how many of `next` it takes.
 fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
     let l = raw.trim_start();
-    // ``` code, to the closing fence (or the end).
-    if l.starts_with("```") {
-        let body: Vec<String> = next.iter().take_while(|n| !n.trim().starts_with("```")).map(|n| n.trim_end().to_string()).collect();
+    // ``` code (```rust: with its language), to a closing fence at least as long (or the
+    // end).
+    if let Some((ticks, lang)) = crate::common::store::fence(l) {
+        let body: Vec<String> = next.iter().take_while(|n| !crate::common::store::closes_fence(n, ticks)).map(|n| n.trim_end().to_string()).collect();
         let used = (body.len() + 1).min(next.len());
-        return Some((Fill::Code(body), used));
+        return Some((Fill::Code(lang.to_string(), body), used));
     }
-    // > quote lines, together, each a paragraph of its own kind (`> - item`); indented
-    // two spaces a level, a quote under a list item.
+    // > quote lines, together, read as a note of their own: each a paragraph of its own
+    // kind (`> - item`), or more blocks (`> > nested`, a fenced code block). Indented two
+    // spaces a level, a quote under a list item.
     let quoted = |s: &str| {
         let t = s.trim_end();
         let q = t.trim_start();
@@ -746,17 +845,18 @@ fn block_from(raw: &str, next: &[&str]) -> Option<(Fill, usize)> {
         q.strip_prefix("> ").or(q.strip_prefix('>')).map(|r| (lead, r.to_string()))
     };
     if let Some((lead, first)) = quoted(raw) {
-        let mut paras = vec![parse_line(&first)];
+        let mut inner = vec![first];
         // The quote goes on while its lines are indented as its first: a quote under a
         // list item and a quote after the list are two.
         for n in next {
             match quoted(n) {
-                Some((l, q)) if l == lead => paras.push(parse_line(&q)),
+                Some((l, q)) if l == lead => inner.push(q),
                 _ => break,
             }
         }
-        let used = paras.len() - 1;
-        return Some((Fill::Quote(lead / 2, paras), used));
+        let used = inner.len() - 1;
+        let inner: Vec<&str> = inner.iter().map(String::as_str).collect();
+        return Some((Fill::Quote(lead / 2, parse_body(&inner)), used));
     }
     // | a | b | with a | --- | --- | line under it.
     if l.starts_with('|') {
@@ -825,7 +925,7 @@ fn separator(l: &str) -> Option<Vec<u16>> {
 fn put_block(h: HWND, at: i32, fill: &Fill) {
     let (kind, rows, cols) = match fill {
         Fill::Quote(..) => (Block::Quote, 1, 1),
-        Fill::Code(_) => (Block::Code, 1, 1),
+        Fill::Code(..) => (Block::Code, 1, 1),
         Fill::Table(r, a) => (Block::Table, r.len().max(1), a.len().max(1)),
     };
     // In place of the placeholder's paragraph mark (the block ends in its own), so no
@@ -844,10 +944,16 @@ fn put_block(h: HWND, at: i32, fill: &Fill) {
     // From the last cell up, so the ones before stay put.
     for (n, &(a, _)) in all.iter().enumerate().rev() {
         match fill {
-            Fill::Quote(_, lines) => fill_quote(h, a as i32, lines),
-            Fill::Code(lines) => {
+            Fill::Quote(_, body) => {
+                // What it holds, blocks and all, goes in as a note's text does.
+                set_sel(h, a as i32, a as i32);
+                insert_text(h, &body.joined());
+                put_body(h, a as i32, body);
+            }
+            Fill::Code(lang, lines) => {
                 set_sel(h, a as i32, a as i32);
                 insert_text(h, &lines.join("\r"));
+                set_code_tag(h, a as i32, lang);
             }
             Fill::Table(rows, aligns) => {
                 let (r, c) = (n / cols, n % cols);
@@ -858,23 +964,6 @@ fn put_block(h: HWND, at: i32, fill: &Fill) {
         }
     }
     style_blocks(h);
-}
-
-/// A quote's paragraphs into its (empty) cell at `at`: lists, checklists and all.
-fn fill_quote(h: HWND, at: i32, lines: &[Line]) {
-    let joined: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
-    set_sel(h, at, at);
-    insert_text(h, &joined.join("\r"));
-    let mut pos = at;
-    let mut links = Vec::new();
-    for line in lines {
-        format_line(h, pos, line);
-        links.extend(line.links.iter().map(|(a, b, url)| (pos + a, pos + b, url.clone())));
-        pos += line.text.encode_utf16().count() as i32 + 1;
-    }
-    for (a, b, url) in links.iter().rev() {
-        set_link(h, *a, *b, url);
-    }
 }
 
 /// Paragraphs into the (empty) cell at `at`, with their marks and links.
@@ -1085,5 +1174,177 @@ mod tests {
         assert!(!sel_in_title(h));
         set_sel(h, 2, 7);
         assert!(!sel_in_title(h), "reaching into the body");
+    }
+
+    /// Where `w` first is in the editor's text `t`.
+    fn find(t: &[u16], w: &str) -> i32 {
+        let w: Vec<u16> = w.encode_utf16().collect();
+        t.windows(w.len()).position(|v| v == &w[..]).unwrap() as i32
+    }
+
+    /// `md` loaded comes out as `want`: from the editor, from the RTF a note is stored as,
+    /// and from a file exported and imported again; and `want` loaded is the same note.
+    fn cycle(md: &str, want: &str) {
+        let h = editor();
+        load_markdown(h, md);
+        assert_eq!(to_markdown(h, true), want, "editor: {md}");
+        let h2 = editor();
+        set_rtf(h2, &get_rtf(h));
+        assert_eq!(to_markdown(h2, true), want, "stored: {md}");
+        let exported = crate::common::store::hard_breaks(&to_markdown(h, true));
+        let h3 = editor();
+        load_markdown(h3, &exported);
+        assert_eq!(to_markdown(h3, true), want, "exported as:\n{exported}");
+        let h4 = editor();
+        load_markdown(h4, want);
+        assert_eq!(to_markdown(h4, true), want, "again: {want}");
+        assert_eq!(text(h4), text(h), "the same note: {want}");
+    }
+
+    /// Quotes in quotes, and code blocks and tables in quotes, are blocks in the quote's
+    /// cell, not text that only looks like them.
+    #[test]
+    fn blocks_inside_quotes() {
+        let cases = [
+            "# T\n> outer\n> > inner\n> back out",
+            "# T\n> > > three deep",
+            "# T\n> intro\n> ```rust\n> let x = 1;\n>\n>     indented\n> ```\n> after",
+            "# T\n> ```\n> only code\n> ```",
+            "# T\n> a\n> > b\n> ```\n> c\n> ```",
+            "# T\n> > one\n>\n> > two",
+            "# T\n> | a | b |\n> | --- | :---: |\n> | **1** | 2 |\n> under it",
+            "# T\n> - item\n> > quoted after it\n> 2. numbered",
+            "# T\n- item\n  > under it\n  > > and in that\nend",
+        ];
+        for md in cases {
+            cycle(md, md);
+        }
+        // Each a block of its own, in the quote's cell.
+        let h = editor();
+        load_markdown(h, "T\n> outer\n> > inner\n> ```\n> code\n> ```\n> back out");
+        let t = text(h);
+        let kinds: Vec<Block> = blocks(h, &t).iter().map(|b| b.0).collect();
+        assert_eq!(kinds, vec![Block::Quote, Block::Quote, Block::Code]);
+        let inner = find(&t, "inner");
+        let (_, rows) = block_at(h, &t, inner).unwrap();
+        assert!(rows[0].start > blocks(h, &t)[0].1[0].start, "the inner quote is the innermost block there");
+        // The light text previews read has them too.
+        assert_eq!(to_markdown(h, false), "T\n> outer\n> > inner\n> ```\n> code\n> ```\n> back out");
+        // What only looks like a nested quote stays text.
+        cycle("T\n> \\> not nested\n> \\```", "# T\n> \\> not nested\n> \\```");
+    }
+
+    /// A code block's language comes back on its fence; the light text (previews, search)
+    /// leaves it out, as it does the code's look.
+    #[test]
+    fn code_keeps_its_language() {
+        for md in [
+            "# T\n```rust\nfn main() {}\n```",
+            "# T\n```\nplain\n```",
+            "# T\n```c++\n\n```",
+            "# T\n```md\n\u{2764}\u{FE0F} love\n```",
+            // A fence that can hold one.
+            "# T\n````md\n```\ninner\n```\n````",
+        ] {
+            cycle(md, md);
+        }
+        let h = editor();
+        load_markdown(h, "T\n```python\nprint(1)\n```");
+        assert_eq!(to_markdown(h, false), "T\n```\nprint(1)\n```");
+        // Unwrapped, the code is text and its language goes with the block.
+        let t = text(h);
+        let p = find(&t, "print");
+        unwrap(h, p);
+        assert_eq!(to_markdown(h, true), "# T\nprint(1)");
+        assert_eq!(to_markdown(h, false), "T\nprint(1)");
+        // The caret starts the code's text past it, and what's typed there shows.
+        let h = editor();
+        load_markdown(h, "T\n```js\nx\n```");
+        let t = text(h);
+        let (_, _, ca, cb) = cell_at(h, &t, 4).unwrap();
+        let start = past_tag(h, &t, ca, cb);
+        assert_eq!(start, ca + 2);
+        set_sel(h, start as i32, start as i32);
+        replace_sel(h, "y");
+        assert_eq!(to_markdown(h, true), "# T\n```js\nyx\n```");
+    }
+
+    /// Empty lines next to blocks come back as many as they were, from the editor and
+    /// from the Markdown it writes.
+    #[test]
+    fn empty_lines_around_blocks_stay() {
+        for md in [
+            "# T\nbefore\n\n\n> q\n\n\nafter",
+            "# T\nbefore\n\n\n\n```\nc\n```\n\n\n\nafter",
+            "# T\n> a\n\n\n\n\n| x |\n| --- |\n| 1 |",
+            "# T\n\n\n> q",
+            "# T\n> one\n>\n>\n> > nested\n>\n>\n> two",
+            "# T\n> > nested\n>\n>\n>",
+        ] {
+            cycle(md, md);
+        }
+        // Markdown's own blank line around a block is how it's set apart, not an empty
+        // line in the note, and it's the same note whichever way it's written.
+        cycle("T\nbefore\n\n> q\n\nafter", "# T\nbefore\n> q\nafter");
+        // RichEdit keeps an empty paragraph between two blocks, and after one at the end
+        // of a quote: one more empty line there is that same paragraph.
+        cycle("T\n> q\n\n\n\n```\nc\n```", "# T\n> q\n```\nc\n```");
+        cycle("T\n> > nested\n>\n>", "# T\n> > nested");
+        // Made in the editor: empty lines above and below a quote, two between blocks.
+        let h = editor();
+        insert_text(h, "T\rbefore\r\rq\r\rafter\r\r\rcode");
+        let q = find(&text(h), "q");
+        wrap(h, q, q + 1, Block::Quote);
+        let c = find(&text(h), "code");
+        wrap(h, c, c + 4, Block::Code);
+        let md = to_markdown(h, true);
+        let h2 = editor();
+        load_markdown(h2, &md);
+        assert_eq!(text(h2), text(h), "{md}");
+        assert_eq!(to_markdown(h2, true), md);
+    }
+
+    /// A centred or right-aligned title, list item or checklist item keeps its alignment.
+    #[test]
+    fn list_items_and_the_title_keep_alignment() {
+        let md = "<h1 align=\"center\">T</h1>\n- <p align=\"center\">bullet</p>\n1. <p align=\"right\">number</p>\n- [ ] <p align=\"center\">task</p>\n- [x] <p align=\"right\">**done**</p>\n> - <p align=\"center\">in a quote</p>";
+        cycle(md, md);
+        cycle("<h1 align=\"right\">T</h1>\nbody", "<h1 align=\"right\">T</h1>\nbody");
+        let h = editor();
+        load_markdown(h, md);
+        let t = text(h);
+        let at = find(&t, "bullet");
+        set_sel(h, at, at);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        assert_eq!((pf.numbering, pf.alignment), (PFN_BULLET, PFA_CENTER));
+        set_sel(h, 0, 0);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        assert_eq!(pf.alignment, PFA_CENTER);
+        // The light text has none of it.
+        assert_eq!(to_markdown(h, false).lines().next(), Some("T"));
+    }
+
+    /// A list item whose text starts like a quote or a checkbox stays that item with that
+    /// text.
+    #[test]
+    fn item_text_that_looks_like_syntax() {
+        let md = "# T\n- \\> not a quote\n- \\[ ] not a box\n- \\[x] nor this\n1. \\> numbered\n- [ ] > a task's is fine\n> - \\> in a quote";
+        cycle(md, md);
+        let h = editor();
+        load_markdown(h, md);
+        let t = text(h);
+        assert!(blocks(h, &t).len() == 1, "only the quote at the end");
+        let s = String::from_utf16_lossy(&t);
+        assert!(s.contains("\r> not a quote\r[ ] not a box\r"), "{s}");
+    }
+
+    /// Table cells hold plain lines (the editor makes no lists there), so list markers in
+    /// a cell are its text, and come back so.
+    #[test]
+    fn list_text_in_table_cells() {
+        let md = "# T\n| - a<br>- b | [ ] c<br>1. d |\n| --- | --- |\n| x | y |";
+        cycle(md, md);
     }
 }

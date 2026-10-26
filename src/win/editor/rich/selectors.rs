@@ -13,7 +13,6 @@ pub const VS16: u16 = 0xFE0F;
 pub const VS15: u16 = 0xFE0E;
 const VS16_MARK: u16 = 0xF8FE;
 const VS15_MARK: u16 = 0xF8FD;
-const CFM_HIDDEN: u32 = 0x0100;
 
 fn mark(c: u16) -> u16 {
     match c {

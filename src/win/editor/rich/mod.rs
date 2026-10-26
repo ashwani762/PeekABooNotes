@@ -70,6 +70,7 @@ pub const CFM_BOLD: u32 = 0x0001;
 pub const CFM_ITALIC: u32 = 0x0002;
 pub const CFM_UNDERLINE: u32 = 0x0004;
 pub const CFM_STRIKEOUT: u32 = 0x0008;
+pub const CFM_HIDDEN: u32 = 0x0100;
 pub const CFM_SIZE: u32 = 0x8000_0000;
 pub const CFM_COLOR: u32 = 0x4000_0000;
 pub const CFM_FACE: u32 = 0x2000_0000;
