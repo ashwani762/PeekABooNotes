@@ -979,14 +979,24 @@ pub fn hard_breaks(md: &str) -> String {
     breaks(&lines).join("\n")
 }
 
+/// Whether `l` is a list or checklist item, as `hard_breaks` tells one.
+pub fn list_line(l: &str) -> bool {
+    let t = l.trim_start();
+    looks_like_marker(t) && !t.starts_with('#') && quoted(t).is_none() && !t.starts_with("```")
+}
+
+/// Whether `l` is a line of plain text, as `hard_breaks` tells one: not empty, a list item,
+/// a quote, a table row, a code fence or a heading. One right after a list item gets a
+/// blank line before it, which import takes out again.
+pub fn plain_line(l: &str) -> bool {
+    !l.trim().is_empty() && !list_line(l) && quoted(l).is_none() && table_cells(l).is_none() && fence(l).is_none() && !l.trim_start().starts_with('#')
+}
+
 fn breaks(lines: &[&str]) -> Vec<String> {
     let quote = |l: &str| quoted(l).is_some();
     let row = |l: &str| table_cells(l).is_some();
-    let item = |l: &str| {
-        let t = l.trim_start();
-        looks_like_marker(t) && !t.starts_with('#') && !quote(t) && !t.starts_with("```")
-    };
-    let plain = |l: &str| !l.trim().is_empty() && !item(l) && !quote(l) && !row(l) && fence(l).is_none() && !l.trim_start().starts_with('#');
+    let item = list_line;
+    let plain = plain_line;
     let lead = |l: &str| l.len() - l.trim_start().len();
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
     // The backticks of the code block the lines are in.

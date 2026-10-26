@@ -39,6 +39,12 @@ fn body_md(h: HWND, t: &[u16], a: usize, b: usize, inline: bool) -> String {
     let mut start = a;
     let mut numbers = [0usize; MAX_LEVEL as usize + 1];
     let mut last = None;
+    // Where the last list item's line ends in `out`, while nothing but empty lines came
+    // after it, and whether any did. Import takes one blank line between an item and plain
+    // text as the gap Markdown needs there (`store::plain_line`), so empty lines there go
+    // out with one more, as next to a block.
+    let mut item_end: Option<usize> = None;
+    let mut empty_since = false;
     while start <= b {
         // Two blocks always have an empty paragraph between them (RichEdit won't let two
         // tables touch): that's their gap, not a blank line.
@@ -59,6 +65,7 @@ fn body_md(h: HWND, t: &[u16], a: usize, b: usize, inline: bool) -> String {
                 out.push('\n');
             }
             last = Some(Last::Block(kind));
+            item_end = None;
             out.push_str(&block_md(h, t, kind, &rows, inline));
             out.push('\n');
             // A quote under a list item is part of it: the list's count goes on after it.
@@ -81,8 +88,26 @@ fn body_md(h: HWND, t: &[u16], a: usize, b: usize, inline: bool) -> String {
         } else {
             last = Some(Last::Text);
         }
-        out.push_str(&para_md(h, t, start, end, inline, &mut numbers));
-        out.push('\n');
+        let line = para_md(h, t, start, end, inline, &mut numbers);
+        if inline {
+            use crate::common::store::{list_line, plain_line};
+            if line.trim().is_empty() {
+                empty_since = true;
+            } else {
+                if let Some(at) = item_end.take().filter(|_| empty_since && plain_line(&line)) {
+                    out.insert(at, '\n');
+                }
+                empty_since = false;
+            }
+            out.push_str(&line);
+            out.push('\n');
+            if list_line(&line) {
+                item_end = Some(out.len());
+            }
+        } else {
+            out.push_str(&line);
+            out.push('\n');
+        }
         if end >= b {
             break;
         }
@@ -578,6 +603,12 @@ fn parse_body(src: &[&str]) -> Body {
         // Trailing spaces only ever mean a line break (`hard_breaks`), which a line is anyway.
         let raw = src[i].trim_end();
         i += 1;
+        // A blank line between a list item and plain text is Markdown's way to end the list
+        // (`store::hard_breaks` writes one), not an empty line: export writes one more
+        // where the note had one.
+        if raw.is_empty() && i >= 2 && crate::common::store::list_line(src[i - 2]) && src[i..].iter().find(|l| !l.trim().is_empty()).is_some_and(|l| crate::common::store::plain_line(l)) {
+            continue;
+        }
         if let Some((fill, used)) = block_from(raw, &src[i..]) {
             // A blank line on either side of a block is Markdown's way to set it apart (a
             // table needs one), not an empty paragraph: blocks have their own space.
@@ -1307,6 +1338,28 @@ mod tests {
         load_markdown(h2, &md);
         assert_eq!(text(h2), text(h), "{md}");
         assert_eq!(to_markdown(h2, true), md);
+    }
+
+    /// Text after a list goes out with the blank line Markdown needs there, and comes back
+    /// without it; empty lines the note had there come back as many.
+    #[test]
+    fn text_after_a_list_keeps_its_lines() {
+        for md in ["# T\n- item\nafter", "# T\n1. one\nafter", "# T\n- [ ] task\nafter", "# T\n- a\n  - b\nafter", "# T\n> - a\n> after", "# T\n- item\n\n\nafter", "# T\n- one\n\n- two"] {
+            cycle(md, md);
+        }
+        // Markdown's own blank line there is how a list ends, not an empty line.
+        cycle("T\n- item\n\nafter", "# T\n- item\nafter");
+        // Made in the editor: an item, an empty line, text.
+        let h = editor();
+        insert_text(h, "T\ritem\r\rafter\rtwo\r\r\rend");
+        for at in [2, 14] {
+            set_sel(h, at, at);
+            set_numbering(h, if at == 2 { PFN_BULLET } else { PFN_ARABIC });
+        }
+        let md = to_markdown(h, true);
+        let h2 = editor();
+        load_markdown(h2, &crate::common::store::hard_breaks(&md));
+        assert_eq!(text(h2), text(h), "{md}");
     }
 
     /// A centred or right-aligned title, list item or checklist item keeps its alignment.
