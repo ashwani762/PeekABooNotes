@@ -6,6 +6,7 @@
     <string name="language_name">Español</string>
     <string name="tray_tooltip">%1$s — notas en el borde de la pantalla</string>
     <string name="window_all_notes">Todas las notas — %1$s</string>
+    <string name="window_archive">Archivadas — %1$s</string>
     <string name="window_settings">Ajustes de %1$s</string>
     <string name="settings_version">Versión %1$s</string>
 
@@ -265,7 +266,7 @@
     <string name="settings_group_in_note">En una nota</string>
     <string name="shortcut_new_note">Nueva nota</string>
     <string name="shortcut_all_notes">Todas las notas</string>
-    <string name="shortcut_archive">Archivo</string>
+    <string name="shortcut_archive">Mostrar archivadas</string>
     <string name="shortcut_reopen">Reabrir la última nota</string>
     <string name="shortcut_toggle_deck">Mostrar u ocultar el mazo</string>
     <string name="shortcut_move_deck">Mover el mazo al otro borde</string>
@@ -285,7 +286,7 @@
     <string name="shortcut_code">Bloque de código</string>
     <string name="shortcut_table">Tabla</string>
     <string name="shortcut_leave_text">Salir del texto de la nota</string>
-    <string name="shortcut_undo_toast">Deshacer un archivado o una eliminación</string>
+    <string name="shortcut_undo_toast">Deshacer mientras se ve el aviso</string>
     <string name="shortcut_deck_keys">Ir al mazo</string>
     <string name="shortcut_deck_move">Moverse entre tarjetas</string>
     <string name="shortcut_deck_ends">Primera o última tarjeta</string>

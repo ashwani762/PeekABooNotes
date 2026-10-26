@@ -6,6 +6,7 @@
     <string name="language_name">Français</string>
     <string name="tray_tooltip">%1$s — des notes au bord de l’écran</string>
     <string name="window_all_notes">Toutes les notes — %1$s</string>
+    <string name="window_archive">Archives — %1$s</string>
     <string name="window_settings">Réglages de %1$s</string>
     <string name="settings_version">Version %1$s</string>
 
@@ -265,7 +266,7 @@
     <string name="settings_group_in_note">Dans une note</string>
     <string name="shortcut_new_note">Nouvelle note</string>
     <string name="shortcut_all_notes">Toutes les notes</string>
-    <string name="shortcut_archive">Archives</string>
+    <string name="shortcut_archive">Afficher les archives</string>
     <string name="shortcut_reopen">Rouvrir la dernière note</string>
     <string name="shortcut_toggle_deck">Afficher ou masquer la pile</string>
     <string name="shortcut_move_deck">Déplacer la pile sur l’autre bord</string>
@@ -285,7 +286,7 @@
     <string name="shortcut_code">Bloc de code</string>
     <string name="shortcut_table">Tableau</string>
     <string name="shortcut_leave_text">Quitter le texte de la note</string>
-    <string name="shortcut_undo_toast">Annuler un archivage ou une suppression</string>
+    <string name="shortcut_undo_toast">Annuler tant que la notification est affichée</string>
     <string name="shortcut_deck_keys">Aller à la pile</string>
     <string name="shortcut_deck_move">Passer d’une carte à l’autre</string>
     <string name="shortcut_deck_ends">Première ou dernière carte</string>

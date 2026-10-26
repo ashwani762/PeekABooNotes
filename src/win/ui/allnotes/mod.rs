@@ -364,7 +364,7 @@ pub fn show(archived: bool) {
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             wide(CLASS).as_ptr(),
-            wide(&t!("window_all_notes", t!("app_name"))).as_ptr(),
+            wide(&title(if archived { 1 } else { 0 })).as_ptr(),
             WS_POPUP | WS_THICKFRAME | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
             x,
             y,
@@ -379,6 +379,12 @@ pub fn show(archived: bool) {
         ShowWindow(hwnd, SW_SHOW);
         SetForegroundWindow(hwnd);
     }
+}
+
+/// The window's title (what the taskbar and Alt+Tab show): the Archive's while it shows
+/// the archive.
+fn title(mode: usize) -> String {
+    if mode == 1 { t!("window_archive", t!("app_name")) } else { t!("window_all_notes", t!("app_name")) }
 }
 
 /// Select these notes, when All Notes is open (an Undo has just brought them back).
@@ -505,7 +511,7 @@ fn restyle_editor() {
 pub fn relabel() {
     let Some((h, search)) = with(|l| (l.hwnd, l.search)) else { return };
     unsafe {
-        SetWindowTextW(h, wide(&t!("window_all_notes", t!("app_name"))).as_ptr());
+        SetWindowTextW(h, wide(&title(with(|l| l.mode).unwrap_or(0))).as_ptr());
         SendMessageW(search, EM_SETCUEBANNER, 1, wide(t!("search_placeholder")).as_ptr() as isize);
     }
     refresh();

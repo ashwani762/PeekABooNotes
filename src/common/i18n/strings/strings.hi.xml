@@ -6,6 +6,7 @@
     <string name="language_name">हिन्दी</string>
     <string name="tray_tooltip">%1$s — स्क्रीन के किनारे पर नोट्स</string>
     <string name="window_all_notes">सभी नोट्स — %1$s</string>
+    <string name="window_archive">संग्रह — %1$s</string>
     <string name="window_settings">%1$s सेटिंग्स</string>
     <string name="settings_version">संस्करण %1$s</string>
 
@@ -265,7 +266,7 @@
     <string name="settings_group_in_note">नोट में</string>
     <string name="shortcut_new_note">नया नोट</string>
     <string name="shortcut_all_notes">सभी नोट्स</string>
-    <string name="shortcut_archive">संग्रह</string>
+    <string name="shortcut_archive">संग्रह दिखाएँ</string>
     <string name="shortcut_reopen">आख़िरी नोट फिर खोलें</string>
     <string name="shortcut_toggle_deck">डेक दिखाएँ या छिपाएँ</string>
     <string name="shortcut_move_deck">डेक को दूसरे किनारे पर ले जाएँ</string>
@@ -285,7 +286,7 @@
     <string name="shortcut_code">कोड ब्लॉक</string>
     <string name="shortcut_table">तालिका</string>
     <string name="shortcut_leave_text">नोट के टेक्स्ट से बाहर जाएँ</string>
-    <string name="shortcut_undo_toast">संग्रहित करना या हटाना पूर्ववत करें</string>
+    <string name="shortcut_undo_toast">सूचना दिखते समय पूर्ववत करें</string>
     <string name="shortcut_deck_keys">डेक पर जाएँ</string>
     <string name="shortcut_deck_move">कार्डों के बीच जाएँ</string>
     <string name="shortcut_deck_ends">पहला या आखिरी कार्ड</string>

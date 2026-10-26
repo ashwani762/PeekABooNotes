@@ -16,6 +16,7 @@
     <string name="language_name">English</string>
     <string name="tray_tooltip">%1$s — notes on the edge of your screen</string>
     <string name="window_all_notes">All Notes — %1$s</string>
+    <string name="window_archive">Archive — %1$s</string>
     <string name="window_settings">%1$s Settings</string>
     <string name="settings_version">Version %1$s</string>
 
@@ -278,7 +279,7 @@
     <string name="settings_group_in_note">In a note</string>
     <string name="shortcut_new_note">New note</string>
     <string name="shortcut_all_notes">All Notes</string>
-    <string name="shortcut_archive">Archive</string>
+    <string name="shortcut_archive">Show Archive</string>
     <string name="shortcut_reopen">Reopen last note</string>
     <string name="shortcut_toggle_deck">Show or hide deck</string>
     <string name="shortcut_move_deck">Move deck to the other edge</string>
@@ -298,7 +299,7 @@
     <string name="shortcut_code">Code block</string>
     <string name="shortcut_table">Table</string>
     <string name="shortcut_leave_text">Leave the note's text</string>
-    <string name="shortcut_undo_toast">Undo an archive or delete</string>
+    <string name="shortcut_undo_toast">Undo an archive or delete while its toast shows</string>
     <string name="shortcut_deck_keys">Go to the deck</string>
     <string name="shortcut_deck_move">Move between cards</string>
     <string name="shortcut_deck_ends">First or last card</string>

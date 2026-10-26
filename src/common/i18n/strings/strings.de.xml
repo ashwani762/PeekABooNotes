@@ -6,6 +6,7 @@
     <string name="language_name">Deutsch</string>
     <string name="tray_tooltip">%1$s — Notizen am Bildschirmrand</string>
     <string name="window_all_notes">Alle Notizen — %1$s</string>
+    <string name="window_archive">Archiv — %1$s</string>
     <string name="window_settings">%1$s – Einstellungen</string>
     <string name="settings_version">Version %1$s</string>
 
@@ -265,7 +266,7 @@
     <string name="settings_group_in_note">In einer Notiz</string>
     <string name="shortcut_new_note">Neue Notiz</string>
     <string name="shortcut_all_notes">Alle Notizen</string>
-    <string name="shortcut_archive">Archiv</string>
+    <string name="shortcut_archive">Archiv anzeigen</string>
     <string name="shortcut_reopen">Letzte Notiz wieder öffnen</string>
     <string name="shortcut_toggle_deck">Stapel ein- oder ausblenden</string>
     <string name="shortcut_move_deck">Stapel an den anderen Rand</string>
@@ -285,7 +286,7 @@
     <string name="shortcut_code">Codeblock</string>
     <string name="shortcut_table">Tabelle</string>
     <string name="shortcut_leave_text">Notiztext verlassen</string>
-    <string name="shortcut_undo_toast">Archivieren oder Löschen widerrufen</string>
+    <string name="shortcut_undo_toast">Widerrufen, solange die Meldung zu sehen ist</string>
     <string name="shortcut_deck_keys">Zum Stapel wechseln</string>
     <string name="shortcut_deck_move">Zwischen Karten wechseln</string>
     <string name="shortcut_deck_ends">Erste oder letzte Karte</string>

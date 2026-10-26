@@ -8,6 +8,9 @@ use crate::common::store::Note;
 
 pub(super) fn set_mode(l: &mut Lib, mode: usize) {
     if l.mode != mode {
+        if (l.mode == 1) != (mode == 1) {
+            unsafe { SetWindowTextW(l.hwnd, wide(&title(mode)).as_ptr()) };
+        }
         l.mode = mode;
         l.seg_x.to(mode as f32);
         l.list_a.snap(0.0);

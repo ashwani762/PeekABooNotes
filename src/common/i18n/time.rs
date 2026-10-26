@@ -20,9 +20,9 @@ fn weekday(t: &LocalTime) -> String {
     os::format_weekday(t, &super::tag()).unwrap_or_else(|| date(t, true))
 }
 
-/// Compact list time: "just now", "5 mins ago", "3:42 PM", "yesterday", "Tuesday",
-/// "October 18". Always used within a sentence ("Edited yesterday"), so today and
-/// yesterday are lowercase.
+/// Compact list time: "just now", "5 mins ago", "today at 3:42 PM" (as the note itself
+/// says it), "yesterday", "Tuesday", "October 18". Always used within a sentence ("Edited
+/// yesterday"), so today and yesterday are lowercase.
 pub fn relative_time(ts: i64) -> String {
     match now() - ts {
         i64::MIN..60 => return crate::t!("time_just_now").to_string(),
@@ -31,7 +31,7 @@ pub fn relative_time(ts: i64) -> String {
     }
     let (t, today) = (os::local_time(ts), os::local_time(now()));
     match local_day(&today) - local_day(&t) {
-        i64::MIN..=0 => clock(&t),
+        i64::MIN..=0 => crate::t!("time_today_at", clock(&t)),
         1 => crate::t!("time_yesterday").to_string(),
         2..=6 => weekday(&t),
         _ => date(&t, t.year == today.year),
