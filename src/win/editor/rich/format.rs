@@ -52,7 +52,7 @@ fn base_format_now(h: HWND, text_rgb: u32, bg_rgb: u32) {
     // And over the emoji, which take their own face again.
     style_emoji(h, &t);
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);
+    show_selection(h);
     style_boxes(h);
 }
 
@@ -245,7 +245,7 @@ fn style_title_now(h: HWND, t: &[u16]) {
     if let Some(p) = pending.filter(|_| styled || a as usize > end) {
         send(h, EM_SETCHARFORMAT, SCF_SELECTION, &p as *const _ as isize);
     }
-    send(h, EM_HIDESELECTION, 0, 0);
+    show_selection(h);
 }
 
 /// Format for text typed at the caret / in the selection: regular body text.
@@ -379,4 +379,4 @@ fn style_boxes_now(h: HWND, only: Option<(usize, usize)>) {
         }
     }
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);}
+    show_selection(h);}

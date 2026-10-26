@@ -267,8 +267,9 @@ fn tip(e: HWND, t: &rich::Span, link: &Link, cp: i32) -> (RECT, String) {
     (anchor, shown)
 }
 
-/// A picked picture: (editor, the selection, the picture's character).
-type Picked = (isize, (i32, i32), i32);
+/// A picked picture: (editor, the selection, the picture's character, the size it's shown
+/// at in twips, for its height).
+type Picked = (isize, (i32, i32), i32, (i32, i32));
 
 thread_local! {
     /// An attachment selected by a click on it: (editor, the selection, its picture's
@@ -288,24 +289,30 @@ fn pick(e: HWND, a: i32, b: i32) {
     unpick(e);
     rich::set_sel(e, a, b);
     let Some(i) = rich::raw_text(e, a.max(0) as usize, b.max(0) as usize).iter().position(|&c| c == 0xFFFC) else { return };
-    rich::send(e, rich::EM_HIDESELECTION, 1, 0);
-    PICKED.with(|p| p.set(Some((e as isize, (a, b), a + i as i32))));
-    frame_picture(e, a + i as i32, true);
+    let obj = a + i as i32;
+    // Read with the selection on the picture alone, then back on its line.
+    let shown = rich::picture_shown(e, obj).unwrap_or((1, 1));
+    rich::set_sel(e, a, b);
+    // Held hidden: the changes that hide the selection while they work (restyling, a
+    // menu asking the format) would otherwise show it again, as the negative.
+    rich::hold_selection_hidden(e, true);
+    PICKED.with(|p| p.set(Some((e as isize, (a, b), obj, shown))));
+    frame_picture(e, obj, shown, true);
 }
 
 /// The picture picked in `e` (if any) is no longer: its selection shows as RichEdit draws
 /// it, and the frame goes.
 fn unpick(e: HWND) {
-    if let Some((_, _, obj)) = take_picked(e) {
-        rich::send(e, rich::EM_HIDESELECTION, 0, 0);
-        frame_picture(e, obj, false);
+    if let Some((_, _, obj, shown)) = take_picked(e) {
+        rich::hold_selection_hidden(e, false);
+        frame_picture(e, obj, shown, false);
     }
 }
 
 /// After message `msg` to `e` (which `drew` or not): a picked picture's frame goes on again
 /// over what RichEdit drew, or, the selection having moved on, it's let go.
 fn picked_after(e: HWND, msg: u32, drew: bool) {
-    let Some((_, at, obj)) = PICKED.with(|p| p.get()).filter(|p| p.0 == e as isize) else { return };
+    let Some((_, at, obj, shown)) = PICKED.with(|p| p.get()).filter(|p| p.0 == e as isize) else { return };
     const EM_SETSEL: u32 = 0x00B1;
     const EM_EXSETSEL: u32 = 0x0437;
     if !drew && !matches!(msg, WM_KEYDOWN | WM_CHAR | WM_LBUTTONDOWN | WM_RBUTTONDOWN | EM_SETSEL | EM_EXSETSEL | WM_KILLFOCUS) {
@@ -313,20 +320,34 @@ fn picked_after(e: HWND, msg: u32, drew: bool) {
     }
     if rich::sel(e) != at {
         unpick(e);
+    } else if msg == WM_SETFOCUS {
+        // Taking the focus back (after a menu, Settings, another window), RichEdit shows
+        // the selection again, the picture as its negative: hidden again, and the picture
+        // drawn afresh, to be framed when it's painted.
+        rich::send(e, rich::EM_HIDESELECTION, 0, 0);
+        rich::send(e, rich::EM_HIDESELECTION, 1, 0);
+        frame_picture(e, obj, shown, false);
     } else if drew {
-        frame_picture(e, obj, true);
+        frame_picture(e, obj, shown, true);
     }
 }
 
-/// Draw the frame round the picture at character `obj` in `e` (`on`), or have RichEdit
-/// draw the picture again without it.
-fn frame_picture(e: HWND, obj: i32, on: bool) {
+/// The bottom of a picture whose top is at `top`, `width` px wide and shown at `shown`
+/// (twips): as tall as its shape makes it at that width.
+fn picture_bottom(top: i32, width: i32, shown: (i32, i32)) -> i32 {
+    top + ((width as i64 * shown.1.max(1) as i64 + shown.0.max(1) as i64 / 2) / shown.0.max(1) as i64) as i32
+}
+
+/// Draw the frame round the picture at character `obj` in `e` (`on`), shown at `shown`
+/// (twips), or have RichEdit draw the picture again without it.
+fn frame_picture(e: HWND, obj: i32, shown: (i32, i32), on: bool) {
     let (p0, p1) = (rich::pos_from_char(e, obj), rich::pos_from_char(e, obj + 1));
     if p1.y != p0.y || p1.x <= p0.x {
         return;
     }
-    // A picture sits on its line's baseline: that's its bottom edge.
-    let bottom = rich::baseline_at(e, obj).filter(|&y| y > p0.y).unwrap_or(p0.y + (p1.x - p0.x));
+    // As tall as its shape at the width it's drawn: RichEdit sets a picture a little below
+    // its line's baseline, so that left the frame's bottom edge 4 px up the picture.
+    let bottom = picture_bottom(p0.y, p1.x - p0.x, shown);
     let r = RECT { left: p0.x, top: p0.y, right: p1.x, bottom };
     unsafe {
         if !on {
@@ -653,7 +674,9 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             }
         }
         WM_NCDESTROY => unsafe {
-            take_picked(e);
+            if take_picked(e).is_some() {
+                rich::hold_selection_hidden(e, false);
+            }
             crate::win::editor::checks::forget(e);
             crate::win::editor::fade::forget(e);
             rich::forget_block_colors(e);
@@ -806,17 +829,38 @@ mod tests {
         let end = rich::para_end(&t, obj);
         pick(e, obj, end);
         assert_eq!(rich::sel(e), (obj, end));
-        assert_eq!(PICKED.with(|p| p.get()), Some((e as isize, (obj, end), obj)));
+        assert_eq!(PICKED.with(|p| p.get()), Some((e as isize, (obj, end), obj, (720, 360))));
+        assert!(rich::selection_held_hidden(e));
         // Drawn again, with the selection where it was: still picked.
         picked_after(e, WM_PAINT, true);
         assert!(PICKED.with(|p| p.get()).is_some());
+        // Restyling that hides the selection while it works leaves it hidden.
+        rich::list_level(e);
+        assert!(rich::selection_held_hidden(e));
+        // The focus back: still picked, still hidden.
+        picked_after(e, WM_SETFOCUS, true);
+        assert!(PICKED.with(|p| p.get()).is_some());
+        assert!(rich::selection_held_hidden(e));
         // The caret goes elsewhere: let go.
         rich::set_sel(e, 0, 0);
         picked_after(e, 0x0437, false);
         assert_eq!(PICKED.with(|p| p.get()), None);
+        assert!(!rich::selection_held_hidden(e));
         // A line without a picture (a file's chip) is just selected.
         pick(e, 0, 1);
         assert_eq!(PICKED.with(|p| p.get()), None);
         unsafe { DestroyWindow(e) };
+    }
+
+    /// A picture's frame is as tall as the picture at the width it's drawn, not to its
+    /// line's baseline (which RichEdit sets a little above the picture's bottom).
+    #[test]
+    fn a_picture_frame_is_as_tall_as_its_picture() {
+        assert_eq!(picture_bottom(5, 240, (3600, 2400)), 165);
+        assert_eq!(picture_bottom(0, 100, (720, 360)), 50);
+        // Narrowed to fit: the same shape.
+        assert_eq!(picture_bottom(10, 120, (3600, 2400)), 90);
+        // Nothing to divide by: square.
+        assert_eq!(picture_bottom(0, 30, (0, 0)), 30);
     }
 }

@@ -23,7 +23,7 @@ pub use format::*;
 pub use links::*;
 pub use lists::*;
 pub use markdown::*;
-pub use pictures::{fit_picture_widths, forget_pictures, picture_dragged, picture_pressed, pictures_changed, refit_picture_widths, widen_stored_pictures};
+pub use pictures::{fit_picture_widths, forget_pictures, picture_dragged, picture_pressed, picture_shown, pictures_changed, refit_picture_widths, widen_stored_pictures};
 pub use selectors::{has_selectors, hide_marks, marker_for, style_emoji, unmark, unmark_str};
 
 pub const CLASS: &str = "RICHEDIT50W";
@@ -429,6 +429,38 @@ pub fn sel_in_title(h: HWND) -> bool {
 
 pub fn set_sel(h: HWND, a: i32, b: i32) {
     send(h, EM_SETSEL, a as usize, b as isize);
+}
+
+thread_local! {
+    /// Editors whose selection stays hidden (a picked picture, framed instead of drawn as
+    /// RichEdit's colour negative): the changes that hide it while they work don't show it
+    /// again after.
+    static HIDDEN: std::cell::RefCell<Vec<isize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Keep `h`'s selection hidden (`on`) until told otherwise, or show it again.
+pub fn hold_selection_hidden(h: HWND, on: bool) {
+    HIDDEN.with(|v| {
+        let mut v = v.borrow_mut();
+        v.retain(|&w| w != h as isize);
+        if on {
+            v.push(h as isize);
+        }
+    });
+    send(h, EM_HIDESELECTION, on as usize, 0);
+}
+
+/// Whether `h`'s selection is held hidden (`hold_selection_hidden`).
+pub fn selection_held_hidden(h: HWND) -> bool {
+    HIDDEN.with(|v| v.borrow().contains(&(h as isize)))
+}
+
+/// Show `h`'s selection again after a change that hid it while it worked, unless it's held
+/// hidden.
+pub fn show_selection(h: HWND) {
+    if !selection_held_hidden(h) {
+        send(h, EM_HIDESELECTION, 0, 0);
+    }
 }
 
 /// Run `f`, which only reads `h` but moves its selection about to do it (Markdown out asks

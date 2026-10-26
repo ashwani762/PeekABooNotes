@@ -85,7 +85,7 @@ fn hide_marks_now(h: HWND, t: &[u16]) {
         send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
     }
     set_sel(h, a, b);
-    send(h, EM_HIDESELECTION, 0, 0);
+    show_selection(h);
 }
 
 /// The face colour emoji are drawn in, over RichEdit's own glyphs.
@@ -122,7 +122,7 @@ pub fn style_emoji(h: HWND, t: &[u16]) {
             send(h, EM_SETCHARFORMAT, SCF_SELECTION, &cf as *const _ as isize);
         }
         set_sel(h, a0, b0);
-        send(h, EM_HIDESELECTION, 0, 0);
+        show_selection(h);
     });
 }
 
