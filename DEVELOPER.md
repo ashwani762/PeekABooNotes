@@ -27,7 +27,7 @@ Both take the version from `Cargo.toml`.
 - `PEEKABOO_TRACE=1` adds DEBUG lines (menu events and the like) to `logs\peekaboo.log`. Panic reports have raw `module+offset` stacks either way (see below).
 - `PEEKABOO_CRASH=panic|fault|overflow` crashes on purpose right after startup, to test crash reporting.
 
-A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three are kept), and its report, with raw `module+offset` stack addresses, to the log and to `crash.log` in the notes folder. Open the dump in Visual Studio or WinDbg next to the matching build's `.pdb`.
+A crash writes a minidump to `logs\crash-YYYYMMDD-HHMMSS.dmp` (the newest three are kept), and its report, with raw `module+offset` stack addresses, to the log and to `crash.log` in the notes folder. Open the dump in Visual Studio or WinDbg next to the matching build's `.pdb`. A minidump holds the threads' stacks, which can hold pieces of note text (what was being typed, saved or drawn), so treat one as private as the notes, and remember it sits in the notes folder, which may be synced; the log never has note text, and names the data folder with the user's own folder as `%USERPROFILE%` (`log::redacted`).
 
 ## Code map
 
