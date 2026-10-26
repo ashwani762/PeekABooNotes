@@ -186,11 +186,10 @@ fn para_md(h: HWND, t: &[u16], start: usize, end: usize, inline: bool, numbers: 
     } else if let Some(md) = inline.then(|| item_link(h, t, body_start)).flatten().and_then(|l| attachment_md(&l.2)) {
         md
     } else if inline {
-        let body = inline_md(h, t, body_start, end);
         // A ticked item's strikethrough is how it looks, not part of its text (also
-        // inside other marks: **~~bread~~**).
+        // inside other marks: **~~bread~~**); tildes typed in it are.
         let done = task && t[start] == CHECKED;
-        if done { body.replace("~~", "") } else { body }
+        inline_md_without(h, t, body_start, end, if done { CFM_STRIKEOUT } else { 0 })
     } else if let Some(md) = light_attachment(h, t, body_start, end) {
         md
     } else {
@@ -381,8 +380,14 @@ fn char_len(t: &[u16], i: usize, b: usize) -> usize {
 }
 
 pub(super) fn inline_md(h: HWND, t: &[u16], a: usize, b: usize) -> String {
+    inline_md_without(h, t, a, b, 0)
+}
+
+/// `inline_md` without the marks in `drop`.
+fn inline_md_without(h: HWND, t: &[u16], a: usize, b: usize, drop: u32) -> String {
     let mut out = String::new();
-    let fx = Effects { from: a, of: effects(h, a, b) };
+    let mut fx = Effects { from: a, of: effects(h, a, b) };
+    fx.of.iter_mut().for_each(|e| *e &= !drop);
     let cur = marks(&fx, h, t, a, b, NO_MARKS, &mut out, false);
     close_marks(&mut out, cur, NO_MARKS);
     out
@@ -1451,6 +1456,16 @@ mod tests {
         // In a quote too.
         let md = "# T\n> \\>>> py\n>   \\- x\n> \\| a |\n> | --- |";
         cycle(md, md);
+    }
+
+    /// A ticked item goes out without the strikethrough it's drawn with, but with the
+    /// tildes typed in it.
+    #[test]
+    fn ticked_items_keep_their_tildes() {
+        for md in ["# T\n- [x] use ~~ operator", "# T\n- [x] a ~ b ~~ c", "# T\n- [x] \\~\\~typed\\~\\~ and **bold**", "# T\n- [ ] not ~~done~~ yet"] {
+            cycle(md, md);
+        }
+        cycle("# T\n- [x] **~~bold done~~**", "# T\n- [x] **bold done**");
     }
 
     /// An empty list item comes back as one, not as a stray marker.
