@@ -379,6 +379,9 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 }
                 if vk == VK_RETURN && !ctrl && !shift && handle_enter(h, e) {
                     st.swallow = true;
+                    // Made with the view held still: a new line at the bottom edge comes
+                    // into view, with its caret, as one RichEdit made would.
+                    super::scrollbar::keep_caret_in_view(e);
                     return 0;
                 }
             }

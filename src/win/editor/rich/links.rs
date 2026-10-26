@@ -307,12 +307,16 @@ pub fn baseline_at(h: HWND, cp: i32) -> Option<i32> {
 }
 
 /// Where the text ends, in px from the top of `h`'s client area (below it when scrolled
-/// that far): the bottom of the last line, however tall that line is (a picture).
+/// that far): the bottom of the last line, however tall that line is (a picture). A text
+/// ending in a paragraph mark has an empty line after it (Enter at the end of a note), its
+/// own mark the story's last, which the length leaves out: that line counts, or the view
+/// was pulled back off the new line and its caret (see `scrollbar::sync`).
 pub fn content_bottom(h: HWND) -> Option<i32> {
     use windows::Win32::Graphics::Gdi::TA_BOTTOM;
     use windows::Win32::UI::Controls::RichEdit::{tomAllowOffClient, tomEnd};
     let n = text_len(h) as i32;
-    let r = range(h, (n - 1).max(0), n)?;
+    let empty_last = n == 0 || raw_text(h, (n - 1) as usize, n as usize).first() == Some(&CR);
+    let r = if empty_last { range(h, n, n + 1)? } else { range(h, n - 1, n)? };
     let (mut x, mut y) = (0i32, 0i32);
     let kind = windows::Win32::UI::Controls::RichEdit::tomConstants(tomEnd.0 | TA_BOTTOM.0 as i32 | tomAllowOffClient.0);
     unsafe { r.GetPoint(kind, &mut x, &mut y).ok()? };

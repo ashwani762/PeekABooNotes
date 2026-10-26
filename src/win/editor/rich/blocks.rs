@@ -1081,6 +1081,25 @@ mod tests {
         assert!(tall > normal * 2, "{tall} vs {normal}");
     }
 
+    /// Enter at the end of a note makes an empty last line: the text runs down to its
+    /// bottom, so the view may scroll to it (and its caret) and isn't pulled back.
+    #[test]
+    fn content_bottom_counts_an_empty_last_line() {
+        let h = editor();
+        insert_text(h, "T\rone\rtwo");
+        let one_line = content_bottom(h).unwrap() - pos_from_char(h, text(h).len() as i32 - 3).y;
+        let before = content_bottom(h).unwrap();
+        let end = text(h).len() as i32;
+        set_sel(h, end, end);
+        replace_sel(h, "\r");
+        let after = content_bottom(h).unwrap();
+        assert!(after - before >= one_line - 1, "{before} then {after}, a line {one_line}");
+        assert!(after >= pos_from_char(h, text(h).len() as i32).y + one_line - 1);
+        // An empty note is one empty line.
+        let empty = editor();
+        assert!(content_bottom(empty).unwrap() > 5);
+    }
+
     #[test]
     fn resizing_is_not_an_undo_step() {
         use windows_sys::Win32::UI::WindowsAndMessaging::MoveWindow;
