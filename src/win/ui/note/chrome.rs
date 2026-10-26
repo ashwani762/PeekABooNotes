@@ -159,7 +159,8 @@ pub(super) fn hit_test(h: HWND, lp: LPARAM) -> LRESULT {
         ScreenToClient(h, &mut p);
         GetClientRect(h, &mut rc);
     }
-    // The scroll bar wins over the resize edge it runs along.
+    // The scroll bar wins over the resize edge it runs along, all but the outermost few
+    // pixels, where the window is still resized beside it.
     if super::scrollbar::on_bar(h, p.x, p.y) {
         return HTCLIENT as LRESULT;
     }

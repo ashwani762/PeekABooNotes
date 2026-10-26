@@ -166,10 +166,15 @@ fn thumb(h: HWND, st: &NoteWin) -> Option<(f32, f32, f32, f32)> {
     let th = (len * view / content).max(28.0 * s).min(len);
     let y = top + (len - th) * (scroll / (content - view)).clamp(0.0, 1.0);
     let w = crate::win::render::anim::lerp(4.0 * s, 7.0 * s, st.bar_wide.value);
-    Some((rc.right as f32 - 3.0 * s - w, y, w, th))
+    Some((rc.right as f32 - EDGE * s - 1.0 * s - w, y, w, th))
 }
 
-/// The pointer is over the bar's column (beside the text, along the track).
+/// The window's outermost pixels beside the bar (DIP): there the note is resized, as along
+/// the rest of its edge, rather than scrolled.
+const EDGE: f32 = 5.0;
+
+/// The pointer is over the bar's column (beside the text, along the track), short of the
+/// window's resize edge.
 pub(super) fn on_bar(h: HWND, x: i32, y: i32) -> bool {
     let Some(st) = state(h) else { return false };
     if metrics(st.edit).is_none() {
@@ -178,7 +183,7 @@ pub(super) fn on_bar(h: HWND, x: i32, y: i32) -> bool {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(h, &mut rc) };
     let (top, len) = track(h, st);
-    x >= rc.right - (12.0 * st.s) as i32 && (y as f32) >= top && (y as f32) < top + len
+    x >= rc.right - (15.0 * st.s) as i32 && x < rc.right - (EDGE * st.s) as i32 && (y as f32) >= top && (y as f32) < top + len
 }
 
 /// Show the bar now and hide it again `LINGER_MS` after the last call.
