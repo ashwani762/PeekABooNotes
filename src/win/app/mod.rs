@@ -150,7 +150,6 @@ pub fn save_now() {
         unsafe { KillTimer(h, T_VIEW_SAVE) };
     }
     let failed = store_mut(|s| s.save()).is_err();
-    tell_notices();
     if SAVE_FAILED.swap(failed, std::sync::atomic::Ordering::Relaxed) != failed {
         // Saving just broke, or works again: say so once, and let every open note's
         // footer follow.
@@ -161,6 +160,9 @@ pub fn save_now() {
             unsafe { InvalidateRect(w, std::ptr::null(), 0) };
         }
     }
+    // After that: what the store says (why nothing is saved, a copy set aside) is the
+    // more telling, and takes the toast's place.
+    tell_notices();
 }
 
 /// What the store has to tell about the notes file (the backup opened in its place,

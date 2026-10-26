@@ -1585,7 +1585,7 @@ mod tests {
         assert_eq!(count_notes(&dir.join(&kept[0])), Some(9));
         assert_eq!(count_notes(&dir.join(BACKUP)), Some(2));
         // In the session too, and the backup is written whole (no temp file left).
-        s.d.notes.truncate(0);
+        s.d.notes.clear();
         s.backup_at = None;
         s.save().unwrap();
         assert_eq!(count_notes(&dir.join(BACKUP)), Some(0));
@@ -1629,6 +1629,8 @@ mod tests {
     }
 
     #[test]
+    // Read-only and back, on Windows: the file's attribute, nothing world-writable.
+    #[allow(clippy::permissions_set_readonly_false)]
     fn a_failed_save_leaves_no_temp_file() {
         let dir = folder("failed");
         let mut s = Store::load(dir.clone());
