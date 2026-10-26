@@ -393,6 +393,8 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             super::scrollbar::interrupt(h);
+            // A link's tip would cover what's being typed.
+            crate::win::ui::tooltip::mute_for(e);
             let vk = wp as u16;
             let (ctrl, shift, alt) = (key_down(VK_CONTROL), key_down(VK_SHIFT), key_down(VK_MENU));
             let Some(st) = state(h) else { return unsafe { DefSubclassProc(e, msg, wp, lp) } };

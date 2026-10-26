@@ -189,6 +189,15 @@ pub fn mute() {
     }
 }
 
+/// A key went to `owner` (typing, say): its tooltip, if it has one up or coming, goes as
+/// for a click, and stays away while the pointer rests where it is.
+pub fn mute_for(owner: HWND) {
+    let mine = TIP.with(|t| t.try_borrow().map(|t| t.as_ref().is_some_and(|t| t.owner == owner && (t.shown || t.pending))).unwrap_or(false));
+    if mine {
+        mute();
+    }
+}
+
 fn go_away(t: &mut Tip) {
     unsafe { KillTimer(t.hwnd, T_SHOW) };
     t.pending = false;
