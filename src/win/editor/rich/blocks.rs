@@ -36,6 +36,9 @@ const HAIR: i16 = 15;
 const BAR: i16 = 45;
 /// Most cells a row may have (RichEdit's own limit).
 const MAX_CELLS: usize = 63;
+/// How far short of the text column's right edge every block ends, twips (as code blocks
+/// always have).
+const BLOCK_INSET: i32 = 2 * CODE_GAP;
 /// Space above a code block's first line and below its last, twips.
 const CODE_AIR: i32 = 90;
 
@@ -300,9 +303,10 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
                     Some(widths.get(n)? - 2 * margin)
                 })
                 .unwrap_or(total);
-            // The cells' padding reaches out past their edges: keep the right border in view
-            // (and an indented quote's start further in).
-            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), (room - 2 * r.margin - r.indent).max(720));
+            // A block's box runs from its indent across its cells' widths, whatever its cell
+            // margin: every kind ends where a code block does, short of the right edge (a
+            // table, with a narrower margin, ended 7 px further right than code above it).
+            let widths = fit_widths(&old.iter().map(|c| c.width).collect::<Vec<_>>(), (room - BLOCK_INSET - r.indent).max(720));
             fitted.insert(row.start, (r.margin, widths.clone()));
             let cells: Vec<CellParms> = widths
                 .iter()
@@ -358,6 +362,24 @@ fn style_blocks_now(h: HWND, t: &[u16]) {
                         pf.mask = if before { PFM_SPACEBEFORE } else { PFM_SPACEAFTER };
                         pf.space_before = CODE_AIR;
                         pf.space_after = CODE_AIR;
+                        send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+                    }
+                }
+            }
+        }
+        if kind == Block::Table {
+            // A cell's text sits in the middle of it: the space a paragraph has after it in
+            // the note's rhythm, under a cell's last line, put it 6 px from the top and 10
+            // from the bottom.
+            let t = text(h);
+            for &row in &rows {
+                for (_, cb) in cells(&t, row) {
+                    set_sel(h, cb as i32, cb as i32);
+                    let mut pf = ParaFormat2::new();
+                    send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+                    if pf.space_after != 0 {
+                        pf = ParaFormat2::new();
+                        pf.mask = PFM_SPACEAFTER;
                         send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
                     }
                 }
@@ -779,6 +801,34 @@ mod tests {
         blocks(h, &t).into_iter().map(|(k, rs)| (k, rs.len(), cells(&t, rs[0]).len())).collect()
     }
 
+    /// A table ends where a code block above it does (a block's box runs across its cells'
+    /// widths, whatever its margin), and its cells' last lines have no paragraph space
+    /// under them, so the text sits in the middle of the cell.
+    #[test]
+    fn tables_line_up_with_code() {
+        let h = editor();
+        load_markdown(h, "T\n```\ncode\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n> quoted");
+        set_block_colors(h, 0xFFFFFF, 0x202020, false);
+        style_blocks(h);
+        let t = text(h);
+        let all = blocks(h, &t);
+        let width = |rs: &[Row]| get(h, rs[0]).unwrap().1.iter().map(|c| c.width).sum::<i32>();
+        assert_eq!(all.len(), 3);
+        for (kind, rs) in &all {
+            assert!((width(rs) - width(&all[0].1)).abs() <= 2, "{kind:?}: {} for {}", width(rs), width(&all[0].1));
+            if *kind == Block::Table {
+                for &r in rs {
+                    for (_, cb) in cells(&t, r) {
+                        set_sel(h, cb as i32, cb as i32);
+                        let mut pf = ParaFormat2::new();
+                        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+                        assert_eq!(pf.space_after, 0);
+                    }
+                }
+            }
+        }
+    }
+
     /// A quote or code block in a quote is a row nested in the quote's cell, and fills that
     /// cell's text rather than the note's width, at any width the note is.
     #[test]
@@ -798,10 +848,10 @@ mod tests {
             for &r in &all[1..] {
                 assert!(r.end <= all[0].end, "nested in the quote");
                 let (p, cs) = get(h, r).unwrap();
-                let used = cs.iter().map(|c| c.width).sum::<i32>() + 2 * p.margin + p.indent;
+                let used = cs.iter().map(|c| c.width).sum::<i32>() + BLOCK_INSET + p.indent;
                 assert!((room - used).abs() <= 2, "width {w}: {used} in {room}");
             }
-            assert!(ocells[0].width + 2 * outer.margin <= column_twips(h) + 2);
+            assert!(ocells[0].width + BLOCK_INSET <= column_twips(h) + 2);
             // Drawn inside it: further in than the quote's own text.
             let x = |w: &str| pos_from_char(h, plain(h).find(w).unwrap() as i32).x;
             assert!(x("inner") > x("outer") && x("code") > x("outer"), "width {w}");
