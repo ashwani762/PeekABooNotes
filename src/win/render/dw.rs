@@ -26,14 +26,83 @@ struct Engine {
     brush: ID2D1SolidColorBrush,
 }
 
-/// Keyed by the text format's address, so each entry also holds that format: a format
-/// freed and re-allocated at the same address must never hit another font's layouts.
-type LayoutKey = (String, usize, u32, u32, u32, bool, bool);
-type Cached = (IDWriteTextFormat, IDWriteTextLayout);
+/// What a layout was made for: the text, the text format's address, the box (`f32` bits),
+/// the DT_* flags, underline and strikethrough. Keyed by the format's address, so each
+/// entry also holds that format: a format freed and re-allocated at the same address must
+/// never hit another font's layouts.
+#[derive(PartialEq)]
+struct LayoutKey<S> {
+    text: S,
+    fmt: usize,
+    w: u32,
+    h: u32,
+    flags: u32,
+    underline: bool,
+    strike: bool,
+}
+
+impl<S: AsRef<str>> LayoutKey<S> {
+    /// The key's hash, from the text as borrowed: a draw that finds its layout allocates
+    /// nothing (it made a `String` of its text each time).
+    fn hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (self.text.as_ref(), self.fmt, self.w, self.h, self.flags, self.underline, self.strike).hash(&mut h);
+        h.finish()
+    }
+
+    fn is(&self, other: &LayoutKey<Box<str>>) -> bool {
+        self.text.as_ref() == &*other.text && (self.fmt, self.w, self.h, self.flags, self.underline, self.strike) == (other.fmt, other.w, other.h, other.flags, other.underline, other.strike)
+    }
+}
+
+struct Cached {
+    key: LayoutKey<Box<str>>,
+    /// Held so the format outlives its layouts (see `LayoutKey`).
+    _fmt: IDWriteTextFormat,
+    layout: IDWriteTextLayout,
+    /// When it was last drawn or measured.
+    used: std::time::Instant,
+}
+
+/// How many layouts are kept: more than a frame of the deck, All Notes or Settings draws
+/// (a wrapped preview line's is 10 to 20 KB). Up to 1,500 were: 17 MB, and 7 MB of it
+/// stayed with the heap after a trim.
+const KEPT_LAYOUTS: usize = 192;
+/// A layout drawn this recently is not let go for room: should a frame draw more texts
+/// than `KEPT_LAYOUTS`, an animation would otherwise make every one of them again each
+/// frame. Past `MOST_LAYOUTS` the least recently drawn go regardless.
+const IN_USE: std::time::Duration = std::time::Duration::from_millis(250);
+const MOST_LAYOUTS: usize = 256;
 
 thread_local! {
     static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
-    static LAYOUTS: std::cell::RefCell<std::collections::HashMap<LayoutKey, Cached>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// By the key's hash (a different key under the same hash is a miss, and replaces it).
+    static LAYOUTS: RefCell<std::collections::HashMap<u64, Cached>> = RefCell::new(std::collections::HashMap::new());
+}
+
+#[cfg(test)]
+pub fn cached_layouts() -> usize {
+    LAYOUTS.with(|c| c.borrow().len())
+}
+
+/// Room for one more layout: the least recently drawn ones go, down to three quarters of
+/// `KEPT_LAYOUTS` (so this runs once per many new layouts), but none drawn within
+/// `IN_USE` unless there are more than `MOST_LAYOUTS`.
+fn make_room(c: &mut std::collections::HashMap<u64, Cached>, now: std::time::Instant) {
+    if c.len() < KEPT_LAYOUTS {
+        return;
+    }
+    let mut ages: Vec<(std::time::Instant, u64)> = c.iter().map(|(&k, v)| (v.used, k)).collect();
+    ages.sort_unstable_by_key(|a| a.0);
+    let excess = c.len() - KEPT_LAYOUTS * 3 / 4;
+    let forced = c.len().saturating_sub(MOST_LAYOUTS - 1);
+    for (i, (used, k)) in ages.into_iter().enumerate() {
+        if i >= excess || (i >= forced && now.duration_since(used) < IN_USE) {
+            break;
+        }
+        c.remove(&k);
+    }
 }
 
 fn engine<R>(f: impl FnOnce(&Engine) -> R) -> Option<R> {
@@ -130,17 +199,24 @@ impl Font {
     /// reuse a cached one.
     fn layout(&self, s: &str, w: f32, h: f32, flags: u32) -> Option<IDWriteTextLayout> {
         let fmt = self.fmt.as_ref()?;
-        let key = (s.to_string(), windows::core::Interface::as_raw(fmt) as usize, w.to_bits(), h.to_bits(), flags, self.underline, self.strike);
-        if let Some(l) = LAYOUTS.with(|c| c.borrow().get(&key).map(|(_, l)| l.clone())) {
-            return Some(l);
+        let key = LayoutKey { text: s, fmt: windows::core::Interface::as_raw(fmt) as usize, w: w.to_bits(), h: h.to_bits(), flags, underline: self.underline, strike: self.strike };
+        let hash = key.hash();
+        let now = std::time::Instant::now();
+        let hit = LAYOUTS.with(|c| {
+            let mut c = c.borrow_mut();
+            let e = c.get_mut(&hash).filter(|e| key.is(&e.key))?;
+            e.used = now;
+            Some(e.layout.clone())
+        });
+        if hit.is_some() {
+            return hit;
         }
         let l = self.build_layout(s, w, h, flags)?;
         LAYOUTS.with(|c| {
             let mut c = c.borrow_mut();
-            if c.len() > 1500 {
-                c.clear();
-            }
-            c.insert(key, (fmt.clone(), l.clone()));
+            make_room(&mut c, now);
+            let key = LayoutKey { text: Box::<str>::from(s), fmt: key.fmt, w: key.w, h: key.h, flags, underline: key.underline, strike: key.strike };
+            c.insert(hash, Cached { key, _fmt: fmt.clone(), layout: l.clone(), used: now });
         });
         Some(l)
     }
@@ -440,4 +516,34 @@ pub fn rotated(t: &mut Target, s: &str, f: &Font, origin: (f32, f32), angle: f32
     }
     let Some(l) = f.layout(s, 10_000.0, (f.ascent + f.descent) as f32, 0) else { return };
     draw(t, l, origin, angle, pivot, clip, rgb, alpha);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The layout cache holds what is being drawn, up to its most, and lets the least
+    /// recently drawn go once they're past their use.
+    #[test]
+    fn layouts_kept_are_bounded() {
+        let f = Font::new(14.0, 400, "Segoe UI");
+        LAYOUTS.with(|c| c.borrow_mut().clear());
+        for i in 0..KEPT_LAYOUTS + 100 {
+            f.measure(&format!("text {i}"));
+        }
+        // All drawn just now: kept, up to the most.
+        assert_eq!(cached_layouts(), MOST_LAYOUTS);
+        // Drawn again, from the cache.
+        let before = cached_layouts();
+        f.measure(&format!("text {}", KEPT_LAYOUTS + 99));
+        assert_eq!(cached_layouts(), before);
+        std::thread::sleep(IN_USE + std::time::Duration::from_millis(50));
+        f.measure("one more");
+        assert_eq!(cached_layouts(), KEPT_LAYOUTS * 3 / 4 + 1);
+        // The one drawn last is among those kept.
+        let kept = cached_layouts();
+        f.measure(&format!("text {}", KEPT_LAYOUTS + 99));
+        assert_eq!(cached_layouts(), kept);
+        LAYOUTS.with(|c| c.borrow_mut().clear());
+    }
 }
