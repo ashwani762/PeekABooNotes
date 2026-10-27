@@ -222,13 +222,21 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             c.card(&row_shape(y), theme::paper(r.color, dark), 1.0, 0x000000, 0.06, 1.4, s);
         }
         let selected = l.sel.contains(&r.id);
-        let bg = if selected { theme::paper(r.color, dark) } else { p.list };
-        let fade = |rgb: u32| mix(bg, rgb, la);
-        let (tc, mc) = if selected {
-            (theme::PAPER_TEXT, theme::paper_subtext(r.color, dark))
+        // Styled for what's under it: inside the selection's highlight, as selected, on the
+        // list, as not, and in between as it slides in or out (a row closing a gap, one
+        // back on Undo), rather than by whether it's selected (its words went dark on the
+        // list in a frame, or light inside the highlight).
+        let under = if selected && Some(r.id) != primary {
+            1.0
         } else {
-            (p.text, p.sub)
+            let sy = (l.sel_y.value - l.scroll.value + slide).round();
+            if primary.is_some() { clamp01(1.0 - (y - sy).abs() / lay.row_h) } else { 0.0 }
         };
+        let paper = if Some(r.id) == primary { primary_index(l).map_or(theme::paper(r.color, dark), |pi| sel_color(l, pi, dark)) } else { theme::paper(r.color, dark) };
+        let bg = mix(p.list, paper, under);
+        // Faded as it comes in by its own opacity, not toward a colour it may not be on.
+        let fade = |rgb: u32| rgb;
+        let (tc, mc) = (mix(p.text, theme::PAPER_TEXT, under), mix(p.sub, theme::paper_subtext(r.color, dark), under));
         let tx = (row_x + 30.0 * s) as i32;
         let right = (row_x + row_w - 14.0 * s) as i32;
         let tb = (y + ROW_TITLE_BASE * s) as i32;
@@ -256,7 +264,7 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             }
         };
         marks(c, &r.title, &r.hits, &f.row_title, tb);
-        c.line_ct(&r.title, &f.row_title, tx, tb, right - tx, clip, fade(tc), DT_LEFT);
+        c.line(&r.title, &f.row_title, tx, tb, right - tx, clip, fade(tc), la, DT_LEFT);
         // Second line: where the search matched, when the title doesn't show it;
         // otherwise when it was edited (and where it lives, when that isn't the deck).
         // "Edited Yesterday", then the start of the note in a lighter shade.
@@ -274,11 +282,11 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             };
             (meta, r.body.lines().map(crate::common::store::summary_line).find(|l| !l.is_empty()))
         };
-        let mw = c.line_ct(&meta, &f.row_time, tx, mb, right - tx, clip, fade(mc), DT_LEFT);
+        let mw = c.line(&meta, &f.row_time, tx, mb, right - tx, clip, fade(mc), la, DT_LEFT);
         if let Some(pv) = preview {
             let px0 = tx + mw;
             if right - px0 > (24.0 * s) as i32 {
-                c.line_ct(&format!(" · {pv}"), &f.row_time, px0, mb, right - px0, clip, fade(mix(bg, mc, 0.7)), DT_LEFT);
+                c.line(&format!(" · {pv}"), &f.row_time, px0, mb, right - px0, clip, fade(mix(bg, mc, 0.7)), la, DT_LEFT);
             }
         }
         // Inset hairline separator, hidden next to highlighted rows.

@@ -624,7 +624,7 @@ pub fn frame(dt: f32) -> bool {
         }
         let dt = if std::mem::take(&mut l.fresh) { dt.min(anim::period()) } else { dt };
         let mut moving = false;
-        for sp in [&mut l.seg_x, &mut l.scroll, &mut l.hover_y, &mut l.hover_a, &mut l.list_a, &mut l.detail_a, &mut l.bar_a, &mut l.sel_k] {
+        for sp in [&mut l.seg_x, &mut l.hover_y, &mut l.hover_a, &mut l.list_a, &mut l.detail_a, &mut l.bar_a, &mut l.sel_k] {
             moving |= sp.step(dt);
         }
         // A row that left fades first; then the rows below, and the selection, close up.
@@ -632,6 +632,9 @@ pub fn frame(dt: f32) -> bool {
             l.hold -= dt;
             moving = true;
         } else {
+            // The list's scroll too: at its end, one row fewer let it scroll back while the
+            // row that left was still fading.
+            moving |= l.scroll.step(dt);
             moving |= l.sel_y.step(dt);
             for sp in l.offs.values_mut() {
                 moving |= sp.step(dt);
