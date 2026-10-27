@@ -222,6 +222,10 @@ pub(super) fn hide_later(h: HWND, to: HWND) {
     if pointer_on(h) || ours(to) {
         lower_behind(h, to);
     }
+    // A click away: it goes as the button comes up, told so at once (`watch_release`).
+    if button_held() {
+        watch_release(h);
+    }
     // Looked at about every refresh: a click away flies the note home as soon as the button
     // is up (every 40 ms, it waited 20 ms on average, up to 40, before setting off).
     unsafe { SetTimer(h, T_HIDE, 16, None) };
@@ -244,11 +248,35 @@ fn pointer_on(h: HWND) -> bool {
     crate::win::util::pt_in(&r, p.x, p.y)
 }
 
-/// On top of every other window until it goes (or `lower` puts it back).
+/// On top of every other window until it goes (or `lower` puts it back), but under the
+/// app's own that stay on top (the deck, a toast, a menu, a tooltip): at the very top, a
+/// note in use covered the deck fanned out beside it.
 fn raise(h: HWND) {
     let Some(st) = state(h) else { return };
     st.raised = true;
-    unsafe { SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    unsafe {
+        SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, flags);
+        let under = lowest_of(&[crate::win::ui::deck::window(), crate::win::ui::toast::window(), crate::win::ui::menu::window(), crate::win::ui::tooltip::window()]);
+        if !under.is_null() && under != h {
+            SetWindowPos(h, under, 0, 0, 0, 0, flags);
+        }
+    }
+}
+
+/// The lowest of `windows` (those showing, on top of all) among the windows on top of all.
+fn lowest_of(windows: &[HWND]) -> HWND {
+    let mut lowest = null_mut();
+    unsafe {
+        let mut w = GetTopWindow(null_mut());
+        while !w.is_null() && GetWindowLongPtrW(w, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0 {
+            if windows.contains(&w) && IsWindowVisible(w) != 0 {
+                lowest = w;
+            }
+            w = GetWindow(w, GW_HWNDNEXT);
+        }
+    }
+    lowest
 }
 
 /// The note was taken up (activated). One that flies home when you click away goes on top
@@ -292,6 +320,70 @@ fn lower_behind(h: HWND, to: HWND) {
 /// Go once the pointer is off the note with no button held: someone still pointing at it,
 /// or dragging something onto it from another app, isn't done with it. While the pointer
 /// rests on the note the timer stops; `pointer_out` starts it again when it leaves.
+/// Whether a mouse button is down (as the system has it, wherever the pointer is).
+fn button_held() -> bool {
+    unsafe { GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0 || GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000 != 0 }
+}
+
+thread_local! {
+    /// Notes waiting for the button clicked in another window to come up, and the hook
+    /// that tells them: (hook, notes, released since).
+    static RELEASE: std::cell::RefCell<(isize, Vec<HWND>, bool)> = const { std::cell::RefCell::new((0, Vec::new(), false)) };
+}
+
+/// Have note `h` told the moment a mouse button comes up anywhere (a low-level mouse hook,
+/// only while a note waits on a click away): looked for every 16 ms instead, which Windows
+/// keeps to its 15.6 ms tick, it set off up to 31 ms after the button came up.
+fn watch_release(h: HWND) {
+    unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        if code >= 0 {
+            match wp as u32 {
+                WM_LBUTTONUP | WM_RBUTTONUP => {
+                    let notes = RELEASE.with(|r| {
+                        let mut r = r.borrow_mut();
+                        r.2 = true;
+                        r.1.clone()
+                    });
+                    for n in notes {
+                        unsafe { PostMessageW(n, WM_TIMER, T_HIDE, 0) };
+                    }
+                }
+                WM_LBUTTONDOWN | WM_RBUTTONDOWN => RELEASE.with(|r| r.borrow_mut().2 = false),
+                _ => {}
+            }
+        }
+        unsafe { CallNextHookEx(null_mut(), code, wp, lp) }
+    }
+    RELEASE.with(|r| {
+        let mut r = r.borrow_mut();
+        if !r.1.contains(&h) {
+            r.1.push(h);
+        }
+        if r.0 == 0 {
+            r.2 = false;
+            r.0 = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(hook), app::hinst(), 0) } as isize;
+        }
+    });
+}
+
+/// Note `h` waits on no button any more (gone, or staying); the hook goes with the last.
+pub(super) fn unwatch_release(h: HWND) {
+    RELEASE.with(|r| {
+        let mut r = r.borrow_mut();
+        r.1.retain(|&n| n != h);
+        if r.1.is_empty() && r.0 != 0 {
+            unsafe { UnhookWindowsHookEx(r.0 as HHOOK) };
+            r.0 = 0;
+        }
+    });
+}
+
+/// Whether the button held when a note began waiting on a click away has come up (the
+/// hook saw it), whatever the async state says yet.
+fn released() -> bool {
+    RELEASE.with(|r| r.borrow().2)
+}
+
 pub(super) fn hide_tick(h: HWND) {
     let fg = unsafe { GetForegroundWindow() };
     // The deck holding the keys (Ctrl+Alt+K from this note) or one of our menus has them
@@ -303,15 +395,16 @@ pub(super) fn hide_tick(h: HWND) {
     let ours = fg == h || (!fg.is_null() && unsafe { GetWindow(fg, GW_OWNER) } == h);
     if ours || !hides(h) {
         unsafe { KillTimer(h, T_HIDE) };
+        unwatch_release(h);
         lower(h);
         return;
     }
     let mut p = POINT { x: 0, y: 0 };
     unsafe { GetCursorPos(&mut p) };
-    let held = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0 || GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000 != 0 };
-    if held {
+    if button_held() && !released() {
         return; // keep looking: a drag may end here or elsewhere
     }
+    unwatch_release(h);
     // On the note itself (not on a window lying over it): wait for it to leave.
     let under = unsafe { WindowFromPoint(p) };
     if !under.is_null() && (under == h || unsafe { IsChild(h, under) } != 0) {

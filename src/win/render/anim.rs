@@ -197,11 +197,36 @@ pub fn tick() {
     });
     let mask = ACTIVE.with(|a| a.get());
     let mut keep = 0;
-    for c in [Client::Deck, Client::Ghost, Client::Toast, Client::Notes, Client::List, Client::Menu, Client::Settings, Client::Tip] {
+    let parity = TICKS.with(|t| {
+        t.set(t.get().wrapping_add(1));
+        t.get() & 1
+    });
+    for (i, c) in [Client::Deck, Client::Ghost, Client::Toast, Client::Notes, Client::List, Client::Menu, Client::Settings, Client::Tip].into_iter().enumerate() {
         let bit = c as u32;
         if mask & bit == 0 {
             continue;
         }
+        // A card in flight keeps every refresh: a window whose frames take most of one
+        // (All Notes or Settings fading in as they open) draws every other one meanwhile,
+        // its motion stepped for both, rather than holding the card to half its rate.
+        let heavy = COST.with(|k| k.get()[i]) > 0.4 * PACER.with(|p| p.get().period()) * 1000.0;
+        let sharing = mask & Client::Ghost as u32 != 0 && matches!(c, Client::List | Client::Settings) && heavy;
+        if sharing && parity == 1 {
+            OWED.with(|o| {
+                let mut v = o.get();
+                v[i] += dt;
+                o.set(v);
+            });
+            keep |= bit;
+            continue;
+        }
+        let dt = dt + OWED.with(|o| {
+            let mut v = o.get();
+            let owed = std::mem::take(&mut v[i]);
+            o.set(v);
+            owed
+        });
+        let t0 = Instant::now();
         let more = match c {
             Client::Deck => crate::win::ui::deck::frame(dt),
             Client::Ghost => crate::win::ui::ghost::frame(dt),
@@ -212,6 +237,12 @@ pub fn tick() {
             Client::Settings => crate::win::ui::settings::frame(dt),
             Client::Tip => crate::win::ui::tooltip::frame(dt),
         };
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        COST.with(|k| {
+            let mut v = k.get();
+            v[i] = 0.5 * v[i] + 0.5 * ms;
+            k.set(v);
+        });
         if more {
             keep |= bit;
         }
@@ -231,6 +262,11 @@ pub fn tick() {
 }
 
 thread_local! {
+    /// What each part's frames have cost lately, ms (a running mean).
+    static COST: Cell<[f32; 8]> = const { Cell::new([0.0; 8]) };
+    /// The time a part sharing refreshes with a card in flight has still to step.
+    static OWED: Cell<[f32; 8]> = const { Cell::new([0.0; 8]) };
+    static TICKS: Cell<u32> = const { Cell::new(0) };
     static PERF: Cell<Option<(u32, f32, f32, u32)>> = const { Cell::new(None) };
     static PERF_ON: Cell<Option<bool>> = const { Cell::new(None) };
 }
@@ -311,16 +347,83 @@ fn timer() -> HANDLE {
     })
 }
 
-/// Sleep `secs` seconds, to a fraction of a millisecond.
+thread_local! {
+    /// What handles the messages that come while the clock waits (`set_pump`).
+    static PUMP: Cell<Option<fn() -> bool>> = const { Cell::new(None) };
+    /// The last input taken from the queue: when, and how long it had waited there (ms).
+    static INPUT: Cell<Option<(f64, u32)>> = const { Cell::new(None) };
+}
+
+/// Have `pump` handle the messages waiting (false once WM_QUIT came) whenever input or a
+/// posted message comes while the clock waits for the next frame's moment: a key or a click
+/// mid-animation was left waiting for the refresh, up to one.
+pub fn set_pump(pump: fn() -> bool) {
+    PUMP.with(|p| p.set(Some(pump)));
+}
+
+/// An input message was taken from the queue, sent at `sent` (its GetTickCount time): for
+/// PEEKABOO_PERF's line on how soon a flight followed it.
+pub fn input_taken(sent: u32) {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetTickCount() -> u32;
+    }
+    let queued = unsafe { GetTickCount() }.wrapping_sub(sent);
+    INPUT.with(|i| i.set(Some((vblank::now(), queued))));
+}
+
+/// The last input taken from the queue: when (on `vblank::now`'s clock), and how many ms it
+/// had waited there.
+pub fn last_input() -> Option<(f64, u32)> {
+    INPUT.with(|i| i.get())
+}
+
+/// Wait on `h` for up to `ms`, handling what comes meanwhile (`set_pump`). True when `h` is
+/// signalled or WM_QUIT came (stop waiting), false when there were messages, handled.
+fn wait_handle(h: HANDLE, ms: u32) -> bool {
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, QS_HOTKEY, QS_INPUT, QS_POSTMESSAGE, QS_SENDMESSAGE};
+    match PUMP.with(|p| p.get()) {
+        Some(pump) => {
+            let r = unsafe { MsgWaitForMultipleObjectsEx(1, &h, ms, QS_INPUT | QS_POSTMESSAGE | QS_HOTKEY | QS_SENDMESSAGE, MWMO_INPUTAVAILABLE) };
+            if r == WAIT_OBJECT_0 + 1 {
+                return !pump();
+            }
+            true
+        }
+        None => {
+            unsafe { WaitForSingleObject(h, ms) };
+            true
+        }
+    }
+}
+
+/// Sleep `secs` seconds, to a fraction of a millisecond, handling input as it comes.
 fn sleep(secs: f64) {
-    use windows_sys::Win32::System::Threading::{INFINITE, SetWaitableTimer, WaitForSingleObject};
+    use windows_sys::Win32::System::Threading::{INFINITE, SetWaitableTimer};
     let timer = timer();
-    // In 100 ns units, negative for "from now".
-    let due = -((secs * 1e7).ceil() as i64).max(1);
-    if !timer.is_null() && unsafe { SetWaitableTimer(timer, &due, 0, None, std::ptr::null(), 0) } != 0 {
-        unsafe { WaitForSingleObject(timer, INFINITE) };
-    } else {
+    if timer.is_null() {
         std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+        return;
+    }
+    let until = vblank::now() + secs;
+    loop {
+        // Set again after messages were handled: one of them may have waited on it itself
+        // (a menu's own loop, running frames).
+        let left = until - vblank::now();
+        if left <= 0.0 {
+            return;
+        }
+        // In 100 ns units, negative for "from now".
+        let due = -((left * 1e7).ceil() as i64).max(1);
+        if unsafe { SetWaitableTimer(timer, &due, 0, None, std::ptr::null(), 0) } == 0 {
+            std::thread::sleep(std::time::Duration::from_secs_f64(left));
+            return;
+        }
+        if wait_handle(timer, INFINITE) {
+            return;
+        }
     }
 }
 
@@ -348,7 +451,7 @@ pub fn wait_vsync() {
         Wait::Refresh => {
             let mon = pace_display();
             let period = timing_of(mon).map_or(period() as f64, |t| t.period);
-            match vblank::wait_next(mon, 1.5 * period) {
+            match vblank::wait_next(mon, 1.5 * period, wait_handle) {
                 Some(true) => sleep(0.002f64.min(0.2 * period)),
                 // The display isn't refreshing (asleep, gone): on by the time.
                 Some(false) => {}

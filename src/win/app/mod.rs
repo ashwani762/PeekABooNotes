@@ -551,6 +551,7 @@ pub fn run() -> i32 {
         refresh_light_text();
         widen_stored_pictures();
 
+        crate::win::render::anim::set_pump(pump_waiting);
         note::register();
         deck::create();
         tray(true);
@@ -581,6 +582,32 @@ pub fn run() -> i32 {
     }
 }
 
+/// The messages waiting now, handled, while the frame clock waits for its next frame's
+/// moment (`anim::set_pump`): false once WM_QUIT came (posted again for the loop).
+fn pump_waiting() -> bool {
+    unsafe {
+        let mut msg: MSG = std::mem::zeroed();
+        while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
+            if msg.message == WM_QUIT {
+                PostQuitMessage(msg.wParam as i32);
+                return false;
+            }
+            taken(&msg);
+            dispatch(&msg);
+        }
+        true
+    }
+}
+
+/// Message `msg` was taken from the queue, to be handled now: noted for the frame clock.
+fn taken(msg: &MSG) {
+    crate::win::render::anim::message_taken();
+    let input = matches!(msg.message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_HOTKEY | WM_NCLBUTTONDOWN | WM_NCLBUTTONUP);
+    if input {
+        crate::win::render::anim::input_taken(msg.time);
+    }
+}
+
 /// One turn of the message loop. Idle: block in GetMessage (0% CPU). Animating: drain
 /// input, step every spring, then wait for the compositor's next frame, so motion runs at
 /// the display's refresh rate. Returns false once WM_QUIT arrives (nested loops, such as
@@ -594,7 +621,7 @@ pub fn pump_once() -> bool {
                     PostQuitMessage(msg.wParam as i32);
                     return false;
                 }
-                crate::win::render::anim::message_taken();
+                taken(&msg);
                 dispatch(&msg);
             }
             crate::win::render::anim::tick();
@@ -606,7 +633,7 @@ pub fn pump_once() -> bool {
                 PostQuitMessage(0);
                 return false;
             }
-            crate::win::render::anim::message_taken();
+            taken(&msg);
             dispatch(&msg);
         }
         true

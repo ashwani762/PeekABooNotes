@@ -201,8 +201,7 @@ pub fn timing(mon: HMONITOR) -> Option<(f64, Option<f64>)> {
 /// Wait, up to `timeout` seconds, for the next refresh of display `mon`, as the waiting
 /// thread sees it begin (`track` set it waiting on it). None when its refreshes can't be
 /// waited on; else whether one came in time.
-pub fn wait_next(mon: HMONITOR, timeout: f64) -> Option<bool> {
-    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+pub fn wait_next(mon: HMONITOR, timeout: f64, wait: impl Fn(windows_sys::Win32::Foundation::HANDLE, u32) -> bool) -> Option<bool> {
     let k = with(mon, |o| o.source)?;
     if TRACKED.with(|t| t.get()) != k {
         return None;
@@ -217,7 +216,7 @@ pub fn wait_next(mon: HMONITOR, timeout: f64) -> Option<bool> {
         if left <= 0.0 {
             return Some(false);
         }
-        unsafe { WaitForSingleObject(seen_event(), (left * 1000.0).ceil() as u32) };
+        wait(seen_event(), (left * 1000.0).ceil() as u32);
     }
 }
 
@@ -265,11 +264,12 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_secs_f64(period * (1.0 + i as f64 * 0.37)));
                 let t0 = now();
                 track(mon);
-                let seen = wait_next(mon, 1.5 * period);
+                let plain = |h, ms| unsafe { windows_sys::Win32::System::Threading::WaitForSingleObject(h, ms) == 0 };
+                let seen = wait_next(mon, 1.5 * period, plain);
                 firsts.push(format!("{:.1}{}", (now() - t0) * 1000.0, if seen == Some(true) { "" } else { "!" }));
                 let mut last = now();
                 for _ in 0..3 {
-                    wait_next(mon, 1.5 * period);
+                    wait_next(mon, 1.5 * period, plain);
                     gaps.push(format!("{:.2}", (now() - last) / period));
                     last = now();
                 }

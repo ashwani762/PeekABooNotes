@@ -337,6 +337,14 @@ pub fn is_embedded(h: HWND) -> bool {
     state(h).is_some_and(|s| s.embedded)
 }
 
+/// Window `h`, made unseen for a card to open into, paints nothing until it's revealed,
+/// when it's drawn whole under the card (`reveal_as`): its first paint, wherever it fell
+/// among the card's first frames, made one of them late. Its picture is drawn without it
+/// (`picture`).
+pub fn hold_paint(h: HWND) {
+    unsafe { RedrawWindow(h, std::ptr::null(), null_mut(), RDW_VALIDATE | RDW_NOERASE | RDW_NOFRAME | RDW_ALLCHILDREN) };
+}
+
 /// Make the window visible (and focused, if it isn't already).
 pub fn reveal(h: HWND) {
     reveal_as(h, true);
@@ -1315,6 +1323,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             WM_DESTROY => {
                 crate::win::ui::tooltip::leave(h);
+                unwatch_release(h);
                 on_destroy(h);
                 app::schedule_trim();
                 return 0;
