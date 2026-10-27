@@ -279,7 +279,9 @@ fn measure(items: &[Item], fonts: &Fonts, s: f32) -> (i32, i32) {
 fn create(x: i32, y: i32, w: i32, h: i32, sub: bool) -> HWND {
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
     let ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | if sub { WS_EX_NOACTIVATE } else { 0 };
-    unsafe { CreateWindowExW(ex, wide(CLASS).as_ptr(), wide("Menu").as_ptr(), WS_POPUP, x, y, w, h, null_mut(), null_mut(), app::hinst(), null_mut()) }
+    let hwnd = unsafe { CreateWindowExW(ex, wide(CLASS).as_ptr(), wide("Menu").as_ptr(), WS_POPUP, x, y, w, h, null_mut(), null_mut(), app::hinst(), null_mut()) };
+    crate::win::util::no_transitions(hwnd);
+    hwnd
 }
 
 /// Tell Windows a menu popup opened or closed, as its own menus do (`TrackPopupMenu`

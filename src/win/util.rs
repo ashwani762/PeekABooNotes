@@ -119,6 +119,16 @@ pub fn clipboard_file_names() -> Vec<String> {
     }
 }
 
+/// Windows' own animations for window `h` showing, hiding and closing turned off: it moves
+/// in and out by itself. Left on, a card flying a note home was followed by Windows
+/// shrinking it away again, with another app in front.
+pub fn no_transitions(h: windows_sys::Win32::Foundation::HWND) {
+    let off: i32 = 1;
+    unsafe {
+        windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(h, 3 /* DWMWA_TRANSITIONS_FORCEDISABLED */, &off as *const i32 as _, 4);
+    }
+}
+
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }

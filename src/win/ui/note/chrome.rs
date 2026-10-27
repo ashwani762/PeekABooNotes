@@ -229,10 +229,30 @@ pub(super) fn hide_tick(h: HWND) {
         unsafe { KillTimer(h, T_HIDE) };
         return;
     }
+    if let Some(st) = state(h) {
+        st.quiet = covered_by(h, fg);
+    }
     unsafe {
         KillTimer(h, T_HIDE);
         PostMessageW(h, WM_CLOSE, 0, 0);
     }
+}
+
+/// Whether window `by` (in front of the note: it has the foreground) hides at least half
+/// of note `h`.
+fn covered_by(h: HWND, by: HWND) -> bool {
+    if by.is_null() || unsafe { IsWindowVisible(by) == 0 || IsIconic(by) != 0 } {
+        return false;
+    }
+    let (mut a, mut b): (RECT, RECT) = unsafe { (std::mem::zeroed(), std::mem::zeroed()) };
+    unsafe {
+        GetWindowRect(h, &mut a);
+        GetWindowRect(by, &mut b);
+    }
+    let w = (a.right.min(b.right) - a.left.max(b.left)).max(0) as i64;
+    let ht = (a.bottom.min(b.bottom) - a.top.max(b.top)).max(0) as i64;
+    let area = ((a.right - a.left) as i64 * (a.bottom - a.top) as i64).max(1);
+    w * ht * 2 >= area
 }
 
 pub(super) fn click(h: HWND, b: Btn) {

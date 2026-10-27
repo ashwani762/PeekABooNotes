@@ -312,6 +312,7 @@ pub fn create() {
     let hwnd = unsafe {
         CreateWindowExW(ex, wide(CLASS).as_ptr(), wide(t!("app_name")).as_ptr(), WS_POPUP, 0, 0, 1, 1, null_mut(), null_mut(), app::hinst(), null_mut())
     };
+    crate::win::util::no_transitions(hwnd);
     DECK.with(|d| {
         *d.borrow_mut() = Some(Deck {
             hwnd,

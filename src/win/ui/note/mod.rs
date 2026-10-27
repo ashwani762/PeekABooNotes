@@ -96,6 +96,10 @@ struct NoteWin {
     dirty: bool,
     loading: bool,
     discard: bool,
+    /// Going because another window took the foreground, which already covers most of it:
+    /// it goes home without the card flying from where it was, which would show over that
+    /// window as if Windows were minimizing something on it.
+    quiet: bool,
     /// When the note was last changed in this window: the first change of a visit (the
     /// window just opened, or the note left alone a while) keeps a version of it first.
     edited_at: Option<std::time::Instant>,
@@ -196,6 +200,7 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
+        quiet: false,
         edited_at: None,
         before: None,
         full_at: None,
@@ -241,8 +246,7 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
     }
     unsafe {
         // Our own transitions replace the system's show/hide animation.
-        let off: i32 = 1;
-        windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(h, 3 /* DWMWA_TRANSITIONS_FORCEDISABLED */, &off as *const i32 as _, 4);
+        crate::win::util::no_transitions(h);
         SetWindowPos(h, null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
     }
     // Dropping the system frame just grew the text area to its real size: place the text
@@ -274,6 +278,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
+        quiet: false,
         edited_at: None,
         before: None,
         full_at: None,
@@ -474,6 +479,9 @@ fn fly_home(h: HWND) {
     let id = st.id;
     if !crate::win::ui::deck::holds(id) {
         dissolve(h);
+        return;
+    }
+    if st.quiet {
         return;
     }
     let Some((r, color, content)) = snapshot(h) else { return };

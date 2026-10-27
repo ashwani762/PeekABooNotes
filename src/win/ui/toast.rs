@@ -123,6 +123,7 @@ fn with_toast(f: impl FnOnce(&mut Toast)) {
                     null_mut(),
                 )
             };
+            crate::win::util::no_transitions(hwnd);
             let (body, bold, tiny) = fonts(s);
             *t = Some(Toast {
                 hwnd,

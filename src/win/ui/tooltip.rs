@@ -88,6 +88,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
             if hwnd.is_null() {
                 return None;
             }
+            crate::win::util::no_transitions(hwnd);
             *t = Some(Tip {
                 hwnd,
                 owner: null_mut(),

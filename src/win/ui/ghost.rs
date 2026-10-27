@@ -127,6 +127,7 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
             null_mut(),
         )
     };
+    crate::win::util::no_transitions(hwnd);
     let mut g = card(hwnd, kind, from, to, color, content, s);
     g.on_arrive = on_arrive;
     render(&mut g);
