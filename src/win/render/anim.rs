@@ -79,6 +79,8 @@ thread_local! {
     static PACE: Cell<Option<HMONITOR>> = const { Cell::new(None) };
     /// The part that last asked for frames.
     static LAST: Cell<u32> = const { Cell::new(0) };
+    /// The display this run's frames were last paced by through a window (or a card).
+    static RUN_DISPLAY: Cell<Option<HMONITOR>> = const { Cell::new(None) };
 }
 
 /// Ask for frames for `c` until its frame function reports it has settled.
@@ -93,6 +95,7 @@ pub fn wake(c: Client) {
             });
             TURN.with(|t| t.set(None));
             PACE.with(|p| p.set(None));
+            RUN_DISPLAY.with(|d| d.set(None));
         }
         a.set(a.get() | c as u32);
     });
@@ -121,12 +124,20 @@ fn window_of(c: u32) -> HWND {
         x if x == Client::Menu as u32 => ui::menu::window(),
         x if x == Client::Settings as u32 => ui::settings::hwnd(),
         x if x == Client::Tip as u32 => ui::tooltip::window(),
-        // A note's controls, scroll bar or ticks: the note (or All Notes) being used.
-        x if x == Client::Notes as u32 => unsafe {
-            let fg = GetForegroundWindow();
-            let ours = !fg.is_null() && GetWindowThreadProcessId(fg, std::ptr::null_mut()) == windows_sys::Win32::System::Threading::GetCurrentThreadId();
-            if ours { fg } else { std::ptr::null_mut() }
-        },
+        // A note's controls, scroll bar or ticks: the note whose own motion last stepped,
+        // else the note (or All Notes) being used.
+        x if x == Client::Notes as u32 => {
+            let moving = ui::note::pace_window();
+            if !moving.is_null() {
+                moving
+            } else {
+                unsafe {
+                    let fg = GetForegroundWindow();
+                    let ours = !fg.is_null() && GetWindowThreadProcessId(fg, std::ptr::null_mut()) == windows_sys::Win32::System::Threading::GetCurrentThreadId();
+                    if ours { fg } else { std::ptr::null_mut() }
+                }
+            }
+        }
         _ => std::ptr::null_mut(),
     };
     if !h.is_null() && unsafe { IsWindowVisible(h) } != 0 { h } else { std::ptr::null_mut() }
@@ -139,11 +150,20 @@ fn window_of(c: u32) -> HWND {
 /// toast, a note's tick or scroll seen from the other screen).
 fn pace_display() -> HMONITOR {
     if let Some(m) = PACE.with(|p| p.get()) {
+        RUN_DISPLAY.with(|d| d.set(Some(m)));
         return m;
     }
     let (last, active) = (LAST.with(|l| l.get()), ACTIVE.with(|a| a.get()));
     if let Some(h) = pace_order(last, active).map(window_of).find(|h| !h.is_null()) {
-        return unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) };
+        let m = unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) };
+        RUN_DISPLAY.with(|d| d.set(Some(m)));
+        return m;
+    }
+    // No window to go by now (a note just closed, its last frames still running): the
+    // display the run went by until now, rather than the pointer's, which put an Esc'd
+    // note's last frames on the other display's refreshes.
+    if let Some(m) = RUN_DISPLAY.with(|d| d.get()) {
+        return m;
     }
     let mut pt = POINT { x: 0, y: 0 };
     unsafe {

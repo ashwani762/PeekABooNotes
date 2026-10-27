@@ -569,6 +569,18 @@ fn sink(r: RECT, color: u8, content: crate::win::ui::ghost::Content, s: f32) {
     crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Dissolve, (r, 8.0 * s), (to, 8.0 * s), color, content, None);
 }
 
+thread_local! {
+    /// The note window whose own motion (its controls, scroll bar, glide) last stepped.
+    static MOVING: std::cell::Cell<HWND> = const { std::cell::Cell::new(null_mut()) };
+}
+
+/// The note window whose motion the frames are for, for them to keep to its display's
+/// refreshes (null when it's gone or hidden).
+pub fn pace_window() -> HWND {
+    let h = MOVING.with(|m| m.get());
+    if !h.is_null() && unsafe { IsWindow(h) != 0 && IsWindowVisible(h) != 0 } { h } else { null_mut() }
+}
+
 /// Fade header controls for every note that is mid-transition.
 pub fn frame(dt: f32) -> bool {
     let mut wins: Vec<HWND> = app::ui(|u| u.notes.values().copied().collect());
@@ -585,9 +597,11 @@ pub fn frame(dt: f32) -> bool {
             let c = st.bar.step(dt) | st.bar_wide.step(dt);
             if scrollbar::step(st, dt) {
                 moving = true;
+                MOVING.with(|m| m.set(h));
             }
             if a || b || c {
                 moving = true;
+                MOVING.with(|m| m.set(h));
                 unsafe { InvalidateRect(h, std::ptr::null(), 0) };
             }
         }
