@@ -218,13 +218,7 @@ thread_local! {
 /// With PEEKABOO_PERF=1, append average/max frame times to %TEMP%\peekaboo-perf.txt, the
 /// display's refresh period, and how many frames stepped more than one refresh (late).
 fn perf(ms: f32, mask: u32, dt: f32) {
-    let on = PERF_ON.with(|p| {
-        if p.get().is_none() {
-            p.set(Some(std::env::var_os("PEEKABOO_PERF").is_some()));
-        }
-        p.get().unwrap_or(false)
-    });
-    if !on {
+    if !perf_on() {
         return;
     }
     PERF.with(|p| {
@@ -241,6 +235,42 @@ fn perf(ms: f32, mask: u32, dt: f32) {
             p.set(Some((n, sum, max, late)));
         }
     });
+}
+
+/// Whether PEEKABOO_PERF=1 asks for frame times.
+pub fn perf_on() -> bool {
+    PERF_ON.with(|p| {
+        if p.get().is_none() {
+            p.set(Some(std::env::var_os("PEEKABOO_PERF").is_some()));
+        }
+        p.get().unwrap_or(false)
+    })
+}
+
+/// A line for %TEMP%\peekaboo-perf.txt (with PEEKABOO_PERF=1).
+pub fn perf_line(line: &str) {
+    use std::io::Write;
+    if perf_on()
+        && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(std::env::temp_dir().join("peekaboo-perf.txt"))
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+thread_local! {
+    /// When the message being handled was taken from the queue: what a flight's lag is
+    /// counted from.
+    static MESSAGE_AT: Cell<f64> = const { Cell::new(0.0) };
+}
+
+/// A message was taken from the queue, to be handled now.
+pub fn message_taken() {
+    MESSAGE_AT.with(|m| m.set(vblank::now()));
+}
+
+/// When the message being handled was taken from the queue, on `vblank::now`'s clock.
+pub fn message_at() -> f64 {
+    MESSAGE_AT.with(|m| m.get())
 }
 
 thread_local! {
@@ -290,10 +320,23 @@ pub fn wait_vsync() {
     match plan {
         Wait::For(secs) => sleep(secs),
         Wait::No => {}
-        // No refresh seen to time it by (the first frame of a run): the compositor's next.
+        // No refresh seen to time it by (the first frame of a run): the display's own next,
+        // as its waiting thread sees it begin, and the moment after it the compositor takes
+        // the frame. The compositor's (DwmFlush) is another display's clock with displays at
+        // other rates: a 60 Hz one's made the first frame on a 100 Hz display a refresh late,
+        // 17 to 19 ms, every run.
         Wait::Refresh => {
-            if unsafe { windows_sys::Win32::Graphics::Dwm::DwmFlush() } < 0 {
-                sleep(period() as f64);
+            let mon = pace_display();
+            let period = timing_of(mon).map_or(period() as f64, |t| t.period);
+            match vblank::wait_next(mon, 1.5 * period) {
+                Some(true) => sleep(0.002f64.min(0.2 * period)),
+                // The display isn't refreshing (asleep, gone): on by the time.
+                Some(false) => {}
+                None => {
+                    if unsafe { windows_sys::Win32::Graphics::Dwm::DwmFlush() } < 0 {
+                        sleep(period);
+                    }
+                }
             }
         }
     }

@@ -441,8 +441,11 @@ pub fn refresh() {
         l.hwnd
     });
     if let Some(h) = h {
-        paint_now(h);
+        // The note's editor goes (it opened in a window of its own) or comes before the
+        // window is drawn, so it's drawn whole once: drawn first, the card where the editor
+        // was showed blank for a frame.
         sync_editor();
+        paint_now(h);
     }
 }
 

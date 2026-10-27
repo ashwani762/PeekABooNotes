@@ -221,6 +221,9 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             // compositor, came frames later, each try a late frame. Without a picture it's
             // paper until the compositor has one; the words are there only should none come.
             let h = note::create(id, r, note::Show::Later);
+            // Its first paint now, unseen, rather than among the next frame's messages, where
+            // it made the card's third or fourth frame late and the one after it leap.
+            unsafe { windows_sys::Win32::Graphics::Gdi::RedrawWindow(h, std::ptr::null(), null_mut(), windows_sys::Win32::Graphics::Gdi::RDW_UPDATENOW | windows_sys::Win32::Graphics::Gdi::RDW_ALLCHILDREN) };
             let picture = note::picture(h);
             deck::hand_off(id);
             let title = if text.trim().is_empty() { String::new() } else { crate::common::store::title_of(&text) };
@@ -228,6 +231,17 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             // The window's corners, at the scale of the monitor it opens on (not the deck's).
             let s = crate::win::ui::screen::of_rect(&r).1;
             let ghost = crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, None);
+            crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
+        }
+        None if !crate::win::render::anim::reduced() => {
+            // Nothing to fly out of: a card with the window's picture fades in where it comes
+            // up, and the window is revealed under it.
+            let h = note::create(id, r, note::Show::Later);
+            unsafe { windows_sys::Win32::Graphics::Gdi::RedrawWindow(h, std::ptr::null(), null_mut(), windows_sys::Win32::Graphics::Gdi::RDW_UPDATENOW | windows_sys::Win32::Graphics::Gdi::RDW_ALLCHILDREN) };
+            let picture = note::picture(h);
+            let s = crate::win::ui::screen::of_rect(&r).1;
+            let content = crate::win::ui::ghost::Content { title: String::new(), body: String::new(), body_top: None, image: picture, from_image: None };
+            let ghost = crate::win::ui::ghost::appear((r, 8.0 * s), color, content);
             crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
         }
         _ => {

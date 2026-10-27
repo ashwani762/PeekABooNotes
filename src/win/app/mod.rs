@@ -594,6 +594,7 @@ pub fn pump_once() -> bool {
                     PostQuitMessage(msg.wParam as i32);
                     return false;
                 }
+                crate::win::render::anim::message_taken();
                 dispatch(&msg);
             }
             crate::win::render::anim::tick();
@@ -605,6 +606,7 @@ pub fn pump_once() -> bool {
                 PostQuitMessage(0);
                 return false;
             }
+            crate::win::render::anim::message_taken();
             dispatch(&msg);
         }
         true

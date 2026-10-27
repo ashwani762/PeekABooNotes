@@ -31,6 +31,13 @@ fn probe_open_costs() {
         ("long", md_long()),
     ];
     let r = RECT { left: 1880, top: 300, right: 2200, bottom: 660 };
+    // A hundred notes beside them, as a notes file has.
+    for i in 0..100 {
+        app::store_mut(|s| s.create(&format!("Note {i}\n{}", md_long()), ""));
+    }
+    let t = Instant::now();
+    app::save_now();
+    eprintln!("PROBE writing 103 notes: {:?}", t.elapsed());
     for round in 0..3 {
         for (name, md) in &notes {
             let id = app::store_mut(|s| s.create(md, ""));
@@ -115,7 +122,18 @@ fn probe_open_costs() {
                 if pic.is_some() { "ok" } else { "none" },
                 if cap.is_some() { "ok" } else { "none" },
             );
+            // Closing, as WM_CLOSE does it (but for the card): the text kept, the picture,
+            // the window gone.
+            let t6 = Instant::now();
+            flush(h);
+            let flushed = t6.elapsed();
+            let t7 = Instant::now();
+            let snap = snapshot(h);
+            let snapped = t7.elapsed();
+            let t8 = Instant::now();
             unsafe { DestroyWindow(h) };
+            let destroyed = t8.elapsed();
+            eprintln!("PROBE round {round} {name} closing: kept {flushed:?}, picture and words {snapped:?} ({}), window gone {destroyed:?}", if snap.is_some() { "ok" } else { "none" });
         }
     }
 }

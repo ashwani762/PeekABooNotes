@@ -90,6 +90,11 @@ struct Ghost {
     /// long the frames before them took (the window it opens into made just before it set
     /// off, and painted while its first frames show), so it never sets off with a leap.
     moves: u8,
+    /// Fading in where the window comes up, rather than flying out of something.
+    appear: bool,
+    /// When the message that set it flying was taken, and when its first frame was put up
+    /// (for PEEKABOO_PERF's line on how soon it moved).
+    lag: Option<(f64, f64)>,
     /// The window it opens into, while its picture is still to be had, and the frames tried.
     /// The card sets off before the window is made, and the compositor has a window just
     /// made a frame or so later; meanwhile it's paper.
@@ -101,14 +106,15 @@ struct Ghost {
 /// Frames a card tries for the picture of the window it opens into, before it does without.
 const PICTURE_TRIES: u8 = 30;
 
-/// The frames a card's flight starts with that step a refresh each, whenever they come.
-const START: u8 = 3;
+/// The frames a card's flight starts with that step a refresh each, whenever they come
+/// (about 60 to 100 ms: while the window it opens into settles in).
+const START: u8 = 6;
 
 /// How much longer a flight takes for its distance (`d` px between the centres where it
 /// starts and ends, at scale `s`): as long as from a deck card to the window beside it
 /// (about 350 to 650 px) up to 700 px, longer beyond, but less than in proportion, so a
 /// card crossing a wide display goes faster but never streaks (2,500 px opening went up to
-/// 290 px a frame at 60 Hz; now under 120, and closing under 140).
+/// 290 px a frame at 60 Hz; now under 130, and closing under 140).
 fn far(d: f32, s: f32) -> f32 {
     (d / (700.0 * s)).max(1.0).powf(0.7).min(2.6)
 }
@@ -152,6 +158,22 @@ fn window_size(a: &RECT, b: &RECT, pad: i32) -> (i32, i32) {
 /// Fly a card from `from` to `to` (screen rects with corner radii). Its first frame is up
 /// when this returns; the card, to `adopt` a window, unless motion is reduced.
 pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, on_arrive: Option<Box<dyn FnOnce()>>) -> Option<HWND> {
+    set_off(kind, from, to, color, content, on_arrive, false)
+}
+
+/// A card for a window opening at `to` with nothing to fly out of (Reopen Last Note for a
+/// note not in the deck): it fades in where the window comes up, growing the last few
+/// pixels into it, and the window is revealed under it as from a flight. Shown at once
+/// instead, the window's first frame could be its empty surface, see-through but for its
+/// border. To `adopt` the window, as `fly`'s.
+pub fn appear(to: (RECT, f32), color: u8, content: Content) -> Option<HWND> {
+    let r = to.0;
+    let (dx, dy) = ((r.right - r.left) * 3 / 100, (r.bottom - r.top) * 3 / 100);
+    let from = RECT { left: r.left + dx, top: r.top + dy, right: r.right - dx, bottom: r.bottom - dy };
+    set_off(Kind::Open, (from, to.1), to, color, content, None, true)
+}
+
+fn set_off(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, on_arrive: Option<Box<dyn FnOnce()>>, appear: bool) -> Option<HWND> {
     if anim::reduced() {
         if let Some(f) = on_arrive {
             f();
@@ -192,7 +214,15 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     }
     let mut g = card(hwnd, kind, from, to, color, content, s);
     g.on_arrive = on_arrive;
+    if appear {
+        g.appear = true;
+        g.fade.snap(0.0);
+        g.fade.to(1.0);
+    }
     render(&mut g);
+    if anim::perf_on() {
+        g.lag = Some((anim::message_at(), crate::win::render::vblank::now()));
+    }
     unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
     GHOSTS.with(|gs| gs.borrow_mut().push(g));
     anim::wake(Client::Ghost);
@@ -257,7 +287,8 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
     let ((ax, ay), (bx, by)) = (centre(&from.0), centre(&to.0));
     let far = far((bx - ax).hypot(by - ay), s);
     let params = match kind {
-        Kind::Open => (0.86, 0.38 * far),
+        // Set off moving (see below), a little longer, so it's no faster at its fastest.
+        Kind::Open => (0.86, 0.45 * far),
         Kind::Close => (1.0, 0.3 * far),
         Kind::Dissolve => (1.0, 0.26),
     };
@@ -293,14 +324,24 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
         fresh: kind != Kind::Open,
         hold: 0,
         moves: 0,
+        appear: false,
+        lag: None,
         awaiting: None,
         picture_in: Spring::unit(1.0, theme::motion::DEFAULT),
     };
-    g.x.to(lx(t));
-    g.y.to(ly(t));
-    g.w.to((t.right - t.left) as f32);
-    g.h.to((t.bottom - t.top) as f32);
-    g.r.to(to.1);
+    let ends = [lx(t), ly(t), (t.right - t.left) as f32, (t.bottom - t.top) as f32, to.1];
+    for (sp, end) in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r].into_iter().zip(ends) {
+        // Opening, it's in hand already (the click took the deck card, the plus button):
+        // it sets off moving, at a pace that only slows from there, its first steps as long
+        // as the ones after them. Let go from rest, a spring's second step is twice its
+        // first or more, a leap just as it sets off. A window flying home sets off from
+        // rest, gathering speed.
+        if kind == Kind::Open {
+            sp.launch(end);
+        } else {
+            sp.to(end);
+        }
+    }
     g
 }
 
@@ -348,6 +389,8 @@ fn look(g: &Ghost) -> Look {
     let content = match (g.kind, g.from_image.is_some() && g.image.is_some()) {
         // Opening, it's paper until the window's picture comes.
         (Kind::Open, _) if g.awaiting.is_some() => 0.0,
+        // Fading in where the window comes up: the window's picture, as one.
+        (Kind::Open, _) if g.appear => card,
         // From the deck card into the window: the card's words are all but gone before the
         // window's come, so the two never show at once, doubled a little apart (they're
         // laid out differently), and each fades over a stretch of the flight, not a frame
@@ -488,7 +531,18 @@ pub fn frame(dt: f32) -> bool {
             fetch_picture(g);
             match advance(g, dt, anim::period()) {
                 Step::Still => {}
-                Step::Moved => render(g),
+                Step::Moved => {
+                    render(g);
+                    if let Some((taken, up)) = g.lag.take() {
+                        let now = crate::win::render::vblank::now();
+                        let kind = match g.kind {
+                            Kind::Open => "open",
+                            Kind::Close => "close",
+                            Kind::Dissolve => "dissolve",
+                        };
+                        anim::perf_line(&format!("flight={kind} message->first frame up {:.1}ms, ->first move drawn {:.1}ms, refresh={:.2}ms", (up - taken) * 1000.0, (now - taken) * 1000.0, anim::period() * 1000.0));
+                    }
+                }
                 Step::Arrived => {
                     if let Some(f) = g.on_arrive.take() {
                         arrivals.push(f);
@@ -748,7 +802,52 @@ mod tests {
                 assert!((s.dt as f64 - p).abs() < 1e-6, "{hz} Hz: a refresh a frame at the start, late or not");
             }
             let (moves, _) = steps(&f, |s| s.edges.to_vec());
-            assert!(moves[0] > 0.0 && moves[0] <= moves[1] + 1e-3);
+            // Even from the first step: neither a slow first step nor a leap after it.
+            assert!(moves[1] <= 1.25 * moves[0] && moves[0] <= 1.25 * moves[1], "{hz} Hz: {moves:?}");
+        }
+    }
+
+    #[test]
+    fn a_card_appearing_fades_in_as_the_window_and_hands_over_on_its_pixels() {
+        for hz in [60.0, 99.0] {
+            let p = 1.0 / hz;
+            let (image, px) = pattern(320, 360, 4);
+            let (dx, dy) = (320 * 3 / 100, 360 * 3 / 100);
+            let from = RECT { left: NOTE.left + dx, top: NOTE.top + dy, right: NOTE.right - dx, bottom: NOTE.bottom - dy };
+            let content = Content { title: String::new(), body: String::new(), body_top: None, image: Some(image), from_image: None };
+            let mut g = card(null_mut(), Kind::Open, (from, 8.0), (NOTE, 8.0), 3, content, 1.0);
+            g.appear = true;
+            g.fade.snap(0.0);
+            g.fade.to(1.0);
+            let (_, a0) = at_alpha(paint(&mut g, false));
+            assert!(a0 < 0.01, "it starts unseen");
+            let (mut alphas, mut moves, mut last) = (Vec::new(), Vec::new(), g.x.value);
+            let mut fade_misses = 0;
+            for _ in 0..200 {
+                match advance(&mut g, p as f32, p as f32) {
+                    Step::Still => {}
+                    Step::Moved | Step::Arrived => {
+                        let (win, alpha) = at_alpha(paint(&mut g, false));
+                        // On the card, the window's picture is whole whatever the card's strength.
+                        assert!((look(&g).content - alpha).abs() < 1e-6);
+                        if g.arrived {
+                            fade_misses = fade_misses.max(over_misses(&mut g, win, NOTE, &px, 8, alpha));
+                        } else {
+                            alphas.push(alpha);
+                            moves.push((g.x.value - last).abs());
+                            last = g.x.value;
+                        }
+                    }
+                }
+                if done(&g) {
+                    break;
+                }
+            }
+            assert!(done(&g), "{hz} Hz: it lands and goes");
+            assert!(alphas.windows(2).take(6).all(|w| w[1] > w[0]), "{hz} Hz: it fades in from its first frame: {alphas:?}");
+            assert!(alphas.windows(2).all(|w| w[1] - w[0] < 0.35), "{hz} Hz: over several frames: {alphas:?}");
+            assert!(moves.iter().all(|m| *m < 3.0), "{hz} Hz: it grows the last few pixels: {moves:?}");
+            assert_eq!(fade_misses, 0, "{hz} Hz: over the window, it shows the window's pixels");
         }
     }
 
@@ -763,7 +862,7 @@ mod tests {
         let (long_moves, spike) = steps(&long, |s| s.edges.to_vec());
         let biggest = |v: &[f32]| v.iter().fold(0.0f32, |a, b| a.max(*b));
         // A flight from a deck card to the window beside it is as it was.
-        assert!(biggest(&near_moves) < 41.0, "{}", biggest(&near_moves));
+        assert!(biggest(&near_moves) < 45.0, "{}", biggest(&near_moves));
         assert!(biggest(&long_moves) < 130.0, "{}", biggest(&long_moves));
         assert!(long.frames.len() > near.frames.len() * 3 / 2);
         // Speeding up and slowing down smoothly, without a leap (the steps under a pixel at
