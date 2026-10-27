@@ -442,6 +442,16 @@ pub fn caret_point(h: HWND) -> Option<(i32, i32)> {
     Some((x, y))
 }
 
+/// The box character `cp` of editor `h` takes, in its client px: as wide as it's drawn, as
+/// tall as its line (with the space it has under it).
+pub fn char_box(h: HWND, cp: i32) -> Option<RECT> {
+    use windows::Win32::UI::Controls::RichEdit::{tomAllowOffClient, tomClientCoord};
+    let r = range(h, cp, cp + 1)?;
+    let (mut l, mut t, mut rr, mut b, mut hit) = (0, 0, 0, 0, 0);
+    unsafe { r.GetRect(tomClientCoord.0 | tomAllowOffClient.0, &mut l, &mut t, &mut rr, &mut b, &mut hit).ok()? };
+    Some(RECT { left: l, top: t, right: rr, bottom: b })
+}
+
 /// Editor `h` draws no caret of its own (`view` draws it, in the frame): Windows' caret,
 /// drawn over the window by inverting its pixels, was left behind in pieces where the view
 /// painted over it. RichEdit still places it, unseen, for what follows the caret (screen
