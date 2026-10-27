@@ -215,40 +215,58 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             } else {
                 None
             };
-            // The window first, unseen, and its picture drawn as it's made (a few ms): the card
-            // sets off with it, moving in the next frame. Made while the card's first frames
-            // showed, it held the card still 100 ms and more, and its picture, from the
-            // compositor, came frames later, each try a late frame. Without a picture it's
-            // paper until the compositor has one; the words are there only should none come.
-            let h = note::create(id, r, note::Show::Later);
-            // Its first paint now, unseen, rather than among the next frame's messages, where
-            // it made the card's third or fourth frame late and the one after it leap.
-            unsafe { windows_sys::Win32::Graphics::Gdi::RedrawWindow(h, std::ptr::null(), null_mut(), windows_sys::Win32::Graphics::Gdi::RDW_UPDATENOW | windows_sys::Win32::Graphics::Gdi::RDW_ALLCHILDREN) };
-            let picture = note::picture(h);
             deck::hand_off(id);
             let title = if text.trim().is_empty() { String::new() } else { crate::common::store::title_of(&text) };
-            let content = crate::win::ui::ghost::Content { title, body: crate::common::store::body_of(&text), body_top: None, image: picture, from_image };
-            // The window's corners, at the scale of the monitor it opens on (not the deck's).
-            let s = crate::win::ui::screen::of_rect(&r).1;
-            let ghost = crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, None);
-            crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
+            fly_open(id, r, color, Some(from), title, crate::common::store::body_of(&text), from_image);
         }
-        None if !crate::win::render::anim::reduced() => {
-            // Nothing to fly out of: a card with the window's picture fades in where it comes
-            // up, and the window is revealed under it.
-            let h = note::create(id, r, note::Show::Later);
-            unsafe { windows_sys::Win32::Graphics::Gdi::RedrawWindow(h, std::ptr::null(), null_mut(), windows_sys::Win32::Graphics::Gdi::RDW_UPDATENOW | windows_sys::Win32::Graphics::Gdi::RDW_ALLCHILDREN) };
-            let picture = note::picture(h);
-            let s = crate::win::ui::screen::of_rect(&r).1;
-            let content = crate::win::ui::ghost::Content { title: String::new(), body: String::new(), body_top: None, image: picture, from_image: None };
-            let ghost = crate::win::ui::ghost::appear((r, 8.0 * s), color, content);
-            crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
-        }
+        None if !crate::win::render::anim::reduced() => fly_open(id, r, color, None, String::new(), String::new(), None),
         _ => {
             note::create(id, r, note::Show::Now);
+            deck::refresh(); // shows the "open" dot
         }
     }
-    deck::refresh(); // shows the "open" dot
+}
+
+/// Open note `id` at `r` with a card: flying out of `from` (with the words `title` and
+/// `body` should the window's picture never come), or with nothing to fly out of, fading in
+/// where it comes up. The window is made first, unseen, and its picture drawn as it's made
+/// (a few ms): the card sets off with it, moving in the next frame. Made while the card's
+/// first frames showed, it held the card still 100 ms and more, and its picture, from the
+/// compositor, came frames later, each try a late frame. The window doesn't paint until
+/// it's revealed (it's drawn whole then, under the card): painted as it's made, or among the
+/// next frames' messages, it held the card's first frame up or made a later one late. The
+/// deck is drawn again in the next frame, with the card's, not before it.
+fn fly_open(id: u64, r: RECT, color: u8, from: Option<(RECT, f32)>, title: String, body: String, from_image: Option<crate::win::render::gfx::Image>) {
+    use crate::win::render::vblank::now;
+    let t0 = now();
+    let h = note::create(id, r, note::Show::Later);
+    note::hold_paint(h);
+    let t1 = now();
+    let picture = note::picture(h);
+    let t2 = now();
+    let content = crate::win::ui::ghost::Content { title, body, body_top: None, image: picture, from_image };
+    // The window's corners, at the scale of the monitor it opens on (not the deck's).
+    let s = crate::win::ui::screen::of_rect(&r).1;
+    let ghost = match from {
+        Some(from) => crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, None),
+        None => crate::win::ui::ghost::appear((r, 8.0 * s), color, content),
+    };
+    crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
+    let t3 = now();
+    deck::refresh_soon(); // shows the "open" dot
+    let ms = |a: f64, b: f64| (b - a) * 1000.0;
+    crate::win::render::anim::perf_line(&format!("open: window made {:.1}ms, its picture {:.1}ms, card up {:.1}ms, deck {:.1}ms", ms(t0, t1), ms(t1, t2), ms(t2, t3), ms(t3, now())));
+}
+
+/// Note `id` opened at `r` in place of another (the next or previous one): it fades in there.
+pub(super) fn open_in_place(id: u64, r: RECT) {
+    let color = store(|s| s.note(id).map(|n| n.color)).unwrap_or(0);
+    if crate::win::render::anim::reduced() {
+        note::create(id, r, note::Show::Now);
+        deck::refresh();
+    } else {
+        fly_open(id, r, color, None, String::new(), String::new(), None);
+    }
 }
 
 pub fn toggle_note(id: u64) {
@@ -283,7 +301,9 @@ pub fn step_note(id: u64, dir: i32, r: RECT) -> bool {
         unsafe { SetForegroundWindow(h) };
         return false;
     }
-    note::create(next, r, note::Show::Now);
+    // Faded in where this one was (shown at once, its first frame could be its empty
+    // surface, an outline and a red cross).
+    open_in_place(next, r);
     true
 }
 

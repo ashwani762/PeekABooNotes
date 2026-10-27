@@ -90,6 +90,12 @@ struct Ghost {
     /// long the frames before them took (the window it opens into made just before it set
     /// off, and painted while its first frames show), so it never sets off with a leap.
     moves: u8,
+    /// Growing out of a round button (the deck's plus): where its centre is on screen. The
+    /// button's picture shrinks and fades there in the card's first few frames, the button
+    /// turning into the card, rather than riding the card's corner for half the flight.
+    button: Option<(f32, f32)>,
+    /// How long it has been moving, in seconds.
+    flown: f32,
     /// Fading in where the window comes up, rather than flying out of something.
     appear: bool,
     /// When the message that set it flying was taken, and when its first frame was put up
@@ -325,10 +331,19 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
         hold: 0,
         moves: 0,
         appear: false,
+        button: None,
+        flown: 0.0,
         lag: None,
         awaiting: None,
         picture_in: Spring::unit(1.0, theme::motion::DEFAULT),
     };
+    // A round button it grows out of: a square start, its radius half its side, and its
+    // picture the start's size.
+    let side = f.right - f.left;
+    let round = side == f.bottom - f.top && from.1 * 2.0 >= side as f32 - 1.0;
+    if round && g.from_image.as_ref().is_some_and(|i| i.w == side && i.h == side) {
+        g.button = Some(((f.left + f.right) as f32 / 2.0, (f.top + f.bottom) as f32 / 2.0));
+    }
     let ends = [lx(t), ly(t), (t.right - t.left) as f32, (t.bottom - t.top) as f32, to.1];
     for (sp, end) in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r].into_iter().zip(ends) {
         // Opening, it's in hand already (the click took the deck card, the plus button):
@@ -401,8 +416,40 @@ fn look(g: &Ghost) -> Look {
         (Kind::Dissolve, _) => card,
         (Kind::Close, _) => card * (1.0 - ease(p, 0.0, 0.6)),
     } * g.picture_in.value;
-    let from = if g.kind == Kind::Open && g.from_image.is_some() { card * (1.0 - ease(p, 0.0, 0.5)) } else { 0.0 };
+    let from = match (g.kind, g.from_image.is_some(), g.button) {
+        (Kind::Open, true, Some(_)) => card * (1.0 - button_gone(g)),
+        (Kind::Open, true, None) => card * (1.0 - ease(p, 0.0, 0.5)),
+        _ => 0.0,
+    };
     Look { card, from, content }
+}
+
+/// How far the button a card grows out of has gone (0 to 1): over its first 45 ms, three
+/// or four frames.
+fn button_gone(g: &Ghost) -> f32 {
+    ease(g.flown, 0.0, 0.045)
+}
+
+/// Picture `img` at `k` times its size (bilinear, premultiplied), for a button's few pixels.
+fn shrunk(img: &crate::win::render::gfx::Image, k: f32) -> crate::win::render::gfx::Image {
+    let (w, h) = (((img.w as f32 * k).round() as i32).max(1), ((img.h as f32 * k).round() as i32).max(1));
+    let src = img.pixels();
+    let at = |x: i32, y: i32| src[(y.clamp(0, img.h - 1) * img.w + x.clamp(0, img.w - 1)) as usize];
+    let px = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            let (sx, sy) = ((x as f32 + 0.5) / k - 0.5, (y as f32 + 0.5) / k - 0.5);
+            let (x0, y0) = (sx.floor() as i32, sy.floor() as i32);
+            let (fx, fy) = (sx - x0 as f32, sy - y0 as f32);
+            let q = [at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1)];
+            let wts = [(1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy];
+            (0..4).fold(0u32, |acc, c| {
+                let v: f32 = q.iter().zip(wts).map(|(p, w)| ((p >> (8 * c)) & 0xFF) as f32 * w).sum();
+                acc | ((v.round() as u32).min(255) << (8 * c))
+            })
+        })
+        .collect();
+    crate::win::render::gfx::Image::from_pixels(w, h, px)
 }
 
 /// Draw the card as it is now; returns where its window goes on screen, and how strongly
@@ -416,6 +463,7 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32, f32) {
     let Look { card: alpha, from, content } = look(g);
     let on_card = |v: f32| if alpha > 0.002 { (v / alpha).min(1.0) } else { 0.0 };
     let (from_a, content) = (on_card(from), on_card(content));
+    let gone = button_gone(g);
     let c = &mut g.canvas;
     c.clear(0);
     // The window sits on whole pixels where the card is; the card keeps its fraction of one
@@ -424,13 +472,26 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32, f32) {
     let (wx, wy) = (g.x.value.floor(), g.y.value.floor());
     let (cw, ch) = ((c.w as f32 - 2.0 * pad).max(1.0), (c.h as f32 - 2.0 * pad).max(1.0));
     let sh = Shape::new(pad + g.x.value - wx, pad + g.y.value - wy, g.w.value.clamp(1.0, cw), g.h.value.clamp(1.0, ch), g.r.value.max(0.0));
-    c.card(&sh, theme::paper(g.color, dark), 1.0, 0x000000, 0.06, 1.6, s);
+    // Opening, its shadow goes as the window it reveals comes up with its own (Windows'),
+    // rather than the two lying one over the other, darker, for the frames it stays whole.
+    let shadow = if g.kind == Kind::Open && g.arrived { 0.0 } else { 1.6 };
+    c.card(&sh, theme::paper(g.color, dark), 1.0, 0x000000, 0.06, shadow, s);
     c.begin_batch();
     // The deck card it opens from, then the window's picture, both anchored at the card's
     // top-left, as the window lays itself out.
     if let Some(from) = g.from_image.as_ref() {
         c.flush();
-        c.image(from, sh.x, sh.y, &sh, from_a);
+        match g.button {
+            // Shrinking where the button was, the card growing out of it.
+            Some((bx, by)) if from_a > 0.002 => {
+                let small = shrunk(from, 1.0 - 0.5 * gone);
+                let at_x = bx - (g.origin.0 + wx as i32 - g.pad) as f32 - small.w as f32 / 2.0;
+                let at_y = by - (g.origin.1 + wy as i32 - g.pad) as f32 - small.h as f32 / 2.0;
+                c.image(&small, at_x.round(), at_y.round(), &sh, from_a);
+            }
+            Some(_) => {}
+            None => c.image(from, sh.x, sh.y, &sh, from_a),
+        }
     }
     if let Some(img) = g.image.as_ref() {
         c.flush();
@@ -494,6 +555,7 @@ fn advance(g: &mut Ghost, dt: f32, period: f32) -> Step {
     // it opens into made and painted as it set off), so it never sets off with a leap.
     let dt = if g.moves >= START { dt } else { dt.min(period) };
     g.moves = g.moves.saturating_add(1);
+    g.flown += dt;
     let mut moving = false;
     for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade, &mut g.picture_in] {
         moving |= sp.step(dt);
@@ -502,7 +564,10 @@ fn advance(g: &mut Ghost, dt: f32, period: f32) -> Step {
         return Step::Moved;
     }
     let near = arrive_within(g.kind);
-    if !moving || [&g.x, &g.y, &g.w, &g.h].iter().all(|sp| (sp.target - sp.value).abs() < near) {
+    // Fading in where the window comes up, it's there once it's whole too: revealed under a
+    // card at 95%, the window made its last 5% in one frame.
+    let whole = !g.appear || g.fade.value >= 0.998;
+    if !moving || ([&g.x, &g.y, &g.w, &g.h].iter().all(|sp| (sp.target - sp.value).abs() < near) && whole) {
         g.arrived = true;
         // Exactly at its end: on the window's own place and size, so its picture is the
         // window's pixels where the window is.
@@ -510,7 +575,12 @@ fn advance(g: &mut Ghost, dt: f32, period: f32) -> Step {
             sp.snap(sp.target);
         }
         match g.kind {
-            Kind::Open => g.hold = HOLD,
+            Kind::Open => {
+                g.hold = HOLD;
+                if g.appear {
+                    g.fade.snap(1.0);
+                }
+            }
             _ => g.fade.snap(0.0),
         }
         return Step::Arrived;
@@ -540,7 +610,8 @@ pub fn frame(dt: f32) -> bool {
                             Kind::Close => "close",
                             Kind::Dissolve => "dissolve",
                         };
-                        anim::perf_line(&format!("flight={kind} message->first frame up {:.1}ms, ->first move drawn {:.1}ms, refresh={:.2}ms", (up - taken) * 1000.0, (now - taken) * 1000.0, anim::period() * 1000.0));
+                        let input = anim::last_input().map_or(String::new(), |(at, queued)| format!("; the last input waited {queued}ms in the queue and was taken {:.1}ms before that message", (taken - at) * 1000.0));
+                        anim::perf_line(&format!("flight={kind} message->first frame up {:.1}ms, ->first move drawn {:.1}ms, refresh={:.2}ms{input}", (up - taken) * 1000.0, (now - taken) * 1000.0, anim::period() * 1000.0));
                     }
                 }
                 Step::Arrived => {
@@ -677,7 +748,7 @@ mod tests {
         let (win, _) = at_alpha(paint(&mut g, false));
         // A window's picture has Windows' border over its edge; the deck card's is as it is.
         let border = crate::win::ui::note::border_color(3, false);
-        let first = if kind == Kind::Open { from_px.as_deref().map(|px| (from.0, px, 14, None)) } else { Some((from.0, &image_px[..], 8, Some(border))) };
+        let first = if kind == Kind::Open { from_px.as_deref().map(|px| (from.0, px, from.1.ceil() as i32, None)) } else { Some((from.0, &image_px[..], 8, Some(border))) };
         let first_misses = first.map(|(at, px, r, b)| misses(&mut g, win, at, px, r, b));
         let mut frames = vec![seen(&g, 1, 0.0)];
         let (mut last_misses, mut held, mut fade_misses) = (None, 0, 0);
@@ -852,6 +923,18 @@ mod tests {
     }
 
     #[test]
+    fn a_new_note_grows_out_of_the_plus_button_which_goes_in_its_first_few_frames() {
+        for hz in [60.0, 99.0, 144.0] {
+            let f = fly_off_screen(Kind::Open, (PLUS, 17.0), (NOTE, 8.0), pattern(320, 360, 5), Some(pattern(34, 34, 6)), hz);
+            assert_eq!(f.first_misses, Some(0), "{hz} Hz: it sets off as the button");
+            // Gone within 45 ms (three to six frames), never riding the card on.
+            let gone = f.frames.iter().position(|s| s.look.from < 1e-6).expect("the button goes");
+            assert!(gone as f64 <= 0.045 * hz + 1.0, "{hz} Hz: gone at frame {gone}");
+            assert!(f.frames[1].look.from > 0.3, "{hz} Hz: not in one frame");
+        }
+    }
+
+    #[test]
     fn a_long_flight_takes_longer_and_never_streaks() {
         // From the capsule at the right edge of a 2,560 px display to a note remembered at
         // its far left.
@@ -918,5 +1001,60 @@ mod tests {
                 eprintln!("PROBE   first {}; last {}", ends[0], ends[1]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod cost {
+    use super::*;
+    use crate::win::render::gfx::Image;
+
+    /// Probe (run with --ignored --nocapture): what a frame of a big note's card costs (a
+    /// note with a picture, 480 x 700 px), late in its flight from a deck card, the whole and
+    /// each part, and put up on a layered window that's never shown.
+    #[test]
+    #[ignore]
+    fn probe_card_costs() {
+        let (w, h) = (480, 700);
+        let img = Image::from_pixels(w, h, vec![0xFF80_9070; (w * h) as usize]);
+        let from_img = Image::from_pixels(304, 160, vec![0xFF70_8090; 304 * 160]);
+        let note = RECT { left: 1500, top: 200, right: 1500 + w, bottom: 200 + h };
+        let tab = RECT { left: 2236, top: 400, right: 2540, bottom: 560 };
+        let content = Content { title: String::new(), body: String::new(), body_top: None, image: Some(img), from_image: Some(from_img) };
+        let mut g = card(null_mut(), Kind::Open, (tab, 14.0), (note, 8.0), 3, content, 1.0);
+        for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h] {
+            sp.snap(sp.target * 0.97 + sp.value * 0.03);
+        }
+        let n = 50;
+        let t = std::time::Instant::now();
+        for _ in 0..n { paint(&mut g, false); }
+        eprintln!("PROBE paint whole: {:?} canvas {}x{}", t.elapsed() / n, g.canvas.w, g.canvas.h);
+        let pad = g.pad as f32;
+        let sh = Shape::new(pad, pad, g.w.value, g.h.value, 8.0);
+        let c = &mut g.canvas;
+        let t = std::time::Instant::now();
+        for _ in 0..n { c.clear(0); }
+        eprintln!("PROBE clear {:?}", t.elapsed() / n);
+        let t = std::time::Instant::now();
+        for _ in 0..n { c.card(&sh, 0xF0E0A0, 1.0, 0, 0.06, 1.6, 1.0); }
+        eprintln!("PROBE card {:?}", t.elapsed() / n);
+        let img2 = Image::from_pixels(w, h, vec![0xFF80_9070; (w * h) as usize]);
+        let t = std::time::Instant::now();
+        for _ in 0..n { c.image(&img2, sh.x, sh.y, &sh, 0.5); }
+        eprintln!("PROBE image half {:?}", t.elapsed() / n);
+        let t = std::time::Instant::now();
+        for _ in 0..n { c.image(&img2, sh.x, sh.y, &sh, 1.0); }
+        eprintln!("PROBE image whole {:?}", t.elapsed() / n);
+        let t = std::time::Instant::now();
+        for _ in 0..n { c.shape(&sh, 0x808080, 0.7, 1.0, 1.0); }
+        eprintln!("PROBE border {:?}", t.elapsed() / n);
+        // Put up on a layered window never shown.
+        let hw = unsafe { CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW, wide("STATIC").as_ptr(), std::ptr::null(), WS_POPUP, -4000, -4000, 10, 10, null_mut(), null_mut(), null_mut(), null_mut()) };
+        assert!(!hw.is_null());
+        assert!(unsafe { IsWindowVisible(hw) } == 0);
+        let t = std::time::Instant::now();
+        for i in 0..n { c.present_faded(hw, -4000 + i as i32, -4000, 0.9); }
+        eprintln!("PROBE present whole {:?}", t.elapsed() / n);
+        unsafe { DestroyWindow(hw) };
     }
 }

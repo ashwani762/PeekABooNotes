@@ -434,6 +434,22 @@ pub fn refresh() {
     });
 }
 
+/// `refresh`, drawn in the next frame rather than now: what a note opening has to show (its
+/// "open" dot, its card gone from the stack) comes with its card's first move, rather than
+/// holding that up by the time the deck takes to draw.
+pub fn refresh_soon() {
+    with(|d| {
+        let was = d.geo.work;
+        update_visibility(d);
+        sync(d);
+        let now = d.geo.work;
+        if (was.left, was.top, was.right, was.bottom) != (now.left, now.top, now.right, now.bottom) {
+            check_fullscreen(d);
+        }
+        anim::wake(Client::Deck);
+    });
+}
+
 /// Note `id` was typed in. Nothing but its card's title and preview can have changed, so
 /// only that card is brought up to date, and the deck is drawn again only when the card
 /// reads differently (a pause in typing otherwise costs the deck nothing).

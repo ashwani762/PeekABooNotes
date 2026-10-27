@@ -96,6 +96,20 @@ impl Shape {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: `card` works out every pixel, for its shortcuts to be checked against.
+    static EVERY_PIXEL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether `card` is to work out every pixel (tests of its shortcuts).
+fn every_pixel() -> bool {
+    #[cfg(test)]
+    return EVERY_PIXEL.with(|e| e.get());
+    #[cfg(not(test))]
+    false
+}
+
 pub struct Canvas {
     pub w: i32,
     pub h: i32,
@@ -215,7 +229,16 @@ impl Canvas {
                 }
                 continue;
             }
-            for pxx in x0..x1 {
+            // An outline, unturned: on rows clear of the corners and of the top and bottom
+            // edges, only the pixels by the sides are on it (a whole card's area of distances
+            // was worked out for a 1 px edge).
+            let (a, b) = if stroke > 0.0 && !rotated && feather <= 1.0 && !every_pixel() && ((py as f32 + 0.5) - cy).abs() < hy - r.max(stroke) - 2.0 {
+                let a = ((s.x + stroke + 2.0).ceil() as i32).clamp(x0, x1);
+                (a, ((s.x + s.w - stroke - 2.0).floor() as i32).clamp(a, x1))
+            } else {
+                (x1, x1)
+            };
+            for pxx in (x0..a).chain(b..x1) {
                 let (mut sx, mut sy) = (pxx as f32 + 0.5, py as f32 + 0.5);
                 if rotated {
                     let (dx, dy) = (sx - s.px, sy - s.py);
@@ -283,6 +306,27 @@ impl Canvas {
         };
         let opaque = 0xFF00_0000 | (fill & 0x00FF_FFFF);
         let solid = fill_a >= 0.999;
+        // A pixel's distance to the edge and its shadow's strength.
+        let at = |lx: f32, ly: f32| -> (f32, f32) {
+            let d = sdf(lx, ly);
+            let sa = if shadow > 0.0 && d > -1.0 {
+                let a = soft(sdf(lx, ly - amb_dy), amb_f) * 0.16 * shadow;
+                let k = soft(sdf(lx, ly - key_dy), key_f) * 0.10 * shadow;
+                1.0 - (1.0 - a) * (1.0 - k)
+            } else {
+                0.0
+            };
+            (d, sa)
+        };
+        // Unturned, on rows clear of the corners (the shadows' too) a pixel's distance and
+        // shadow go by its column alone, and on columns clear of them by its row alone:
+        // worked out once (the same numbers), not again for every pixel of a long side.
+        // Here it's a few px from an edge (the rest is the span) and the shadows lie less
+        // than `amb_dy + key_dy` below the card, so these margins keep to the straight parts.
+        let margin = amb_dy + key_dy + 4.0;
+        let straight_row = |ly: f32| [ly, ly - amb_dy, ly - key_dy].iter().all(|&y| (y - cy).abs() <= hy - r - 3.0);
+        let mid = (cx - (hx - r - margin), cx + (hx - r - margin));
+        let mut by_col: Vec<(f32, f32)> = Vec::new();
         let px = self.px();
         for py in y0..y1 {
             let row = (py * cw) as usize;
@@ -296,6 +340,11 @@ impl Canvas {
             } else {
                 None
             };
+            let side = span.is_some() && straight_row(ly0) && !every_pixel();
+            if side && by_col.is_empty() {
+                by_col = (x0..x1).map(|col| at(col as f32 + 0.5, ly0)).collect();
+            }
+            let by_row = (solid && !rotated && !side && !every_pixel()).then(|| at(cx, ly0));
             let mut pxx = x0;
             while pxx < x1 {
                 if let Some((a, b)) = span
@@ -312,19 +361,18 @@ impl Canvas {
                     lx = s.px + dx * cos - dy * sin;
                     ly = s.py + dx * sin + dy * cos;
                 }
-                let d = sdf(lx, ly);
+                let (d, sa) = match by_row {
+                    _ if side => by_col[(col - x0) as usize],
+                    Some(v) if lx > mid.0 && lx < mid.1 => v,
+                    _ => at(lx, ly),
+                };
                 let p = &mut px[row + col as usize];
                 if d < -1.5 && solid {
                     *p = opaque; // deep inside: no shadow, no edge, no blending
                     continue;
                 }
-                if shadow > 0.0 && d > -1.0 {
-                    let a = soft(sdf(lx, ly - amb_dy), amb_f) * 0.16 * shadow;
-                    let k = soft(sdf(lx, ly - key_dy), key_f) * 0.10 * shadow;
-                    let sa = 1.0 - (1.0 - a) * (1.0 - k);
-                    if sa > 0.002 {
-                        Self::blend(p, 0x000000, sa);
-                    }
+                if sa > 0.002 {
+                    Self::blend(p, 0x000000, sa);
                 }
                 let cov = (0.5 - d).clamp(0.0, 1.0);
                 if cov > 0.0 {
@@ -463,7 +511,7 @@ impl Canvas {
         if r.left < 0 || r.top < 0 || r.right > self.w || r.bottom > self.h || r.right <= r.left || r.bottom <= r.top {
             return None;
         }
-        Some(Image { w: r.right - r.left, h: r.bottom - r.top, px: self.copy_out(r) })
+        Some(Image::from_pixels(r.right - r.left, r.bottom - r.top, self.copy_out(r)))
     }
 
     pub fn copy_out(&mut self, r: RECT) -> Vec<u32> {
@@ -725,7 +773,18 @@ impl Canvas {
             if ((py as f32 + 0.5) - cy).abs() < hy - r - 1.0 {
                 a = ((clip.x + 1.0).ceil() as i32).clamp(x0, x1);
                 b = ((clip.x + clip.w - 1.0).floor() as i32).clamp(a, x1);
-                for pxx in a..b {
+                let fast = img.opaque && k < 256 && !every_pixel();
+                if fast {
+                    // Faded, a whole picture is the same sum on every channel: two at a time.
+                    let keep = 256 - k;
+                    for pxx in a..b {
+                        let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
+                        let rb = ((s & 0x00FF_00FF) * k + (dst & 0x00FF_00FF) * keep) >> 8 & 0x00FF_00FF;
+                        let ag = (((s >> 8) & 0x00FF_00FF) * k + ((dst >> 8) & 0x00FF_00FF) * keep) & 0xFF00_FF00;
+                        px[row + pxx as usize] = rb | ag;
+                    }
+                }
+                for pxx in if fast { b..b } else { a..b } {
                     let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
                     if k >= 256 && s >> 24 == 0xFF {
                         px[row + pxx as usize] = s;
@@ -876,12 +935,20 @@ pub struct Image {
     pub w: i32,
     pub h: i32,
     px: Vec<u32>,
+    /// Every pixel whole (a window's picture): faded, it's drawn two channels at a time.
+    opaque: bool,
 }
 
 impl Image {
     /// From `w` x `h` premultiplied BGRA pixels.
+    /// Its premultiplied BGRA pixels, row by row.
+    pub fn pixels(&self) -> &[u32] {
+        &self.px
+    }
+
     pub fn from_pixels(w: i32, h: i32, px: Vec<u32>) -> Image {
-        Image { w, h, px }
+        let opaque = px.iter().all(|p| p >> 24 == 0xFF);
+        Image { w, h, px, opaque }
     }
 }
 
@@ -931,7 +998,7 @@ fn grab(hwnd: HWND, tries: u32) -> Option<Image> {
             GdiFlush();
             let px = std::slice::from_raw_parts(dib.px, (w * h) as usize);
             if !blank(px) {
-                return Some(Image { w, h, px: px.iter().map(|p| p | 0xFF00_0000).collect() });
+                return Some(Image { w, h, px: px.iter().map(|p| p | 0xFF00_0000).collect(), opaque: true });
             }
         }
         None
@@ -992,6 +1059,51 @@ pub fn app_icon(size: i32) -> HICON {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_card_drawn_with_its_shortcuts_is_the_card_worked_out_pixel_by_pixel() {
+        use super::{Canvas, EVERY_PIXEL, Shape};
+        let shapes = [
+            (Shape::new(48.3, 48.7, 320.0, 360.0, 8.0), 1.0, 1.6, 1.0),
+            (Shape::new(30.0, 20.5, 480.6, 700.2, 14.0), 1.0, 1.6, 1.25),
+            (Shape::new(40.5, 60.0, 34.0, 34.0, 17.0), 1.0, 1.6, 1.0),
+            (Shape::new(10.0, 10.0, 304.0, 160.0, 14.0), 1.0, 0.0, 1.5),
+            (Shape::new(52.2, 41.9, 200.0, 90.0, 6.0), 0.6, 1.0, 1.0),
+            (Shape::new(70.0, 50.0, 300.0, 400.0, 12.0).rotated(0.05, 220.0, 250.0), 1.0, 1.3, 1.0),
+        ];
+        for (sh, fill_a, shadow, scale) in shapes {
+            let draw = |every: bool| {
+                EVERY_PIXEL.with(|e| e.set(every));
+                let mut c = Canvas::new(640, 860);
+                // Over something already there, as cards in a deck are.
+                c.clear(0x4020_3040);
+                c.card(&sh, 0xF0E0A0, fill_a, 0x000000, 0.06, shadow, scale);
+                EVERY_PIXEL.with(|e| e.set(false));
+                c.copy_out(windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 640, bottom: 860 })
+            };
+            assert!(draw(false) == draw(true), "{sh:?}");
+        }
+    }
+
+    #[test]
+    fn an_outline_and_a_faded_picture_drawn_with_shortcuts_are_them_pixel_by_pixel() {
+        use super::{Canvas, EVERY_PIXEL, Image, Shape};
+        let (w, h) = (300, 420);
+        let px: Vec<u32> = (0..h as u32).flat_map(|y| (0..w as u32).map(move |x| 0xFF00_0000 | ((x * 37 + y * 11) & 0xFF) << 16 | ((x ^ y) & 0xFF) << 8 | ((y * 5 + x * 3) & 0xFF))).collect();
+        let img = Image::from_pixels(w, h, px);
+        for (sh, stroke, alpha) in [(Shape::new(20.4, 30.6, 300.0, 420.0, 8.0), 1.0, 0.37), (Shape::new(10.0, 10.0, 200.0, 120.0, 14.0), 2.0, 0.81), (Shape::new(15.5, 12.5, 40.0, 40.0, 20.0), 1.0, 0.5)] {
+            let draw = |every: bool| {
+                EVERY_PIXEL.with(|e| e.set(every));
+                let mut c = Canvas::new(360, 480);
+                c.clear(0xFF30_6090);
+                c.image(&img, sh.x, sh.y, &sh, alpha);
+                c.shape(&sh, 0x806040, 0.7, 1.0, stroke);
+                EVERY_PIXEL.with(|e| e.set(false));
+                c.copy_out(windows_sys::Win32::Foundation::RECT { left: 0, top: 0, right: 360, bottom: 480 })
+            };
+            assert!(draw(false) == draw(true), "{sh:?}");
+        }
+    }
+
     use super::*;
 
     /// A picture clipped to a rounded card comes out the same whether a pixel is worked out
