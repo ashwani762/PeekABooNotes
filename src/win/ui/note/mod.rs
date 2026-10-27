@@ -870,6 +870,8 @@ fn connect_editor(h: HWND, edit: HWND) {
     rich::send(edit, rich::EM_SETEVENTMASK, 0, (rich::ENM_CHANGE | rich::ENM_LINK) as isize);
     attach::hook(edit);
     crate::win::editor::view::set_painter(input::paint_frame);
+    // Its caret is drawn in its frame, with everything else.
+    crate::win::editor::view::own_caret(edit);
     unsafe { SetWindowSubclass(edit, Some(edit_proc), 1, h as usize) };
 }
 

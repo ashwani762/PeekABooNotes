@@ -15,16 +15,24 @@
 //! wheel's glide) are drawn whole and compared with what's on screen a row at a time: only
 //! the rows that differ are painted, so a restyle that changed nothing puts nothing on
 //! screen.
+//!
+//! The caret is drawn in the frame too (`Caret`), and Windows' own is kept unseen.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ptr::null_mut;
+use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, EndPaint, GetUpdateRect, IntersectClipRect, InvalidateRect, PAINTSTRUCT, SRCCOPY, SetViewportOrgEx, UpdateWindow,
+    BeginPaint, BitBlt, CreateFontIndirectW, DeleteObject, EndPaint, GdiFlush, GetDC, GetTextMetricsW, GetUpdateRect, IntersectClipRect, InvalidateRect, LOGFONTW, PAINTSTRUCT, ReleaseDC,
+    SRCCOPY, SelectObject, SetViewportOrgEx, TEXTMETRICW, UpdateWindow,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, IsWindow, IsWindowVisible};
+use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GUITHREADINFO, GetCaretBlinkTime, GetClientRect, GetGUIThreadInfo, IsWindow, IsWindowVisible, KillTimer, SPI_GETCARETTIMEOUT, SPI_GETCARETWIDTH, SetCaretPos, SetTimer, SystemParametersInfoW,
+};
 
 use crate::win::editor::{checks, emoji, fade, rich};
 use crate::win::render::gfx::{Canvas, Image};
@@ -151,6 +159,9 @@ pub fn on_paint(e: HWND) -> bool {
     // when it scrolls outside `quiet`): all of it. Otherwise whole rows, so each row on
     // screen is known to be one drawn here.
     let moved = SHOWN.with(|m| m.borrow().get(&(e as isize)).is_none_or(|s| s.w != w || s.h != h || s.scroll != scroll));
+    if !moved && paint_blink(e, w, h) {
+        return true;
+    }
     unsafe {
         let mut u: RECT = std::mem::zeroed();
         if moved {
@@ -168,7 +179,7 @@ pub fn on_paint(e: HWND) -> bool {
         with_canvas(w, h, |c| {
             // Drawn whole even for a part: what goes over the text looks around it (the
             // paper or selection under a circle).
-            if !fresh && compose(e, c, 0, w, h, Parts::All) {
+            if !fresh && frame(e, c, w, h) {
                 rows = (0..h).map(|y| hash(&c.row(y)[..w as usize])).collect();
             }
             if rows.len() == h as usize {
@@ -180,24 +191,30 @@ pub fn on_paint(e: HWND) -> bool {
                 }
             }
         });
-        SHOWN.with(|m| {
-            let mut m = m.borrow_mut();
-            let s = m.entry(e as isize).or_insert(Shown { w, h, scroll, rows: Vec::new() });
-            if moved || s.rows.len() != h as usize {
-                *s = Shown { w, h, scroll, rows: vec![0; h as usize] };
-            }
-            for y in y0..y1 {
-                if let Some(r) = rows.get(y as usize) {
-                    s.rows[y as usize] = *r;
-                }
-            }
-        });
+        record(e, (w, h, scroll), moved, &rows, y0, y1);
     }
     unsafe { EndPaint(e, &ps) };
     if !crate::win::render::anim::active() {
         CANVAS.with(|c| c.borrow_mut().take());
     }
     true
+}
+
+/// Editor `e`'s window (`w`, `h`, scrolled to `scroll`) shows rows `y0..y1` of a frame whose
+/// rows hash to `rows`: all it shows is unknown first when it `moved`.
+fn record(e: HWND, (w, h, scroll): (i32, i32, i32), moved: bool, rows: &[u64], y0: i32, y1: i32) {
+    SHOWN.with(|m| {
+        let mut m = m.borrow_mut();
+        let s = m.entry(e as isize).or_insert(Shown { w, h, scroll, rows: Vec::new() });
+        if moved || s.rows.len() != h as usize {
+            *s = Shown { w, h, scroll, rows: vec![0; h as usize] };
+        }
+        for y in y0..y1 {
+            if let Some(r) = rows.get(y as usize) {
+                s.rows[y as usize] = *r;
+            }
+        }
+    });
 }
 
 /// Put what changed in editor `e` on screen now, in one paint: it's drawn whole, and the
@@ -207,26 +224,19 @@ pub fn present(e: HWND) {
     if unsafe { IsWindow(e) == 0 || IsWindowVisible(e) == 0 } || rich::is_quiet(e) {
         return;
     }
-    let (w, h) = (client(e).0, client(e).1);
+    let (w, h) = client(e);
     if w <= 0 || h <= 0 {
         return;
     }
-    let scroll = rich::scroll_y(e);
-    let Some(rows) = with_canvas(w, h, |c| compose(e, c, 0, w, h, Parts::All).then(|| (0..h).map(|y| hash(&c.row(y)[..w as usize])).collect::<Vec<u64>>())) else {
+    let Some(changed) = changes(e, w, h) else {
         // RichEdit paints itself.
         unsafe { InvalidateRect(e, std::ptr::null(), 0) };
         return;
     };
-    let changed = SHOWN.with(|m| {
-        let m = m.borrow();
-        let shown = m.get(&(e as isize)).filter(|s| s.w == w && s.h == h && s.scroll == scroll);
-        changed_rows(shown.map(|s| &s.rows[..]), &rows)
-    });
     if changed.is_empty() {
         return;
     }
     FRESH.set(e as isize);
-    FRESH_ROWS.with(|r| *r.borrow_mut() = rows);
     unsafe {
         for (a, b) in changed {
             InvalidateRect(e, &RECT { left: 0, top: a, right: w, bottom: b }, 0);
@@ -234,6 +244,21 @@ pub fn present(e: HWND) {
         UpdateWindow(e);
     }
     FRESH.set(0);
+}
+
+/// Editor `e` (`w` x `h`) drawn whole on the canvas, its rows' hashes kept for the paint
+/// that shows it (`FRESH_ROWS`): the runs of rows that differ from what its window shows.
+/// None when RichEdit can't draw it.
+fn changes(e: HWND, w: i32, h: i32) -> Option<Vec<(i32, i32)>> {
+    let scroll = rich::scroll_y(e);
+    let rows = with_canvas(w, h, |c| frame(e, c, w, h).then(|| (0..h).map(|y| hash(&c.row(y)[..w as usize])).collect::<Vec<u64>>()))?;
+    let changed = SHOWN.with(|m| {
+        let m = m.borrow();
+        let shown = m.get(&(e as isize)).filter(|s| s.w == w && s.h == h && s.scroll == scroll);
+        changed_rows(shown.map(|s| &s.rows[..]), &rows)
+    });
+    FRESH_ROWS.with(|r| *r.borrow_mut() = rows);
+    Some(changed)
 }
 
 /// The runs of rows (from, to) whose hashes `rows` differ from those `shown` (all of
@@ -260,13 +285,435 @@ fn changed_rows(shown: Option<&[u64]>, rows: &[u64]) -> Vec<(i32, i32)> {
 /// Editor `e` is going.
 pub fn forget(e: HWND) {
     SHOWN.with(|m| m.borrow_mut().remove(&(e as isize)));
+    OWN.with(|o| o.borrow_mut().remove(&(e as isize)));
+    CARET.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.e == e as isize {
+            k.e = 0;
+            k.at = None;
+            unsafe { KillTimer(e, CARET_TIMER) };
+        }
+    });
 }
 
 /// Let the canvas go (with no note open).
 pub fn trim() {
     CANVAS.with(|c| c.borrow_mut().take());
     SHOWN.with(|m| m.borrow_mut().retain(|&e, _| unsafe { IsWindow(e as HWND) } != 0));
+    OWN.with(|o| o.borrow_mut().retain(|&e| unsafe { IsWindow(e as HWND) } != 0));
+    EXTENTS.with(|x| x.borrow_mut().clear());
 }
+
+// ---------------------------------------------------------------- the caret
+
+/// The caret's blink: a timer on the editor's window.
+pub const CARET_TIMER: usize = 0xCA7;
+
+/// The caret's colour (premultiplied ARGB): the body text's (paper is always light).
+const CARET_ARGB: u32 = 0xFF00_0000 | crate::common::theme::PAPER_TEXT;
+
+/// The caret of the editor with the focus, drawn in its frame like everything else.
+/// Windows' own is drawn over the window by inverting what's there, outside any frame, and
+/// inverted back to take it away: where the view had painted the rows it was on (a key,
+/// a restyle, the next letter), taking it away drew it again, in pieces left behind as
+/// ticks over and under the letters, and one moved while drawing was held (a typed space)
+/// stayed put until the next letter painted. In the frame, it's where the selection is,
+/// once, and the next frame drawn without it takes it away wherever it was.
+struct Caret {
+    /// The editor with the focus (0: none).
+    e: isize,
+    /// In the shown half of a blink.
+    on: bool,
+    /// Where it was last drawn (shown or not), in client pixels, and the frame's pixels
+    /// under it then, for a blink to put back.
+    at: Option<RECT>,
+    under: Vec<u32>,
+    /// When it last moved: it stops blinking, shown, after Windows' caret timeout.
+    since: Instant,
+    /// The paint under way is a blink's: just the caret.
+    blinking: bool,
+}
+
+/// A font, for its extent: face, size in twips, weight, italic, DPI.
+type FontKey = ([u16; 32], i32, u16, bool, u32);
+
+thread_local! {
+    static CARET: RefCell<Caret> = RefCell::new(Caret { e: 0, on: false, at: None, under: Vec::new(), since: Instant::now(), blinking: false });
+    /// Editors whose caret the view draws (`own_caret`).
+    static OWN: RefCell<HashSet<isize>> = RefCell::new(HashSet::new());
+    /// Fonts' (ascent, descent) in px.
+    static EXTENTS: RefCell<HashMap<FontKey, (i32, i32)>> = RefCell::new(HashMap::new());
+}
+
+/// Draw editor `e`'s caret in its frame, from now on, and keep Windows' own unseen. Only
+/// for an editor the view draws (RichEdit's text services there): one that paints itself
+/// keeps Windows' caret.
+pub fn own_caret(e: HWND) {
+    if rich::services(e).is_some() && rich::hide_caret(e) {
+        OWN.with(|o| o.borrow_mut().insert(e as isize));
+    }
+}
+
+/// Editor `e` took the focus (`has`) or lost it: its caret shows, blinking, or goes.
+pub fn focus(e: HWND, has: bool) {
+    if !OWN.with(|o| o.borrow().contains(&(e as isize))) {
+        return;
+    }
+    let changed = CARET.with(|k| {
+        let mut k = k.borrow_mut();
+        if has {
+            *k = Caret { e: e as isize, on: true, at: None, under: Vec::new(), since: Instant::now(), blinking: false };
+            true
+        } else if k.e == e as isize {
+            k.e = 0;
+            k.at = None;
+            true
+        } else {
+            false
+        }
+    });
+    if !changed {
+        return;
+    }
+    if has {
+        // Whatever reset the document's look (its RTF put back) leaves Windows' caret unseen.
+        rich::hide_caret(e);
+    } else {
+        unsafe { KillTimer(e, CARET_TIMER) };
+    }
+    present(e);
+}
+
+/// Editor `e`'s caret, if something moved it (a click, an arrow, a command setting the
+/// selection), drawn where it is now.
+pub fn caret_moved(e: HWND) {
+    let Some(at) = CARET.with(|k| {
+        let k = k.borrow();
+        (k.e == e as isize).then_some(k.at)
+    }) else {
+        return;
+    };
+    let (w, h) = client(e);
+    if !same(caret_rect(e, w, h), at) {
+        present(e);
+    }
+}
+
+/// What a blink does.
+enum Blink {
+    /// Nothing (it rests shown, or there's no caret).
+    Nothing,
+    /// The caret moved without being drawn: a frame, to draw it where it is.
+    Frame,
+    /// Show or hide it: a paint of just these pixels.
+    Caret(RECT),
+}
+
+/// A blink of editor `e`'s caret (its `CARET_TIMER`): shown or hidden in a paint of just its
+/// own pixels. Moved without being drawn, it's drawn where it is now, in a frame.
+pub fn blink(e: HWND) {
+    match blink_step(e) {
+        Blink::Nothing => {}
+        Blink::Frame => present(e),
+        Blink::Caret(r) => {
+            CARET.with(|k| k.borrow_mut().blinking = true);
+            unsafe {
+                InvalidateRect(e, &r, 0);
+                UpdateWindow(e);
+            }
+            CARET.with(|k| k.borrow_mut().blinking = false);
+        }
+    }
+}
+
+/// The caret's next blink in editor `e`: shown if hidden and the other way round.
+fn blink_step(e: HWND) -> Blink {
+    let Some((at, on, since)) = CARET.with(|k| {
+        let k = k.borrow();
+        (k.e == e as isize).then_some((k.at, k.on, k.since))
+    }) else {
+        unsafe { KillTimer(e, CARET_TIMER) };
+        return Blink::Nothing;
+    };
+    let (w, h) = client(e);
+    if !same(caret_rect(e, w, h), at) {
+        return Blink::Frame;
+    }
+    let Some(r) = at else {
+        unsafe { KillTimer(e, CARET_TIMER) };
+        return Blink::Nothing;
+    };
+    // Left still for Windows' caret timeout: it stays, shown, and stops blinking.
+    let rest = caret_timeout().is_some_and(|t| since.elapsed() >= t);
+    if rest {
+        unsafe { KillTimer(e, CARET_TIMER) };
+        if on {
+            return Blink::Nothing;
+        }
+    }
+    CARET.with(|k| k.borrow_mut().on = rest || !on);
+    Blink::Caret(r)
+}
+
+/// A blink's paint, when that's all this paint is: the caret's pixels, shown or not, from
+/// what the frame had under it. False for any other paint.
+fn paint_blink(e: HWND, w: i32, h: i32) -> bool {
+    let Some(r) = CARET.with(|k| {
+        let k = k.borrow();
+        k.at.filter(|_| k.blinking && k.e == e as isize)
+    }) else {
+        return false;
+    };
+    let mut u: RECT = unsafe { std::mem::zeroed() };
+    let inside = unsafe { GetUpdateRect(e, &mut u, 0) } != 0 && u.left >= r.left && u.top >= r.top && u.right <= r.right && u.bottom <= r.bottom;
+    let Some(px) = caret_pixels(e).filter(|_| inside) else {
+        return false;
+    };
+    let (cw, ch) = (r.right - r.left, r.bottom - r.top);
+    let mut c = Canvas::new(cw, ch);
+    c.copy_in(RECT { left: 0, top: 0, right: cw, bottom: ch }, &px);
+    let mut ps: PAINTSTRUCT = unsafe { std::mem::zeroed() };
+    unsafe {
+        let dc = BeginPaint(e, &mut ps);
+        GdiFlush();
+        IntersectClipRect(dc, 0, 0, w, h);
+        BitBlt(dc, r.left, r.top, cw, ch, c.dc(), 0, 0, SRCCOPY);
+        EndPaint(e, &ps);
+    }
+    blinked(e, r);
+    true
+}
+
+/// What editor `e`'s caret's place shows now: the caret, or (in the hidden half of a
+/// blink) the frame's pixels under it. None without a caret drawn.
+fn caret_pixels(e: HWND) -> Option<Vec<u32>> {
+    CARET.with(|k| {
+        let k = k.borrow();
+        let r = k.at.filter(|_| k.e == e as isize)?;
+        let n = ((r.right - r.left) * (r.bottom - r.top)) as usize;
+        (k.under.len() == n).then(|| if k.on { vec![CARET_ARGB; n] } else { k.under.clone() })
+    })
+}
+
+/// Editor `e`'s rows under `r` were painted by a blink: they aren't the frame's any more,
+/// and the next frame paints them.
+fn blinked(e: HWND, r: RECT) {
+    SHOWN.with(|m| {
+        if let Some(s) = m.borrow_mut().get_mut(&(e as isize)) {
+            for y in r.top.max(0)..r.bottom.min(s.rows.len() as i32) {
+                s.rows[y as usize] = 0;
+            }
+        }
+    });
+}
+
+/// Whether two places for the caret are the same (or both none).
+fn same(a: Option<RECT>, b: Option<RECT>) -> bool {
+    let k = |r: Option<RECT>| r.map(|r| (r.left, r.top, r.right, r.bottom));
+    k(a) == k(b)
+}
+
+/// Editor `e`'s frame, `w` x `h`: `compose`d whole, and its caret over all of it.
+fn frame(e: HWND, c: &mut Canvas, w: i32, h: i32) -> bool {
+    if !compose(e, c, 0, w, h, Parts::All) {
+        return false;
+    }
+    put_caret(e, c, w, h);
+    true
+}
+
+/// Editor `e`'s caret onto its frame `c`, if it has the focus: shown, or (in the hidden
+/// half of a blink) not, and the pixels under it kept for the blink. One that moved shows
+/// at once, and blinks from then.
+fn put_caret(e: HWND, c: &mut Canvas, w: i32, h: i32) {
+    if CARET.with(|k| k.borrow().e) != e as isize {
+        return;
+    }
+    let r = caret_rect(e, w, h);
+    let moved = CARET.with(|k| {
+        let mut k = k.borrow_mut();
+        let moved = !same(r, k.at);
+        if moved {
+            k.on = true;
+            k.since = Instant::now();
+        }
+        k.at = r;
+        k.under = r.map_or_else(Vec::new, |r| c.copy_out(r));
+        if let Some(r) = r.filter(|_| k.on) {
+            c.fill_raw(r.left, r.top, r.right, r.bottom, CARET_ARGB);
+        }
+        moved
+    });
+    if moved && let Some(r) = r {
+        unsafe {
+            // Windows' caret, unseen, goes where it is too, for what follows it (a
+            // magnifier, a screen reader).
+            if system_caret(e).is_some_and(|s| (s.left, s.top) != (r.left, r.top)) {
+                SetCaretPos(r.left, r.top);
+            }
+            let t = GetCaretBlinkTime();
+            if t == 0 || t == u32::MAX {
+                KillTimer(e, CARET_TIMER);
+            } else {
+                SetTimer(e, CARET_TIMER, t, None);
+            }
+        }
+    }
+}
+
+/// Where editor `e`'s caret goes in its client area (`w` x `h`): at the insertion point, as
+/// tall as the font there and as wide as Windows' caret, as RichEdit sizes its own. None
+/// with something selected, or out of view.
+fn caret_rect(e: HWND, w: i32, h: i32) -> Option<RECT> {
+    let (a, b) = rich::sel(e);
+    if a != b {
+        return None;
+    }
+    let (x, base) = rich::caret_point(e)?;
+    let (ascent, descent) = font_extent(e, &rich::char_format(e, rich::SCF_SELECTION));
+    let r = RECT { left: x, top: base - ascent, right: x + caret_width(e), bottom: base + descent };
+    let r = RECT { left: r.left.max(0), top: r.top.max(0), right: r.right.min(w), bottom: r.bottom.min(h) };
+    (r.right > r.left && r.bottom > r.top).then_some(r)
+}
+
+/// Windows' caret, if editor `e` has it: where RichEdit put it, unseen.
+fn system_caret(e: HWND) -> Option<RECT> {
+    let mut g: GUITHREADINFO = unsafe { std::mem::zeroed() };
+    g.cbSize = size_of::<GUITHREADINFO>() as u32;
+    (unsafe { GetGUIThreadInfo(GetCurrentThreadId(), &mut g) } != 0 && g.hwndCaret == e).then_some(g.rcCaret)
+}
+
+/// The caret's width in px: RichEdit's own caret's (Windows' text cursor thickness).
+fn caret_width(e: HWND) -> i32 {
+    let mut set: u32 = 1;
+    unsafe { SystemParametersInfoW(SPI_GETCARETWIDTH, 0, &mut set as *mut _ as _, 0) };
+    let set = set.clamp(1, 20) as i32;
+    // Its own, unless that's an italic caret's slant (wider than the thickness at its DPI).
+    let most = set * (unsafe { GetDpiForWindow(e) }.max(96) as i32 + 95) / 96;
+    system_caret(e).map(|r| r.right - r.left).filter(|&w| (1..=most).contains(&w)).unwrap_or(set)
+}
+
+/// How long the caret blinks after it last moved, if Windows says (it rests shown then).
+fn caret_timeout() -> Option<Duration> {
+    let mut ms: u32 = 0;
+    let ok = unsafe { SystemParametersInfoW(SPI_GETCARETTIMEOUT, 0, &mut ms as *mut _ as _, 0) } != 0;
+    (ok && ms > 0 && ms != u32::MAX).then(|| Duration::from_millis(ms as u64))
+}
+
+/// The ascent and descent, in px, of character format `cf`'s font in editor `e`.
+fn font_extent(e: HWND, cf: &rich::CharFormat2) -> (i32, i32) {
+    const CFE_BOLD: u32 = 0x0001;
+    const CFE_ITALIC: u32 = 0x0002;
+    let dpi = unsafe { GetDpiForWindow(e) }.max(96);
+    let weight = if cf.weight != 0 {
+        cf.weight
+    } else if cf.effects & CFE_BOLD != 0 {
+        700
+    } else {
+        400
+    };
+    let key = (cf.face, cf.height, weight, cf.effects & CFE_ITALIC != 0, dpi);
+    if let Some(m) = EXTENTS.with(|x| x.borrow().get(&key).copied()) {
+        return m;
+    }
+    let px = ((cf.height as i64 * dpi as i64 + 720) / 1440) as i32;
+    let m = unsafe {
+        let mut lf: LOGFONTW = std::mem::zeroed();
+        lf.lfHeight = -px;
+        lf.lfWeight = weight as i32;
+        lf.lfItalic = key.3 as u8;
+        lf.lfCharSet = cf.charset;
+        lf.lfFaceName = cf.face;
+        let f = CreateFontIndirectW(&lf);
+        let dc = GetDC(null_mut());
+        let old = SelectObject(dc, f);
+        let mut tm: TEXTMETRICW = std::mem::zeroed();
+        let ok = GetTextMetricsW(dc, &mut tm) != 0;
+        SelectObject(dc, old);
+        DeleteObject(f);
+        ReleaseDC(null_mut(), dc);
+        if ok { (tm.tmAscent, tm.tmDescent) } else { (px * 4 / 5, px / 5) }
+    };
+    EXTENTS.with(|x| x.borrow_mut().insert(key, m));
+    m
+}
+
+/// For tests: what an editor's window shows, painted as the view paints it (hidden windows
+/// paint nothing, and `present` skips them).
+#[cfg(test)]
+pub(crate) struct Screen {
+    pub w: i32,
+    pub h: i32,
+    pub px: Vec<u32>,
+}
+
+#[cfg(test)]
+impl Screen {
+    /// Editor `e`'s window, painted whole.
+    pub fn new(e: HWND) -> Screen {
+        SHOWN.with(|m| m.borrow_mut().remove(&(e as isize)));
+        let (w, h) = client(e);
+        let mut s = Screen { w, h, px: vec![0; (w * h) as usize] };
+        s.present(e);
+        s
+    }
+
+    /// `present` and the paint it asks for: the band of rows from the first that changed
+    /// to the last, all of them once the view has moved.
+    pub fn present(&mut self, e: HWND) {
+        let (w, h) = (self.w, self.h);
+        let scroll = rich::scroll_y(e);
+        let moved = SHOWN.with(|m| m.borrow().get(&(e as isize)).is_none_or(|s| s.w != w || s.h != h || s.scroll != scroll));
+        let changed = changes(e, w, h).expect("drawn");
+        let (Some(first), Some(last)) = (changed.first(), changed.last()) else { return };
+        let (y0, y1) = if moved { (0, h) } else { (first.0, last.1) };
+        let rows = FRESH_ROWS.with(|r| std::mem::take(&mut *r.borrow_mut()));
+        CANVAS.with(|c| {
+            let mut c = c.borrow_mut();
+            let c = c.as_mut().unwrap();
+            for y in y0..y1 {
+                self.px[(y * w) as usize..((y + 1) * w) as usize].copy_from_slice(&c.row(y)[..w as usize]);
+            }
+        });
+        record(e, (w, h, scroll), moved, &rows, y0, y1);
+    }
+
+    /// A blink of the caret, and what it paints.
+    pub fn blink(&mut self, e: HWND) {
+        match blink_step(e) {
+            Blink::Nothing => {}
+            Blink::Frame => self.present(e),
+            Blink::Caret(r) => {
+                let px = caret_pixels(e).expect("a caret");
+                let cw = (r.right - r.left) as usize;
+                for y in r.top..r.bottom {
+                    let k = (y - r.top) as usize * cw;
+                    let at = (y * self.w + r.left) as usize;
+                    self.px[at..at + cw].copy_from_slice(&px[k..k + cw]);
+                }
+                blinked(e, r);
+            }
+        }
+    }
+}
+
+/// For tests: editor `e`'s frame, drawn whole now, where its caret is, and whether it's
+/// drawn there (not in the hidden half of a blink).
+#[cfg(test)]
+pub(crate) fn frame_now(e: HWND) -> (Vec<u32>, Option<RECT>, bool) {
+    let (w, h) = client(e);
+    let mut c = Canvas::new(w, h);
+    assert!(frame(e, &mut c, w, h));
+    let (at, on) = CARET.with(|k| {
+        let k = k.borrow();
+        (k.at.filter(|_| k.e == e as isize), k.on)
+    });
+    (c.copy_out(RECT { left: 0, top: 0, right: w, bottom: h }), at, on)
+}
+
+/// For tests: the caret's colour.
+#[cfg(test)]
+pub(crate) const CARET_COLOR: u32 = CARET_ARGB;
 
 #[cfg(test)]
 mod tests {

@@ -429,6 +429,28 @@ pub fn baseline_at(h: HWND, cp: i32) -> Option<i32> {
     Some(p.y)
 }
 
+/// Where editor `h`'s insertion point stands: its x and its line's baseline, in px from its
+/// client area's top left, as RichEdit puts its caret (after a soft line end it was typed
+/// to, before the next line's first letter otherwise).
+pub fn caret_point(h: HWND) -> Option<(i32, i32)> {
+    use windows::Win32::Graphics::Gdi::TA_BASELINE;
+    use windows::Win32::UI::Controls::RichEdit::{tomAllowOffClient, tomClientCoord, tomStart};
+    let s = unsafe { doc(h)?.GetSelection2().ok()? };
+    let (mut x, mut y) = (0i32, 0i32);
+    let kind = windows::Win32::UI::Controls::RichEdit::tomConstants(tomStart.0 | TA_BASELINE.0 as i32 | tomAllowOffClient.0 | tomClientCoord.0);
+    unsafe { s.GetPoint(kind, &mut x, &mut y).ok()? };
+    Some((x, y))
+}
+
+/// Editor `h` draws no caret of its own (`view` draws it, in the frame): Windows' caret,
+/// drawn over the window by inverting its pixels, was left behind in pieces where the view
+/// painted over it. RichEdit still places it, unseen, for what follows the caret (screen
+/// readers, magnifiers). False when it can't be.
+pub fn hide_caret(h: HWND) -> bool {
+    use windows::Win32::UI::Controls::RichEdit::tomNullCaret;
+    doc(h).is_some_and(|d| unsafe { d.SetCaretType(tomNullCaret.0) }.is_ok())
+}
+
 /// Where the text ends, in px from the top of `h`'s client area (below it when scrolled
 /// that far): the bottom of the last line, however tall that line is (a picture). A text
 /// ending in a paragraph mark has an empty line after it (Enter at the end of a note), its
