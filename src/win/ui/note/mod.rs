@@ -1009,7 +1009,16 @@ pub(super) fn open_link(url: &str) {
         },
         None => url.to_string(),
     };
-    unsafe { ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(&target).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+    // On a thread of its own: starting the app that opens it can take a good part of a
+    // second, and here it held up every frame meanwhile, the tooltip's fade cut off whole.
+    let _ = std::thread::Builder::new().name("open".into()).spawn(move || unsafe {
+        use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize};
+        let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(&target).as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+        if com.is_ok() {
+            CoUninitialize();
+        }
+    });
 }
 
 unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {

@@ -56,6 +56,8 @@ struct Tip {
     beside: bool,
     /// Clicked: stay away until the pointer moves to another button.
     muted: bool,
+    /// Frames that have stepped its fade out since the click.
+    fading: u32,
     shown: bool,
     hidden_at: Option<Instant>,
     fade: Spring,
@@ -124,6 +126,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 by_key: false,
                 beside: false,
                 muted: false,
+                fading: 0,
                 shown: false,
                 hidden_at: None,
                 fade: Spring::fade(0.0, IN),
@@ -171,8 +174,13 @@ pub fn beside(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool) 
 
 fn rest(owner: HWND, anchor: RECT, label: &str, keys: &str, by_key: bool, beside: bool, over: bool) {
     with(|t| {
-        let same = t.owner == owner && t.label == label && t.keys == keys && (t.anchor.left, t.anchor.top) == (anchor.left, anchor.top);
-        if same && (t.pending || t.shown || t.muted) {
+        let same_button = t.owner == owner && t.label == label && t.keys == keys;
+        let same = same_button && (t.anchor.left, t.anchor.top) == (anchor.left, anchor.top);
+        // Clicked, it stays away while the pointer is on that button, wherever the button
+        // has moved to since (the plus button sliding as the deck makes room): taken for
+        // another one, it came straight back, whole, then vanished at the end of the click's
+        // fade.
+        if (same && (t.pending || t.shown)) || (same_button && t.muted) {
             return;
         }
         t.owner = owner;
@@ -218,6 +226,7 @@ pub fn mute() {
     if live {
         with(|t| {
             t.muted = true;
+            t.fading = 0;
             let up = t.shown;
             go_away(t);
             // Quickly, in a few frames; and hidden in any case once that's had time, as a
@@ -361,6 +370,7 @@ fn measure(t: &Tip) -> (i32, i32) {
 
 pub fn frame(dt: f32) -> bool {
     with(|t| {
+        t.fading = t.fading.saturating_add(1);
         let mut moving = t.fade.step(dt);
         for sp in [&mut t.at.0, &mut t.at.1, &mut t.width, &mut t.swap] {
             moving |= sp.step(dt);
@@ -476,7 +486,9 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             WM_TIMER if wp == T_GONE => {
                 KillTimer(h, T_GONE);
                 with(|t| {
-                    if !t.shown {
+                    // Only when no frames have run its fade (a dialog's loop): with frames,
+                    // they finish it, rather than this cutting it off part way.
+                    if !t.shown && t.fading < 2 {
                         hide(t);
                     }
                 });
