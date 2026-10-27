@@ -327,7 +327,7 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
     x = x.clamp(work.left, (work.right - w).max(work.left));
     y = y.clamp(work.top, (work.bottom - h).max(work.top));
     let hwnd = create(x - margin, y - margin, w + 2 * margin, h + 2 * margin, false);
-    let mut fade = Spring::unit(0.0, (1.0, 0.12));
+    let mut fade = Spring::fade(0.0, (1.0, 0.12));
     fade.to(1.0);
     let menu = Menu {
         hwnd,
@@ -406,6 +406,7 @@ pub fn frame(dt: f32) -> bool {
             if ms > 110 && o.menus[0].fade.target > 0.0 {
                 for m in &mut o.menus {
                     m.fade.retarget(0.0, (1.0, 0.1));
+                    m.fade.launch(0.0);
                 }
             }
             draw_all(o);
@@ -566,7 +567,9 @@ fn dismiss(o: &mut Open) {
     let root = o.menus[0].hwnd;
     for m in &mut o.menus {
         m.hot = Target::None;
+        // It starts going at once, from the frame after the click.
         m.fade.retarget(0.0, (1.0, 0.12));
+        m.fade.launch(0.0);
         unsafe {
             let ex = GetWindowLongW(m.hwnd, GWL_EXSTYLE) as u32;
             SetWindowLongW(m.hwnd, GWL_EXSTYLE, (ex | WS_EX_TRANSPARENT) as i32);
@@ -612,7 +615,10 @@ fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, i
     c.clear(0);
     let a = clamp01(m.fade.value);
     // Settle: a few pixels of travel toward the content, anchored at the side it opens from.
-    let settle = (1.0 - m.fade.value) * 6.0 * s;
+    // In whole pixels, so the card and its text move together: the text is put down on
+    // whole pixels, and with the card between them the two parted by a fraction and met
+    // again at the end, the text seeming to change its weight as the last pixel went.
+    let settle = if anim::reduced() { 0.0 } else { ((1.0 - m.fade.value) * 6.0 * s).round() };
     let ox = m.margin as f32 + settle * m.from.0;
     let oy = m.margin as f32 + settle * m.from.1;
     let card = Shape::new(ox, oy, m.w as f32, m.h as f32, 12.0 * s);
@@ -804,7 +810,7 @@ fn new_sub(parent: &Menu, row: usize, items: Vec<Item>) -> Menu {
     let (x, y, flipped) = beside((left, left + parent.w), row_top, (w, h), (PAD * s).round() as i32, (OVERLAP * s).round() as i32, parent.leftward, work);
     let margin = parent.margin;
     let hwnd = create(x - margin, y - margin, w + 2 * margin, h + 2 * margin, true);
-    let mut fade = Spring::unit(0.0, (1.0, 0.12));
+    let mut fade = Spring::fade(0.0, (1.0, 0.12));
     fade.to(1.0);
     Menu {
         hwnd,
