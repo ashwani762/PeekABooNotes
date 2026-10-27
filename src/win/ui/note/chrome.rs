@@ -193,7 +193,7 @@ pub(super) fn hit_test(h: HWND, lp: LPARAM) -> LRESULT {
 
 /// Whether this note flies back to the deck when you click away: unpinned, a window of
 /// its own, and the setting on.
-fn hides(h: HWND) -> bool {
+pub(super) fn hides(h: HWND) -> bool {
     let Some(st) = state(h) else { return false };
     let id = st.id;
     !st.embedded && !app::store(|s| s.d.settings.keep_open || s.note(id).is_some_and(|n| n.pinned))
@@ -205,14 +205,22 @@ fn hides(h: HWND) -> bool {
 /// home from where it's seen as the click ends, rather than vanishing behind the window
 /// and a card coming out over it after.
 pub(super) fn hide_later(h: HWND, to: HWND) {
-    if !hides(h) || (!to.is_null() && unsafe { GetWindow(to, GW_OWNER) } == h) {
+    if !hides(h) {
+        // Kept open (pinned, or the setting changed while it was in use): among the
+        // other windows again, behind the one that took the foreground.
+        lower_behind(h, to);
         return;
     }
-    // Not when the foreground went to one of ours (another note opening, the deck, a menu):
-    // lifted then, it came up over the deck card flying open, and for a few frames the peek
-    // seemed to blink off.
-    if !pointer_on(h) && !ours(to) {
-        raise(h);
+    if !to.is_null() && unsafe { GetWindow(to, GW_OWNER) } == h {
+        return;
+    }
+    // On top of every other window since it was taken up (see `use_note`), so the window
+    // clicked never covers it, even for the frame or two before this. Not when the
+    // foreground went to one of ours (another note opening, the deck, a menu): kept up
+    // then, it came up over the deck card flying open, and for a few frames the peek
+    // seemed to blink off; nor while the pointer is on it.
+    if pointer_on(h) || ours(to) {
+        lower_behind(h, to);
     }
     // Looked at about every refresh: a click away flies the note home as soon as the button
     // is up (every 40 ms, it waited 20 ms on average, up to 40, before setting off).
@@ -239,9 +247,20 @@ fn pointer_on(h: HWND) -> bool {
 /// On top of every other window until it goes (or `lower` puts it back).
 fn raise(h: HWND) {
     let Some(st) = state(h) else { return };
-    if !st.raised {
-        st.raised = true;
-        unsafe { SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    st.raised = true;
+    unsafe { SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+}
+
+/// The note was taken up (activated). One that flies home when you click away goes on top
+/// of every other window now, while it's in use: lifted only once it had lost the
+/// foreground, it was too late, the window clicked already drawn over it, and the whole
+/// note vanished for a frame before coming back to fly home. One kept open stays among the
+/// other windows.
+pub(super) fn use_note(h: HWND) {
+    if hides(h) {
+        raise(h);
+    } else {
+        lower(h);
     }
 }
 
@@ -255,6 +274,18 @@ pub(super) fn lower(h: HWND) {
     let id = st.id;
     if !app::store(|s| s.note(id).is_some_and(|n| n.pinned)) {
         unsafe { SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    }
+}
+
+/// `lower`, and behind `to` (the window that took the foreground), as it would be had it
+/// never been lifted: put back among the other windows, it went above all of them.
+fn lower_behind(h: HWND, to: HWND) {
+    lower(h);
+    let pinned = state(h).is_some_and(|st| app::store(|s| s.note(st.id).is_some_and(|n| n.pinned)));
+    // Behind a window on top of all (the deck, a menu) it would be lifted too.
+    let top = !to.is_null() && unsafe { GetWindowLongPtrW(to, GWL_EXSTYLE) } as u32 & WS_EX_TOPMOST != 0;
+    if !pinned && !to.is_null() && !top && unsafe { IsWindowVisible(to) } != 0 {
+        unsafe { SetWindowPos(h, to, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
     }
 }
 

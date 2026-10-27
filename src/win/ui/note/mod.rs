@@ -1060,7 +1060,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     st.active = (wp & 0xFFFF) as u32 != WA_INACTIVE || crate::win::ui::menu::is_menu(lp as HWND);
                     if st.active {
                         KillTimer(h, T_HIDE);
-                        lower(h);
+                        use_note(h);
                         SetFocus(st.edit);
                         let id = st.id;
                         if app::store(|s| s.d.settings.last_note) != Some(id) {
