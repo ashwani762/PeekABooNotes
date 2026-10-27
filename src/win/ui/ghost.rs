@@ -77,6 +77,31 @@ struct Ghost {
     body_font: Font,
     on_arrive: Option<Box<dyn FnOnce()>>,
     arrived: bool,
+    /// Its first frame, the pose it sets off from, is up but not yet on screen: the next
+    /// frame leaves it there to be seen, and the flight moves from the one after.
+    fresh: bool,
+    /// Frames the card stays whole over the window it has just revealed, which may take a
+    /// frame to come up, before it fades.
+    hold: u8,
+}
+
+/// How near its end a card has to be to have arrived, in px. A card that opens into a
+/// window arrives once its picture sits on the window's own pixels (it's drawn on whole
+/// ones), so it hands over to the window without a jump. One flying home is all but faded
+/// by then, so it needn't come as close.
+fn arrive_within(kind: Kind) -> f32 {
+    if kind == Kind::Open { 0.5 } else { 1.5 }
+}
+
+/// What a card's frame did.
+#[derive(PartialEq, Debug)]
+enum Step {
+    /// Nothing to draw: its first frame is showing still, or it holds over its window.
+    Still,
+    /// It moved: draw it.
+    Moved,
+    /// It got there this frame, exactly at its end.
+    Arrived,
 }
 
 thread_local! {
@@ -175,6 +200,8 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
         body_font: crate::win::editor::rich::preview_fonts(s).1,
         on_arrive: None,
         arrived: false,
+        fresh: true,
+        hold: 0,
     };
     g.x.to(lx(t));
     g.y.to(ly(t));
@@ -199,15 +226,43 @@ fn render(g: &mut Ghost) {
     g.canvas.present(g.hwnd, x, y);
 }
 
-/// Draw the card as it is now; returns where its window goes on screen.
-fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
-    let s = g.s;
+/// How strongly a card shows, by how far it has come.
+#[derive(Clone, Copy, Debug)]
+struct Look {
+    /// The card itself: its paper and shadow.
+    card: f32,
+    /// The deck card it opens from, fading out.
+    from: f32,
+    /// The window's picture (or its words, without one).
+    content: f32,
+}
+
+fn look(g: &Ghost) -> Look {
     let p = progress(g);
-    let alpha = match g.kind {
+    let card = match g.kind {
         Kind::Open => g.fade.value,
         Kind::Close => 1.0 - clamp01((p - 0.7) / 0.3),
         Kind::Dissolve => 1.0 - p,
     };
+    // Content sits where the note window draws it; the growing card reveals it.
+    let content = match (g.kind, g.from_image.is_some() && g.image.is_some()) {
+        // From the deck card into the window: the card's words fade before the window's
+        // come, so the two never show at once, doubled a little apart (they're laid out
+        // differently), and the paper never stands empty for long.
+        (Kind::Open, true) => card * clamp01((p - 0.27) / 0.33),
+        (Kind::Open, false) => card * clamp01((p - 0.25) / 0.6),
+        // Archived or deleted, the note fades as one, words and all: never an empty card.
+        (Kind::Dissolve, _) => card,
+        (Kind::Close, _) => card * (1.0 - clamp01(p / 0.6)),
+    };
+    let from = if g.kind == Kind::Open && g.from_image.is_some() { card * (1.0 - clamp01((p - 0.05) / 0.25)) } else { 0.0 };
+    Look { card, from, content }
+}
+
+/// Draw the card as it is now; returns where its window goes on screen.
+fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
+    let s = g.s;
+    let Look { card: alpha, from: from_a, content } = look(g);
     let c = &mut g.canvas;
     c.clear(0);
     // The window sits on whole pixels where the card is; the card keeps its fraction of one
@@ -218,28 +273,13 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
     let sh = Shape::new(pad + g.x.value - wx, pad + g.y.value - wy, g.w.value.clamp(1.0, cw), g.h.value.clamp(1.0, ch), g.r.value.max(0.0));
     c.card(&sh, theme::paper(g.color, dark), alpha, 0x000000, 0.06 * alpha, 1.6 * alpha, s);
     c.begin_batch();
-    // Content sits where the note window draws it; the growing card reveals it.
-    let content = match g.kind {
-        Kind::Open => alpha * clamp01((p - 0.25) / 0.6),
-        // Archived or deleted, the note fades as one, words and all: never an empty card.
-        Kind::Dissolve => alpha,
-        Kind::Close => alpha * (1.0 - clamp01(p / 0.6)),
-    };
     if let Some(img) = g.image.as_ref() {
         // Anchored at the card's top-left, as the window lays itself out.
         c.flush();
-        match (g.kind, g.from_image.as_ref()) {
-            (Kind::Open, Some(from)) => {
-                // From the deck card into the window: the card's words fade before the
-                // window's come, so the two never show at once, doubled a little apart
-                // (they're laid out differently), and the paper never stands empty for long.
-                let out = clamp01((p - 0.05) / 0.25);
-                let into = clamp01((p - 0.27) / 0.33);
-                c.image(from, sh.x, sh.y, &sh, alpha * (1.0 - out));
-                c.image(img, sh.x, sh.y, &sh, alpha * into);
-            }
-            _ => c.image(img, sh.x, sh.y, &sh, content),
+        if let Some(from) = g.from_image.as_ref() {
+            c.image(from, sh.x, sh.y, &sh, from_a);
         }
+        c.image(img, sh.x, sh.y, &sh, content);
     } else if content > 0.01 && sh.w > 40.0 * s && sh.h > 30.0 * s {
         let (x0, y0) = (sh.x + 18.0 * s, sh.y + 42.0 * s);
         let right = sh.x + sh.w - 16.0 * s;
@@ -270,31 +310,77 @@ pub fn clear() {
     }
 }
 
+/// Frames a card that opened into a window stays whole over it: the frame the window is
+/// revealed in, and the one after, as a window that was hidden can take a frame to show
+/// (the reveal's work, its paint, is done then too, so it never shortens the fade).
+const HOLD: u8 = 2;
+
+/// One frame of a card's flight, `dt` seconds on.
+fn advance(g: &mut Ghost, dt: f32) -> Step {
+    if g.fresh {
+        // Put up as the window (or deck card) it takes over from, pixel for pixel, in the
+        // frame that one goes: that frame has to be seen before the card moves.
+        g.fresh = false;
+        return Step::Still;
+    }
+    if g.hold > 0 {
+        g.hold -= 1;
+        if g.hold > 0 {
+            return Step::Still;
+        }
+        g.fade.to(0.0);
+    }
+    let mut moving = false;
+    for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade] {
+        moving |= sp.step(dt);
+    }
+    if g.arrived {
+        return Step::Moved;
+    }
+    let near = arrive_within(g.kind);
+    if !moving || [&g.x, &g.y, &g.w, &g.h].iter().all(|sp| (sp.target - sp.value).abs() < near) {
+        g.arrived = true;
+        // Exactly at its end: on the window's own place and size, so its picture is the
+        // window's pixels where the window is.
+        for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r] {
+            sp.snap(sp.target);
+        }
+        match g.kind {
+            Kind::Open => g.hold = HOLD,
+            _ => g.fade.snap(0.0),
+        }
+        return Step::Arrived;
+    }
+    Step::Moved
+}
+
+/// Whether a card is done: arrived and faded.
+fn done(g: &Ghost) -> bool {
+    g.arrived && g.hold == 0 && g.fade.settled() && g.fade.value <= 0.01
+}
+
 pub fn frame(dt: f32) -> bool {
     let mut arrivals: Vec<Box<dyn FnOnce()>> = Vec::new();
     let alive = GHOSTS.with(|gs| {
         let mut gs = gs.borrow_mut();
         for g in gs.iter_mut() {
-            let mut moving = false;
-            for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade] {
-                moving |= sp.step(dt);
-            }
-            let near = (g.w.target - g.w.value).abs() < 1.5 && (g.h.target - g.h.value).abs() < 1.5 && (g.x.target - g.x.value).abs() < 1.5 && (g.y.target - g.y.value).abs() < 1.5;
-            if !g.arrived && (near || !moving) {
-                g.arrived = true;
-                if let Some(f) = g.on_arrive.take() {
-                    arrivals.push(f);
-                }
-                match g.kind {
-                    Kind::Open => g.fade.to(0.0),
-                    _ => g.fade.snap(0.0),
+            match advance(g, dt) {
+                Step::Still => {}
+                Step::Moved => render(g),
+                Step::Arrived => {
+                    if let Some(f) = g.on_arrive.take() {
+                        arrivals.push(f);
+                    }
+                    // Flying home or sinking, it has faded out: it goes with this frame.
+                    if !done(g) {
+                        render(g);
+                    }
                 }
             }
-            render(g);
         }
         // Retire ghosts that have arrived and faded.
         gs.retain(|g| {
-            let done = g.arrived && g.fade.settled() && g.fade.value <= 0.01;
+            let done = done(g);
             if done {
                 unsafe { DestroyWindow(g.hwnd) };
             }
@@ -314,8 +400,9 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::window_size;
-    use windows_sys::Win32::Foundation::RECT;
+    use super::*;
+    use crate::win::render::anim::{Pacer, Vsync};
+    use crate::win::render::gfx::Image;
 
     #[test]
     fn a_flight_across_monitors_keeps_a_card_sized_window() {
@@ -328,44 +415,185 @@ mod tests {
         assert!(w * h * 4 < 2_000_000);
     }
 
-    /// Timing (run with --ignored --nocapture): what a note's flights cost to draw, frame
-    /// by frame at 99 Hz: open from a pulled-out deck card into a 320 x 360 window with its
-    /// picture, and back to its tab.
+    const TAB: RECT = RECT { left: 2236, top: 400, right: 2540, bottom: 560 };
+    const NOTE: RECT = RECT { left: 1880, top: 300, right: 2200, bottom: 660 };
+    const PLUS: RECT = RECT { left: 2490, top: 900, right: 2524, bottom: 934 };
+    const CAPSULE: RECT = RECT { left: 2540, top: 500, right: 2548, bottom: 520 };
+    const SLOT: RECT = RECT { left: 2514, top: 400, right: 2560, bottom: 560 };
+
+    /// A picture with something different in every pixel near its neighbours, so one drawn
+    /// a pixel off shows.
+    fn pattern(w: i32, h: i32, seed: u32) -> (Image, Vec<u32>) {
+        let px: Vec<u32> = (0..h as u32)
+            .flat_map(|y| (0..w as u32).map(move |x| 0xFF00_0000 | (((x * 37 + y * 11 + seed) & 0xFF) << 16) | (((x ^ y) & 0xFF) << 8) | ((y * 5 + x * 3 + seed) & 0xFF)))
+            .collect();
+        (Image::from_pixels(w, h, px.clone()), px)
+    }
+
+    /// How many pixels inside screen rect `at` (its corners, `r` px each way, left out) the
+    /// card's canvas, put up at `win` on screen, shows other than `want`.
+    fn misses(g: &mut Ghost, win: (i32, i32), at: RECT, want: &[u32], r: i32) -> usize {
+        let local = RECT { left: at.left - win.0, top: at.top - win.1, right: at.right - win.0, bottom: at.bottom - win.1 };
+        let got = g.canvas.copy_out(local);
+        let (w, h) = (at.right - at.left, at.bottom - at.top);
+        if got.len() != want.len() {
+            return want.len();
+        }
+        let corner = |x: i32, y: i32| (x < r || x >= w - r) && (y < r || y >= h - r);
+        (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| !corner(x, y) && got[(y * w + x) as usize] != want[(y * w + x) as usize]).count()
+    }
+
+    /// One presented frame of a flight: the refresh it shows from, its step, where the card is
+    /// on screen and how strongly it shows.
+    struct Seen {
+        refresh: u32,
+        dt: f32,
+        edges: [f32; 4],
+        look: Look,
+    }
+
+    fn seen(g: &Ghost, refresh: u32, dt: f32) -> Seen {
+        let (ox, oy) = (g.origin.0 as f32, g.origin.1 as f32);
+        let edges = [ox + g.x.value, oy + g.y.value, ox + g.x.value + g.w.value, oy + g.y.value + g.h.value];
+        Seen { refresh, dt, edges, look: look(g) }
+    }
+
+    /// What a flight showed, frame by frame, as the message loop drives it at `hz`: put up
+    /// late in a refresh (after the window's picture and layout took most of it), then a
+    /// frame just after each refresh. With the pixels checked at the hand-offs: the first
+    /// frame against `first` at its rect, the arrival against `last`.
+    struct Flight {
+        frames: Vec<Seen>,
+        first_misses: Option<usize>,
+        last_misses: Option<usize>,
+        held: u32,
+    }
+
+    fn fly_off_screen(kind: Kind, from: (RECT, f32), to: (RECT, f32), image: (Image, Vec<u32>), from_image: Option<(Image, Vec<u32>)>, hz: f64) -> Flight {
+        let p = 1.0 / hz;
+        let (image, image_px) = image;
+        let (from_image, from_px) = from_image.map_or((None, None), |(i, px)| (Some(i), Some(px)));
+        let content = Content { title: "Q4 goals, draft".into(), body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(), body_top: None, image: Some(image), from_image };
+        let mut g = card(null_mut(), kind, from, to, 3, content, 1.0);
+        let mut pacer = Pacer::new();
+        // `fly` draws the first frame and puts it up at once.
+        let win = paint(&mut g, false);
+        let first = if kind == Kind::Open { from_px.as_deref().map(|px| (from.0, px, 14)) } else { Some((from.0, &image_px[..], 8)) };
+        let first_misses = first.map(|(at, px, r)| misses(&mut g, win, at, px, r));
+        let mut frames = vec![seen(&g, 1, 0.0)];
+        let (mut last_misses, mut held) = (None, 0);
+        for tick in 0..400u32 {
+            // The first tick comes right after `fly`, in the same refresh; the rest just after
+            // a refresh, as DwmFlush returns.
+            let t = if tick == 0 { 0.92 * p } else { (tick as f64 + 0.1) * p };
+            let dt = pacer.step(t, Some(Vsync { vblank: (t / p).floor() * p, period: p }));
+            let refresh = (t / p).floor() as u32 + 1;
+            match advance(&mut g, dt) {
+                Step::Still => held += 1,
+                Step::Moved => {
+                    paint(&mut g, false);
+                    frames.push(seen(&g, refresh, dt));
+                }
+                Step::Arrived => {
+                    if !done(&g) {
+                        let win = paint(&mut g, false);
+                        if kind == Kind::Open {
+                            last_misses = Some(misses(&mut g, win, to.0, &image_px, 8));
+                        }
+                        frames.push(seen(&g, refresh, dt));
+                    }
+                }
+            }
+            if done(&g) {
+                break;
+            }
+        }
+        Flight { frames, first_misses, last_misses, held }
+    }
+
+    /// The biggest step between frames (any edge, px), and the biggest spike: a step over
+    /// both its neighbours', as a ratio of the bigger of them (1 or less is smooth).
+    fn steps(f: &Flight, of: impl Fn(&Seen) -> Vec<f32>) -> (Vec<f32>, f32) {
+        let s: Vec<f32> = f.frames.windows(2).map(|w| of(&w[1]).iter().zip(of(&w[0])).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max)).collect();
+        let spike = s.windows(3).filter(|w| w[1] > 0.25).map(|w| w[1] / w[0].max(w[2]).max(1e-3)).fold(0.0, f32::max);
+        (s, spike)
+    }
+
+    #[test]
+    fn a_card_starts_as_the_window_it_takes_over_and_is_seen_so_before_it_moves() {
+        for kind in [Kind::Close, Kind::Dissolve] {
+            let to = if kind == Kind::Close { (SLOT, 14.0) } else { (RECT { left: 1896, top: 330, right: 2184, bottom: 651 }, 8.0) };
+            let f = fly_off_screen(kind, (NOTE, 8.0), to, pattern(320, 360, 1), None, 99.0);
+            assert_eq!(f.first_misses, Some(0), "the first frame is the window's pixels");
+            let first = &f.frames[0];
+            assert_eq!(first.edges, [1880.0, 300.0, 2200.0, 660.0]);
+            assert!((first.look.content - 1.0).abs() < 1e-6 && (first.look.card - 1.0).abs() < 1e-6);
+            // Left on screen for a refresh of its own; the next frame is a refresh's step on.
+            assert!(f.held >= 1);
+            let second = &f.frames[1];
+            assert_eq!(second.refresh, first.refresh + 1);
+            assert!((second.dt - 1.0 / 99.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn a_card_opening_into_a_window_ends_on_its_pixels_and_stays_whole_while_it_comes_up() {
+        let f = fly_off_screen(Kind::Open, (TAB, 14.0), (NOTE, 8.0), pattern(320, 360, 2), Some(pattern(304, 160, 3)), 99.0);
+        assert_eq!(f.first_misses, Some(0), "the first frame is the deck card's pixels");
+        assert_eq!(f.last_misses, Some(0), "the arrival is the window's pixels");
+        let at = f.frames.iter().position(|s| s.edges == [1880.0, 300.0, 2200.0, 660.0]).expect("arrives exactly");
+        assert!((f.frames[at].look.content - 1.0).abs() < 1e-6 && f.frames[at].look.from < 1e-6);
+        // Whole for the refresh the window is revealed in and the one after, then fading
+        // where it is, never moving.
+        assert_eq!(f.frames[at + 1].refresh, f.frames[at].refresh + 2);
+        for s in &f.frames[at + 1..] {
+            assert_eq!(s.edges, f.frames[at].edges);
+            assert!(s.look.card < 1.0);
+        }
+    }
+
+    /// Probe (run with --ignored --nocapture): every flight frame by frame at 60, 99, 120
+    /// and 144 Hz, off screen: the hand-offs' pixels, each frame's step and opacity, and
+    /// what a frame costs to draw (the first eight steps; PROBE_ALL=1 lists them all).
     #[test]
     #[ignore]
     fn probe_flights() {
-        use super::*;
-        let paper = |w: i32, h: i32| crate::win::render::gfx::Image::from_pixels(w, h, vec![0xFFF6_E7A6; (w * h) as usize]);
-        let tab = RECT { left: 2236, top: 400, right: 2540, bottom: 560 };
-        let note = RECT { left: 1880, top: 300, right: 2200, bottom: 660 };
-        for kind in [Kind::Open, Kind::Close] {
-            let (from, to) = if kind == Kind::Open { ((tab, 14.0), (note, 8.0)) } else { ((note, 8.0), (tab, 14.0)) };
-            let content = Content {
-                title: "Q4 goals, draft".into(),
-                body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(),
-                body_top: None,
-                image: Some(paper(320, 360)),
-                from_image: (kind == Kind::Open).then(|| paper(304, 160)),
-            };
-            let mut g = card(null_mut(), kind, from, to, 3, content, 1.0);
-            let (mut n, t0) = (0, std::time::Instant::now());
-            loop {
-                let mut moving = false;
-                for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade] {
-                    moving |= sp.step(1.0 / 99.0);
-                }
-                if !g.arrived && !moving {
-                    g.arrived = true;
-                    g.fade.to(0.0);
-                }
-                paint(&mut g, false);
-                n += 1;
-                if (g.arrived && g.fade.settled() && g.fade.value <= 0.01) || n > 300 {
-                    break;
-                }
+        // Where a flight starts or ends: a screen rect and its corner radius.
+        type End = (RECT, f32);
+        let dissolve_to = RECT { left: 1896, top: 330, right: 2184, bottom: 651 };
+        let flights: [(&str, Kind, End, End, bool); 6] = [
+            ("open from its card", Kind::Open, (TAB, 14.0), (NOTE, 8.0), true),
+            ("new note from +", Kind::Open, (PLUS, 17.0), (NOTE, 8.0), false),
+            ("open from the pill", Kind::Open, (CAPSULE, 4.0), (NOTE, 8.0), false),
+            ("close to its card", Kind::Close, (NOTE, 8.0), (SLOT, 14.0), false),
+            ("close to the pill", Kind::Close, (NOTE, 8.0), (CAPSULE, 4.0), false),
+            ("archive or delete", Kind::Dissolve, (NOTE, 8.0), (dissolve_to, 8.0), false),
+        ];
+        for (name, kind, from, to, deck_card) in flights {
+            for hz in [60.0, 99.0, 120.0, 144.0] {
+                let t0 = std::time::Instant::now();
+                let f = fly_off_screen(kind, from, to, pattern(320, 360, 1), deck_card.then(|| pattern(304, 160, 2)), hz);
+                let cost = t0.elapsed() / f.frames.len() as u32;
+                let (moves, spike) = steps(&f, |s| s.edges.to_vec());
+                let (fades, fade_spike) = steps(&f, |s| vec![s.look.card, s.look.from, s.look.content].into_iter().map(|a| a * 100.0).collect());
+                let dts: Vec<String> = f.frames.iter().skip(1).map(|s| format!("{:.2}", s.dt as f64 * hz)).collect();
+                let off = dts.iter().filter(|d| *d != "1.00").count();
+                eprintln!(
+                    "PROBE {name} at {hz} Hz: {} frames, {} refreshes held still, {:.2?} a frame; first frame {} pixels off, arrival {}; steps in refreshes all 1: {}",
+                    f.frames.len(),
+                    f.held,
+                    cost,
+                    f.first_misses.map_or("-".into(), |m| m.to_string()),
+                    f.last_misses.map_or("-".into(), |m| m.to_string()),
+                    off == 0
+                );
+                let fmt = |v: &[f32]| v.iter().take(if std::env::var_os("PROBE_ALL").is_some() { 999 } else { 8 }).map(|x| format!("{x:.1}")).collect::<Vec<_>>().join(" ");
+                eprintln!("PROBE   moves (px): {} ... biggest {:.1}, spike {:.2}", fmt(&moves), moves.iter().fold(0.0f32, |a, b| a.max(*b)), spike);
+                eprintln!("PROBE   opacity steps (%): {} ... spike {:.2}", fmt(&fades), fade_spike);
+                let first = &f.frames[0];
+                let ends: Vec<String> = [first, f.frames.last().unwrap()].iter().map(|s| format!("[{:.1} {:.1} {:.1} {:.1}] card {:.2} from {:.2} content {:.2}", s.edges[0], s.edges[1], s.edges[2], s.edges[3], s.look.card, s.look.from, s.look.content)).collect();
+                eprintln!("PROBE   first {}; last {}", ends[0], ends[1]);
             }
-            let spent = t0.elapsed();
-            eprintln!("PROBE flight {}: {n} frames, {spent:.1?} ({:.2?} a frame)", if kind == Kind::Open { "open" } else { "close" }, spent / n);
         }
     }
 }
