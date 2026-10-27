@@ -41,6 +41,7 @@ mod layout;
 mod draw;
 mod keys;
 mod fullscreen;
+mod fader;
 #[cfg(test)]
 mod probe;
 use layout::*;
@@ -307,10 +308,15 @@ pub fn monitor_geo() -> (RECT, f32) {
 }
 
 /// The deck is going to another display, or the other edge: fold it at once and fade the
-/// pill in there, rather than have it blink from one place to the other (with Reduce
-/// Motion too: it moves nothing).
+/// pill in there, while what was on screen fades out where it was, rather than have it
+/// blink from one place to the other (with Reduce Motion too: it moves nothing).
 pub fn arrive() {
     with(|d| {
+        if d.visible && !d.hiding
+            && let Some(c) = d.canvas.as_mut()
+        {
+            fader::start(d.hwnd, c);
+        }
         set_open(d, false, true);
         d.pill.snap(0.0);
         d.pill.to(1.0);
@@ -388,6 +394,7 @@ pub fn create() {
 }
 
 pub fn shutdown() {
+    fader::close();
     // Taken out first, so no frame still in flight draws it back; its canvas and fonts go with it.
     if let Some(d) = DECK.with(|d| d.borrow_mut().take()) {
         unsafe {
@@ -452,6 +459,7 @@ pub fn frame(dt: f32) -> bool {
         (moving || d.marquee_live, folded)
     })
     .unwrap_or((false, false));
+    let more = fader::frame(dt) | more;
     if folded {
         // What the cards' text took (Direct2D, fonts, layouts) goes back to Windows once
         // the deck has rested folded for a moment, as it does when a window closes.
