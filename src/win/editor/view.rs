@@ -439,12 +439,16 @@ fn blink_step(e: HWND) -> Blink {
     if !same(caret_rect(e, w, h), at) {
         return Blink::Frame;
     }
-    let Some(r) = at else {
-        unsafe { KillTimer(e, CARET_TIMER) };
-        return Blink::Nothing;
-    };
     // Left still for Windows' caret timeout: it stays, shown, and stops blinking.
     let rest = caret_timeout().is_some_and(|t| since.elapsed() >= t);
+    // None to show (text selected): the timer goes on looking, so a caret that comes back
+    // without anything drawing it (a selection let go) shows within a blink.
+    let Some(r) = at else {
+        if rest {
+            unsafe { KillTimer(e, CARET_TIMER) };
+        }
+        return Blink::Nothing;
+    };
     if rest {
         unsafe { KillTimer(e, CARET_TIMER) };
         if on {
@@ -495,8 +499,8 @@ fn caret_pixels(e: HWND) -> Option<Vec<u32>> {
     })
 }
 
-/// Editor `e`'s rows under `r` were painted by a blink: they aren't the frame's any more,
-/// and the next frame paints them.
+/// Editor `e`'s rows under `r` were painted by a blink (or by RichEdit itself): they aren't
+/// the frame's any more, and the next frame paints them.
 fn blinked(e: HWND, r: RECT) {
     SHOWN.with(|m| {
         if let Some(s) = m.borrow_mut().get_mut(&(e as isize)) {
@@ -545,20 +549,54 @@ fn put_caret(e: HWND, c: &mut Canvas, w: i32, h: i32) {
         moved
     });
     if moved && let Some(r) = r {
-        unsafe {
-            // Windows' caret, unseen, goes where it is too, for what follows it (a
-            // magnifier, a screen reader).
-            if system_caret(e).is_some_and(|s| (s.left, s.top) != (r.left, r.top)) {
-                SetCaretPos(r.left, r.top);
-            }
-            let t = GetCaretBlinkTime();
-            if t == 0 || t == u32::MAX {
-                KillTimer(e, CARET_TIMER);
-            } else {
-                SetTimer(e, CARET_TIMER, t, None);
-            }
+        // Windows' caret, unseen, goes where it is too, for what follows it (a magnifier, a
+        // screen reader).
+        if system_caret(e).is_some_and(|s| (s.left, s.top) != (r.left, r.top)) {
+            unsafe { SetCaretPos(r.left, r.top) };
+        }
+        blink_from_now(e);
+    }
+}
+
+/// Editor `e`'s caret blinks from now, a whole blink shown first (or not at all, with
+/// blinking turned off in Windows).
+fn blink_from_now(e: HWND) {
+    unsafe {
+        let t = GetCaretBlinkTime();
+        if t == 0 || t == u32::MAX {
+            KillTimer(e, CARET_TIMER);
+        } else {
+            SetTimer(e, CARET_TIMER, t, None);
         }
     }
+}
+
+/// After a click in editor `e`: its caret drawn afresh where it is, shown, blinking from
+/// now. Clicking out of a selection, the caret stayed away for a second, until its second
+/// blink: RichEdit draws what a click changes itself, outside the view's frames (the lines
+/// the selection let go of, the caret's among them, in its own look), so what the window
+/// was last given there isn't what it shows, and the caret's rows are painted again.
+pub fn caret_again(e: HWND) {
+    let Some(at) = CARET.with(|k| {
+        let k = k.borrow();
+        (k.e == e as isize).then_some(k.at)
+    }) else {
+        return;
+    };
+    let (w, h) = client(e);
+    let now = caret_rect(e, w, h);
+    for r in [at, now].into_iter().flatten() {
+        blinked(e, r);
+    }
+    CARET.with(|k| {
+        let mut k = k.borrow_mut();
+        k.on = true;
+        k.since = Instant::now();
+    });
+    if now.is_some() {
+        blink_from_now(e);
+    }
+    present(e);
 }
 
 /// Where editor `e`'s caret goes in its client area (`w` x `h`): at the insertion point, as
