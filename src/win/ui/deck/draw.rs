@@ -91,12 +91,19 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
         let n = d.caps.value;
         let pt = g.pill_top_for(n) - wy as f32;
         let empty = d.tabs.is_empty();
+        // A note came back past the cards shown: the pill swells a little and brightens
+        // (with Reduce Motion, brightens only).
+        let k = swell(d.pulse);
+        let grow = if anim::reduced() { 0.0 } else { 2.5 * s * k };
         let pill = |c: &mut Canvas, px: f32, pt: f32, a: f32| {
-            let shape = Shape::new(px, pt, pw, g.pill_h_for(n), pw / 2.0);
+            let shape = Shape::new(px - grow, pt - grow, pw + 2.0 * grow, g.pill_h_for(n) + 2.0 * grow, pw / 2.0 + grow);
             let mut drop = shape;
             drop.y += 1.0 * s;
             c.shape(&drop, 0x000000, 0.12 * a, 3.0 * s, 0.0);
             c.shape(&shape, mat.fill, mat.alpha * a, 1.0, 0.0);
+            if k > 0.002 {
+                c.shape(&shape, theme::FOCUS, 0.35 * k * a, 1.0, 0.0);
+            }
             c.shape(&shape, mat.edge, mat.edge_alpha * a, 1.0, 1.0);
             if empty {
                 let cap = Shape::new(px + (pw - CAP_W * s) / 2.0, pt + (PILL_W - CAP_W) / 2.0 * s, CAP_W * s, CAP_H * s, CAP_W * s / 2.0);
@@ -191,12 +198,18 @@ fn draw_extras(d: &mut Deck, c: &mut Canvas, ww: i32, ring: Option<Hit>, dark: b
         let follow = foot.reduce(f32::max).map_or(0.0, |f| (f - rest).min(0.0));
         let drop = footer_drop(d) + follow - (1.0 - d.extras.value) * tuck;
         if g.more > 0 {
-            let (w, h) = ((TAB_W - 10.0) * s, 26.0 * s);
-            let sh = Shape::new(cx - w / 2.0, g.more_y() + drop, w, h, h / 2.0);
+            // Swelling too when a note came back among those it counts.
+            let k = swell(d.pulse);
+            let grow = if anim::reduced() { 0.0 } else { 2.5 * s * k };
+            let (w, h) = ((TAB_W - 10.0) * s + 2.0 * grow, 26.0 * s + 2.0 * grow);
+            let sh = Shape::new(cx - w / 2.0, g.more_y() + drop - grow, w, h, h / 2.0);
             let hot = d.more_hot.value;
             c.soft_shadow(&sh, s, 0.6 * ea);
             c.shape(&sh, mat.fill, mat.alpha * ea, 1.0, 0.0);
             c.shape(&sh, mat.edge, mat.edge_alpha * ea, 1.0, 1.0);
+            if k > 0.002 {
+                c.shape(&sh, theme::FOCUS, 0.35 * k * ea, 1.0, 0.0);
+            }
             if hot > 0.01 {
                 c.shape(&sh, if dark { 0xFFFFFF } else { 0x000000 }, 0.06 * hot * ea, 1.0, 0.0);
             }

@@ -54,6 +54,7 @@ pub(super) fn tab_texts(id: u64) -> (String, String) {
 /// Rebuild the tab list from the store, keeping the springs of tabs that still exist.
 pub(super) fn sync(d: &mut Deck) {
     let rows: Vec<(u64, u8, bool)> = app::store(|s| s.active_notes().into_iter().filter(|n| !n.off_deck).map(|n| (n.id, n.color, n.pinned)).collect());
+    let all: Vec<u64> = rows.iter().map(|r| r.0).collect();
     let open: Vec<u64> = app::ui(|u| u.notes.keys().copied().collect());
     let in_deck = rows.iter().filter(|r| !open.contains(&r.0)).count();
     let before = stops(d);
@@ -117,6 +118,14 @@ pub(super) fn sync(d: &mut Deck) {
         d.tabs.push(t);
     }
     g.caps = d.tabs.len();
+    // A note that came into the deck with no card of its own here (past the cards it
+    // shows): the pill says so.
+    let known: std::collections::HashSet<u64> = all.iter().copied().collect();
+    if d.synced && all.iter().any(|id| !d.known.contains(id) && !d.tabs.iter().any(|t| t.id == *id)) {
+        d.pulse = Some(0.0);
+    }
+    d.fresh |= d.synced && known != d.known;
+    d.known = known;
     // The pill grows or shrinks to its capsules, and they slide to their places in it.
     if d.synced {
         d.caps.to(g.caps as f32);
@@ -220,6 +229,7 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
 }
 
 pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
+    let dt = if std::mem::take(&mut d.fresh) { dt.min(anim::period()) } else { dt };
     let mut moving = false;
     let s = d.geo.s;
     let hover = d.hover;
@@ -255,7 +265,21 @@ pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
     for sp in [&mut d.pill, &mut d.caps, &mut d.extras, &mut d.plus_hot, &mut d.more_hot] {
         moving |= sp.step(dt);
     }
+    if let Some(t) = d.pulse {
+        // Its first step one refresh, whatever the work before it (an Undo) took.
+        let t = t + dt;
+        d.pulse = (t < PULSE_S).then_some(t);
+        moving = true;
+    }
     moving
+}
+
+/// How long the pill's swell lasts.
+pub(super) const PULSE_S: f32 = 0.5;
+
+/// The swell at its time `t`: from nothing, up and back to nothing, smoothly at both ends.
+pub(super) fn swell(t: Option<f32>) -> f32 {
+    t.map_or(0.0, |t| (std::f32::consts::PI * (t / PULSE_S).clamp(0.0, 1.0)).sin().powi(2))
 }
 
 /// Map an edge-space horizontal span (distance from the screen edge, `near` < `far`) to

@@ -45,6 +45,9 @@ pub(super) fn deck() -> Deck {
         pill: Spring::fade(1.0, motion::DEFAULT),
         caps: Spring::px(NOTES.len() as f32, motion::DEFAULT),
         synced: true,
+        known: std::collections::HashSet::new(),
+        pulse: None,
+        fresh: false,
         extras: Spring::unit(0.0, motion::SHINGLE),
         extras_delay: 0.0,
         extras_goal: 0.0,
@@ -492,6 +495,23 @@ fn capsules_make_room_and_close_up_smoothly() {
     }
     assert!(grew.windows(2).all(|w| w[1] >= w[0] - 0.08), "{grew:?}");
     assert!((d.tabs[3].born.value - 1.0).abs() < 0.01);
+}
+
+/// A note back past the cards shown: the pill swells from nothing and back to nothing,
+/// a frame at a time, and the deck rests after.
+#[test]
+fn the_pill_swells_smoothly_when_a_note_comes_back_unseen() {
+    let mut d = deck();
+    d.pulse = Some(0.0);
+    let mut k = vec![swell(d.pulse)];
+    while step_deck(&mut d) {
+        k.push(swell(d.pulse));
+    }
+    assert_eq!(k[0], 0.0);
+    assert_eq!(*k.last().unwrap(), 0.0);
+    assert!(k.iter().cloned().fold(0.0, f32::max) > 0.95);
+    assert!(k.windows(2).all(|w| (w[1] - w[0]).abs() < 0.12), "{k:?}");
+    assert!(d.pulse.is_none());
 }
 
 /// One frame at 60 Hz; whether anything still moves.
