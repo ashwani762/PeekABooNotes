@@ -97,6 +97,7 @@ pub fn compose(e: HWND, c: &mut Canvas, top: i32, w: i32, rows: i32, parts: Part
     }
     c.make_opaque_rect(RECT { left: 0, top: 0, right: w, bottom: rows });
     let (t, a0, b0) = rich::screen_text(e);
+    selected_pictures(e, c, top, rows, &t, a0, b0);
     emoji::draw(e, c, top, &t, a0, b0);
     if parts == Parts::All {
         checks::draw(e, c, top, w, &t, a0, b0);
@@ -106,6 +107,47 @@ pub fn compose(e: HWND, c: &mut Canvas, top: i32, w: i32, rows: i32, parts: Part
         fade::draw(e, c, top);
     }
     true
+}
+
+/// The pictures in editor `e`'s selection, on `c` (its client rows `top..top + rows`):
+/// RichEdit draws each as its colour negative, which turned a photo into an X-ray in the
+/// middle of a drag across it. Inverted back, and tinted with the selection's colour as
+/// the text around it is marked. `t` holds the text on screen, `a0..b0` what shows.
+///
+/// A picture is drawn from the top of its line, as wide as its character, down to the
+/// paper RichEdit leaves under it (it sits a little below the baseline, and its line's
+/// spacing comes after): what's inverted is down to the first row of the paper alone.
+fn selected_pictures(e: HWND, c: &mut Canvas, top: i32, rows: i32, t: &rich::Span, a0: usize, b0: usize) {
+    const OBJECT: u16 = 0xFFFC;
+    let (a, b) = rich::sel(e);
+    // Hidden (a picture picked, framed instead): drawn as it is.
+    if a == b || rich::selection_held_hidden(e) {
+        return;
+    }
+    let Some((paper, _)) = checks::paper(e) else { return };
+    let (from, to) = ((a.min(b).max(0) as usize).max(a0).max(t.from), (a.max(b).max(0) as usize).min(b0).min(t.from + t.t.len()));
+    for cp in from..to {
+        if t.t[cp - t.from] != OBJECT {
+            continue;
+        }
+        let Some(bx) = rich::char_box(e, cp as i32) else { continue };
+        let (x0, x1) = (bx.left.max(0), bx.right.min(c.w));
+        let (y0, y1) = ((bx.top - top).max(0), (bx.bottom - top).min(rows));
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        let mut y = y0;
+        while y < y1 && !c.row(y)[x0 as usize..x1 as usize].iter().all(|&p| p & 0xFF_FFFF == paper) {
+            y += 1;
+        }
+        let r = RECT { left: x0, top: y0, right: x1, bottom: y };
+        if r.bottom <= r.top {
+            continue;
+        }
+        c.invert_rect(r);
+        let hl = unsafe { windows_sys::Win32::Graphics::Gdi::GetSysColor(windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHT) };
+        c.fade_rect(r, ((hl & 0xFF) << 16) | (hl & 0xFF00) | ((hl >> 16) & 0xFF), 0.65);
+    }
 }
 
 /// Client rows `top..top + rows` of editor `e` as their text reads now (`Parts::Text`).
@@ -439,12 +481,16 @@ fn blink_step(e: HWND) -> Blink {
     if !same(caret_rect(e, w, h), at) {
         return Blink::Frame;
     }
-    let Some(r) = at else {
-        unsafe { KillTimer(e, CARET_TIMER) };
-        return Blink::Nothing;
-    };
     // Left still for Windows' caret timeout: it stays, shown, and stops blinking.
     let rest = caret_timeout().is_some_and(|t| since.elapsed() >= t);
+    // None to show (text selected): the timer goes on looking, so a caret that comes back
+    // without anything drawing it (a selection let go) shows within a blink.
+    let Some(r) = at else {
+        if rest {
+            unsafe { KillTimer(e, CARET_TIMER) };
+        }
+        return Blink::Nothing;
+    };
     if rest {
         unsafe { KillTimer(e, CARET_TIMER) };
         if on {
@@ -495,8 +541,8 @@ fn caret_pixels(e: HWND) -> Option<Vec<u32>> {
     })
 }
 
-/// Editor `e`'s rows under `r` were painted by a blink: they aren't the frame's any more,
-/// and the next frame paints them.
+/// Editor `e`'s rows under `r` were painted by a blink (or by RichEdit itself): they aren't
+/// the frame's any more, and the next frame paints them.
 fn blinked(e: HWND, r: RECT) {
     SHOWN.with(|m| {
         if let Some(s) = m.borrow_mut().get_mut(&(e as isize)) {
@@ -545,20 +591,54 @@ fn put_caret(e: HWND, c: &mut Canvas, w: i32, h: i32) {
         moved
     });
     if moved && let Some(r) = r {
-        unsafe {
-            // Windows' caret, unseen, goes where it is too, for what follows it (a
-            // magnifier, a screen reader).
-            if system_caret(e).is_some_and(|s| (s.left, s.top) != (r.left, r.top)) {
-                SetCaretPos(r.left, r.top);
-            }
-            let t = GetCaretBlinkTime();
-            if t == 0 || t == u32::MAX {
-                KillTimer(e, CARET_TIMER);
-            } else {
-                SetTimer(e, CARET_TIMER, t, None);
-            }
+        // Windows' caret, unseen, goes where it is too, for what follows it (a magnifier, a
+        // screen reader).
+        if system_caret(e).is_some_and(|s| (s.left, s.top) != (r.left, r.top)) {
+            unsafe { SetCaretPos(r.left, r.top) };
+        }
+        blink_from_now(e);
+    }
+}
+
+/// Editor `e`'s caret blinks from now, a whole blink shown first (or not at all, with
+/// blinking turned off in Windows).
+fn blink_from_now(e: HWND) {
+    unsafe {
+        let t = GetCaretBlinkTime();
+        if t == 0 || t == u32::MAX {
+            KillTimer(e, CARET_TIMER);
+        } else {
+            SetTimer(e, CARET_TIMER, t, None);
         }
     }
+}
+
+/// After a click in editor `e`: its caret drawn afresh where it is, shown, blinking from
+/// now. Clicking out of a selection, the caret stayed away for a second, until its second
+/// blink: RichEdit draws what a click changes itself, outside the view's frames (the lines
+/// the selection let go of, the caret's among them, in its own look), so what the window
+/// was last given there isn't what it shows, and the caret's rows are painted again.
+pub fn caret_again(e: HWND) {
+    let Some(at) = CARET.with(|k| {
+        let k = k.borrow();
+        (k.e == e as isize).then_some(k.at)
+    }) else {
+        return;
+    };
+    let (w, h) = client(e);
+    let now = caret_rect(e, w, h);
+    for r in [at, now].into_iter().flatten() {
+        blinked(e, r);
+    }
+    CARET.with(|k| {
+        let mut k = k.borrow_mut();
+        k.on = true;
+        k.since = Instant::now();
+    });
+    if now.is_some() {
+        blink_from_now(e);
+    }
+    present(e);
 }
 
 /// Where editor `e`'s caret goes in its client area (`w` x `h`): at the insertion point, as
@@ -816,6 +896,81 @@ mod tests {
         for top in [40, 97, 150] {
             let rows = drawn(e, top, w, 50);
             assert_eq!(rows, part[(top * w) as usize..((top + 50) * w) as usize], "rows {top}..");
+        }
+        unsafe { DestroyWindow(e) };
+    }
+
+    /// A picture in a selection is drawn as it is, tinted with the selection's colour, not
+    /// as the colour negative RichEdit draws; a picked one (its selection hidden, a frame
+    /// round it) as it is.
+    #[test]
+    fn a_selected_picture_is_tinted_not_inverted() {
+        let (w, h) = (400, 300);
+        let e = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, w, h, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(e);
+        rich::insert_text(e, "Title\rbefore the picture\r\rafter it");
+        let t = rich::text(e);
+        let at = t.iter().enumerate().filter(|&(_, &c)| c == rich::CR).nth(1).unwrap().0 as i32 + 1;
+        rich::set_sel(e, at, at);
+        rich::insert_rtf(e, &format!("{{\\rtf1 {}}}", rich::test_picture(48, 24, 1440, 720)));
+        rich::apply_base_format(e, 0x1D1D1F, PAPER);
+        checks::set_style(e, 0x303030, PAPER, 1.0);
+        let obj = rich::text(e).iter().position(|&c| c == 0xFFFC).unwrap() as i32;
+        let draw = |top: i32, rows: i32| {
+            let mut c = Canvas::new(w, rows);
+            assert!(compose(e, &mut c, top, w, rows, Parts::Text));
+            c.copy_out(RECT { left: 0, top: 0, right: w, bottom: rows })
+        };
+        rich::set_sel(e, 0, 0);
+        let plain = draw(0, h);
+        // The picture: its grey pixels.
+        let grey = |p: u32| p & 0xFF_FFFF == 0x80_8080;
+        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+        for y in 0..h {
+            for x in 0..w {
+                if grey(plain[(y * w + x) as usize]) {
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+                }
+            }
+        }
+        let p0 = windows_sys::Win32::Foundation::POINT { x: x0, y: y0 };
+        let (pw, ph) = (x1 - x0, y1 - y0);
+        assert!(pw > 40 && ph > 20, "{pw} x {ph}");
+        let hl = unsafe { windows_sys::Win32::Graphics::Gdi::GetSysColor(windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHT) };
+        let hl = ((hl & 0xFF) << 16) | (hl & 0xFF00) | ((hl >> 16) & 0xFF);
+        let near = |a: u32, b: u32| (0..3).all(|k| ((a >> (8 * k)) & 0xFF).abs_diff((b >> (8 * k)) & 0xFF) <= 2);
+        for focused in [false, true] {
+            if focused {
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW(e, 0x0007, 0, 0) };
+            }
+            rich::set_sel(e, obj - 4, obj + 4);
+            // Whole, and a band through the picture's middle (a paint of part of it).
+            for (top, rows) in [(0, h), (p0.y + 20, 30)] {
+                let sel = draw(top, rows);
+                let mut checked = 0;
+                for y in p0.y.max(top)..(p0.y + ph).min(top + rows) {
+                    for x in p0.x..p0.x + pw {
+                        let (s, p) = (sel[((y - top) * w + x) as usize], plain[(y * w + x) as usize]);
+                        let k = |sh: u32| ((((p >> sh) & 0xFF) as f32 * 0.65 + ((hl >> sh) & 0xFF) as f32 * 0.35).round() as u32) << sh;
+                        assert!(near(s, k(16) | k(8) | k(0)), "focused {focused}, at {x},{y}: {s:06x} for {p:06x}");
+                        checked += 1;
+                    }
+                }
+                assert!(checked >= 30 * pw.min(96) as usize / 2, "{checked}");
+            }
+        }
+        // Picked: its selection hidden, drawn as it is.
+        rich::set_sel(e, obj, obj + 1);
+        rich::hold_selection_hidden(e, true);
+        let picked = draw(0, h);
+        rich::hold_selection_hidden(e, false);
+        for y in p0.y..p0.y + ph {
+            for x in p0.x..p0.x + pw {
+                assert_eq!(picked[(y * w + x) as usize] & 0xFFFFFF, plain[(y * w + x) as usize] & 0xFFFFFF);
+            }
         }
         unsafe { DestroyWindow(e) };
     }

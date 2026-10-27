@@ -435,11 +435,12 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         let r = now();
         match msg {
             WM_SETFOCUS | WM_KILLFOCUS => crate::win::editor::view::focus(e, msg == WM_SETFOCUS),
-            // What may move the caret without drawing anything else (a click, a drag, a
-            // composed character): it's drawn where it went.
-            WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_CAPTURECHANGED | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION | WM_IME_CHAR => {
-                crate::win::editor::view::caret_moved(e)
-            }
+            // A click: the caret drawn afresh where it is, blinking from there (RichEdit
+            // draws what a click changes itself, the caret's rows among them).
+            WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN => crate::win::editor::view::caret_again(e),
+            // What may move the caret without drawing anything else (a drag, a composed
+            // character): it's drawn where it went.
+            WM_CAPTURECHANGED | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION | WM_IME_CHAR => crate::win::editor::view::caret_moved(e),
             WM_MOUSEMOVE if wp & 0x0001 != 0 => crate::win::editor::view::caret_moved(e),
             _ => {}
         }
@@ -1059,6 +1060,56 @@ mod tests {
         send(WM_SETFOCUS, 0);
         check(&mut screen, "focus in", true);
         assert!(carets >= 50 && blinks >= 50, "{carets} carets, {blinks} blinks");
+        unsafe { DestroyWindow(e) };
+    }
+
+    /// Clicking out of a selection shows the caret in the frame after the click, blinking
+    /// from shown, even where RichEdit draws over the caret's rows itself as it takes the
+    /// click (it puts back, in its own look, the lines a selection let go of): the caret
+    /// stayed away for a second, to its second blink.
+    #[test]
+    fn a_click_out_of_a_selection_shows_the_caret_at_once() {
+        use crate::win::editor::view::{CARET_COLOR, Parts, Screen, compose, frame_now};
+        let (w, h) = (360, 240);
+        let e = typing_editor(w, h);
+        rich::set_sel(e, 0, 0);
+        rich::set_scroll_y(e, 0);
+        unsafe { SendMessageW(e, WM_SETFOCUS, 0, 0) };
+        let mut screen = Screen::new(e);
+        // Lines below the title selected, as by a drag.
+        let t = rich::text(e);
+        let line = |n: usize| t.iter().enumerate().filter(|&(_, &c)| c == rich::CR).nth(n).unwrap().0 as i32;
+        rich::set_sel(e, line(2) + 1, line(5));
+        crate::win::editor::view::caret_moved(e);
+        screen.present(e);
+        assert!(frame_now(e).1.is_none(), "no caret in a selection");
+        // A click at the end of the second line, out of the selection.
+        let end = rich::pos_from_char(e, line(1));
+        let lp = (((end.y + 8) as isize) << 16) | ((end.x + 30) as isize & 0xFFFF);
+        unsafe { SendMessageW(e, WM_LBUTTONDOWN, 1, lp) };
+        screen.present(e);
+        let (_, at, on) = frame_now(e);
+        let r = at.expect("a caret");
+        assert!(on);
+        // RichEdit puts the line back in its own look as the button comes up: no caret.
+        let mut bare = crate::win::render::gfx::Canvas::new(w, h);
+        assert!(compose(e, &mut bare, 0, w, h, Parts::All));
+        let bare = bare.copy_out(RECT { left: 0, top: 0, right: w, bottom: h });
+        for y in r.top..r.bottom {
+            screen.px[(y * w) as usize..((y + 1) * w) as usize].copy_from_slice(&bare[(y * w) as usize..((y + 1) * w) as usize]);
+        }
+        unsafe { SendMessageW(e, WM_LBUTTONUP, 0, lp) };
+        screen.present(e);
+        let (px, at2, on) = frame_now(e);
+        assert_eq!(at2.map(|r| (r.left, r.top)), Some((r.left, r.top)));
+        assert!(on, "shown after the click");
+        assert!(screen.px == px, "the window shows the caret after the click");
+        assert!((r.top..r.bottom).all(|y| screen.px[(y * w + r.left) as usize] == CARET_COLOR));
+        // And it blinks from there: hidden at the next blink, back at the one after.
+        screen.blink(e);
+        assert!(screen.px == bare, "hidden at the first blink");
+        screen.blink(e);
+        assert!(screen.px == px);
         unsafe { DestroyWindow(e) };
     }
 

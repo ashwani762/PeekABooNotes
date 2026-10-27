@@ -516,6 +516,20 @@ impl Canvas {
         }
     }
 
+    /// Turn the colours inside `r` (an opaque region) into their negatives: undoes what
+    /// GDI's inversion did there.
+    pub fn invert_rect(&mut self, r: RECT) {
+        unsafe { GdiFlush() };
+        let (w, h) = (self.w, self.h);
+        let px = self.px();
+        for y in r.top.max(0)..r.bottom.min(h) {
+            let row = (y * w) as usize;
+            for p in &mut px[row + r.left.max(0) as usize..row + r.right.min(w).max(r.left.max(0)) as usize] {
+                *p ^= 0x00FF_FFFF;
+            }
+        }
+    }
+
     /// Blend a rectangle toward `rgb`, keeping `a` of what's there: fades a whole region
     /// (text included) in one pass. Each pixel keeps its own opacity, so a see-through
     /// surface (a card mid-flight) fades without going solid, or dark where it's faint.
