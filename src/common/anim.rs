@@ -16,21 +16,41 @@ pub struct Spring {
     damping: f32,
     response: f32,
     eps: f32,
+    /// A fade (opacity), which Reduce Motion keeps: it moves nothing on screen.
+    keep: bool,
 }
 
 impl Spring {
     /// A spring for pixel-sized quantities.
     pub fn px(value: f32, params: (f32, f32)) -> Spring {
-        Spring { value, velocity: 0.0, target: value, damping: params.0, response: params.1, eps: 0.15 }
+        Spring { value, velocity: 0.0, target: value, damping: params.0, response: params.1, eps: 0.15, keep: false }
     }
 
     /// A spring for 0..1 progress / opacity / scale quantities.
     pub fn unit(value: f32, params: (f32, f32)) -> Spring {
-        Spring { value, velocity: 0.0, target: value, damping: params.0, response: params.1, eps: 0.002 }
+        Spring { value, velocity: 0.0, target: value, damping: params.0, response: params.1, eps: 0.002, keep: false }
+    }
+
+    /// A 0..1 opacity that goes on fading with Reduce Motion on (a cross-fade moves
+    /// nothing), where other springs land at once.
+    pub fn fade(value: f32, params: (f32, f32)) -> Spring {
+        Spring { keep: true, ..Spring::unit(value, params) }
     }
 
     pub fn to(&mut self, target: f32) {
         self.target = target;
+    }
+
+    /// Head for `target` and, from rest, set off at once: with half the speed a critically
+    /// damped spring would leave with, so it moves from the first frame and slows from
+    /// there, with no slow first step and a leap in the second (a spring let go from rest
+    /// moves 2.2 times as far in its second frame as in its first). Already moving, it
+    /// keeps its speed, as `to` does.
+    pub fn launch(&mut self, target: f32) {
+        self.target = target;
+        if self.velocity.abs() < self.eps * 8.0 {
+            self.velocity = (target - self.value) * PI / self.response;
+        }
     }
 
     pub fn retarget(&mut self, target: f32, params: (f32, f32)) {
@@ -51,7 +71,7 @@ impl Spring {
 
     /// Advance by `dt` seconds. Returns true while still moving.
     pub fn step(&mut self, dt: f32) -> bool {
-        if self.settled() || reduced() {
+        if self.settled() || (reduced() && !self.keep) {
             self.value = self.target;
             self.velocity = 0.0;
             return false;
@@ -420,5 +440,78 @@ mod tests {
         assert!(close(c.step(12.0, None), 1.0 / 20.0));
         // Nonsense timing (a period of zero) is no timing.
         assert!(close(c.step(12.01, Some(Timing { period: 0.0, vblank: Some(0.0), display: 1 })), 0.01));
+    }
+}
+
+#[cfg(test)]
+mod spring_tests {
+    use super::{Spring, set_reduced_motion};
+
+    /// Each frame's step of a spring heading from 0 to 100 at `hz`, until it rests.
+    fn steps(mut sp: Spring, hz: f32) -> Vec<f32> {
+        let mut v = Vec::new();
+        let mut last = sp.value;
+        while sp.step(1.0 / hz) && v.len() < 400 {
+            v.push(sp.value - last);
+            last = sp.value;
+        }
+        v
+    }
+
+    /// The largest ratio of a step to the one before it, over the steps of at least a pixel
+    /// (the tail's tiny steps aren't seen).
+    fn worst_leap(v: &[f32]) -> f32 {
+        v.windows(2).filter(|w| w[1].abs() >= 1.0).map(|w| w[1] / w[0].abs().max(1e-3)).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_launched_spring_moves_from_its_first_frame_without_a_leap() {
+        for params in [(1.0, 0.32), (1.0, 0.2), (1.0, 0.12), (0.9, 0.26)] {
+            for hz in [60.0, 99.99, 144.0] {
+                let mut sp = Spring::px(0.0, params);
+                sp.to(100.0);
+                let from_rest = steps(sp, hz);
+                let mut sp = Spring::px(0.0, params);
+                sp.launch(100.0);
+                let launched = steps(sp, hz);
+                // Let go from rest, the second step is twice the first or more: a leap
+                // (unless the whole move is over in a few frames).
+                if params.1 >= 0.2 {
+                    assert!(from_rest[1] / from_rest[0] > 1.6, "{params:?} at {hz} Hz: {from_rest:?}");
+                }
+                // Launched, no step is more than 1.6 times the one before it, and the first
+                // is a real move.
+                assert!(worst_leap(&launched) < 1.6, "{params:?} at {hz} Hz: {launched:?}");
+                assert!(launched[0] > 0.5 * launched[1], "{params:?} at {hz} Hz: {launched:?}");
+                // And it gets there no later.
+                assert!(launched.len() <= from_rest.len() + 2, "{params:?} at {hz} Hz");
+            }
+        }
+    }
+
+    #[test]
+    fn launching_a_moving_spring_keeps_its_speed() {
+        let mut sp = Spring::px(0.0, (1.0, 0.32));
+        sp.to(100.0);
+        for _ in 0..5 {
+            sp.step(1.0 / 60.0);
+        }
+        let v = sp.velocity;
+        sp.launch(0.0);
+        assert_eq!(sp.velocity, v);
+    }
+
+    #[test]
+    fn reduce_motion_lands_moves_at_once_and_keeps_fades() {
+        set_reduced_motion(true);
+        let mut moving = Spring::unit(0.0, (1.0, 0.2));
+        moving.to(1.0);
+        assert!(!moving.step(1.0 / 60.0));
+        assert_eq!(moving.value, 1.0);
+        let mut fade = Spring::fade(0.0, (1.0, 0.2));
+        fade.to(1.0);
+        assert!(fade.step(1.0 / 60.0));
+        assert!(fade.value > 0.0 && fade.value < 0.5);
+        set_reduced_motion(false);
     }
 }

@@ -89,17 +89,46 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
     if pa > 0.01 {
         let (px, pw) = span(&g, ww, PILL_INSET * s, (PILL_INSET + PILL_W) * s);
         let pt = g.pill_top() - wy as f32;
-        let shape = Shape::new(px, pt, pw, g.pill_h(), pw / 2.0);
-        let mut drop = shape;
-        drop.y += 1.0 * s;
-        c.shape(&drop, 0x000000, 0.12 * pa, 3.0 * s, 0.0);
-        c.shape(&shape, mat.fill, mat.alpha * pa, 1.0, 0.0);
-        c.shape(&shape, mat.edge, mat.edge_alpha * pa, 1.0, 1.0);
-        if d.tabs.is_empty() {
-            let cap = Shape::new(px + (pw - CAP_W * s) / 2.0, pt + (PILL_W - CAP_W) / 2.0 * s, CAP_W * s, CAP_H * s, CAP_W * s / 2.0);
-            c.shape(&cap, mat.subtext, 0.4 * pa, 1.0, 0.0);
+        let empty = d.tabs.is_empty();
+        let pill = |c: &mut Canvas, px: f32, pt: f32, a: f32| {
+            let shape = Shape::new(px, pt, pw, g.pill_h(), pw / 2.0);
+            let mut drop = shape;
+            drop.y += 1.0 * s;
+            c.shape(&drop, 0x000000, 0.12 * a, 3.0 * s, 0.0);
+            c.shape(&shape, mat.fill, mat.alpha * a, 1.0, 0.0);
+            c.shape(&shape, mat.edge, mat.edge_alpha * a, 1.0, 1.0);
+            if empty {
+                let cap = Shape::new(px + (pw - CAP_W * s) / 2.0, pt + (PILL_W - CAP_W) / 2.0 * s, CAP_W * s, CAP_H * s, CAP_W * s / 2.0);
+                c.shape(&cap, mat.subtext, 0.4 * a, 1.0, 0.0);
+            }
+        };
+        if d.wide && d.pill.target < 0.5 {
+            // Fanning out, the pill dissolves from the top down as the capsules leave it
+            // in turn, rather than fading all at once around the ones still waiting.
+            let m = (6.0 * s).ceil() as i32;
+            let (x0, y0) = (px.floor() as i32 - m, pt.floor() as i32 - m);
+            let (w, h) = (pw.ceil() as i32 + 2 * m + 1, g.pill_h().ceil() as i32 + 2 * m + 1);
+            let mut pc = Canvas::new(w, h);
+            pc.clear(0);
+            pill(&mut pc, px - x0 as f32, pt - y0 as f32, 1.0);
+            let mut v = pc.copy_out(rect(0, 0, w, h));
+            for (row, line) in v.chunks_mut(w as usize).enumerate() {
+                let k = sweep(pa, (row as f32 + y0 as f32 - pt) / g.pill_h());
+                let k = (k * 256.0) as u32;
+                for p in line.iter_mut() {
+                    let ch = |sh: u32| ((((*p >> sh) & 0xFF) * k) >> 8) << sh;
+                    *p = ch(24) | ch(16) | ch(8) | ch(0);
+                }
+            }
+            c.over(&Image::from_pixels(w, h, v), x0, y0);
+        } else {
+            pill(&mut c, px, pt, pa);
         }
     }
+
+    // The "+N" tile and the plus button come out from under the last card, so they're
+    // drawn before the cards.
+    draw_extras(d, &mut c, ww, ring, dark);
 
     // Cards: tucked ones first, then the pulled-out / dragged one on top.
     let mut order: Vec<usize> = (0..d.tabs.len()).collect();
@@ -119,13 +148,47 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
         focus::ring_haloed(&mut c, &cp.shape, theme::FOCUS, mat.fill, clamp01((cp.reveal - 0.55) / 0.45), s);
     }
 
-    // "+N" tile and the plus button.
+    if !d.wide {
+        // Nothing outside the pill's zone is left hit-testable, not even a shadow's edge.
+        let z = pill_zone;
+        c.fill_raw(0, 0, ww, z.top, 0);
+        c.fill_raw(0, z.bottom, ww, wh, 0);
+        c.fill_raw(0, z.top, z.left, z.bottom, 0);
+        c.fill_raw(z.right, z.top, ww, z.bottom, 0);
+    }
+    d.canvas = Some(c);
+    (wx, wy)
+}
+
+/// How much of a row `y` of the pill (0 at its top, 1 at its foot) is left as it dissolves
+/// from the top down, at `pa` (1 whole, 0 gone): a soft front moving down its length.
+fn sweep(pa: f32, y: f32) -> f32 {
+    const SOFT: f32 = 0.6;
+    let front = (1.0 - pa) * (1.0 + SOFT) - SOFT;
+    clamp01((y - front) / SOFT)
+}
+
+/// The "+N" tile and the plus button, which slide down out from under the last card as
+/// the deck fans out, and back under it as it folds.
+fn draw_extras(d: &mut Deck, c: &mut Canvas, ww: i32, ring: Option<Hit>, dark: bool) {
+    let g = d.geo;
+    let s = g.s;
+    let mat = theme::chrome(dark);
     let ea = clamp01(d.extras.value);
     if ea > 0.01 && d.wide {
-        let slide = (1.0 - d.extras.value) * 30.0 * s;
-        let centre_near = (TAB_W / 2.0 + 2.0) * s - slide;
+        let centre_near = (TAB_W / 2.0 + 2.0) * s;
         let (cx, _) = span(&g, ww, centre_near, centre_near);
-        let drop = footer_drop(d);
+        // From the foot of the stack (its last card's bottom) to the plus button's. They
+        // keep below the foot as it moves (the stack folding up into the pill, its last
+        // card still on its way down), rather than waiting where they go.
+        let rest = g.slot_y(g.n) + 6.0 * s;
+        let tuck = (g.plus_cy() + 17.0 * s - rest).max(0.0);
+        let foot = (0..d.tabs.len()).filter(|&i| !d.tabs[i].open).map(|i| {
+            let sh = pose(d, i, ww, g.ey as f32).shape;
+            sh.y + sh.h
+        });
+        let follow = foot.reduce(f32::max).map_or(0.0, |f| (f - rest).min(0.0));
+        let drop = footer_drop(d) + follow - (1.0 - d.extras.value) * tuck;
         if g.more > 0 {
             let (w, h) = ((TAB_W - 10.0) * s, 26.0 * s);
             let sh = Shape::new(cx - w / 2.0, g.more_y() + drop, w, h, h / 2.0);
@@ -137,7 +200,7 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
                 c.shape(&sh, if dark { 0xFFFFFF } else { 0x000000 }, 0.06 * hot * ea, 1.0, 0.0);
             }
             if ring == Some(Hit::More) {
-                focus::ring_haloed(&mut c, &sh, theme::FOCUS, mat.fill, ea, s);
+                focus::ring_haloed(c, &sh, theme::FOCUS, mat.fill, ea, s);
             }
             let f = font(d, 0, 11.0, FW_SEMIBOLD as i32);
             let r = rect(sh.x as i32, sh.y as i32, sh.w as i32, sh.h as i32);
@@ -156,20 +219,9 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
         c.rrect(cx - lw / 2.0, cy - lt / 2.0, lw, lt, lt / 2.0, ink, ea);
         c.rrect(cx - lt / 2.0, cy - lw / 2.0, lt, lw, lt / 2.0, ink, ea);
         if ring == Some(Hit::Plus) {
-            focus::ring_haloed(&mut c, &sh, theme::FOCUS, mat.fill, ea, s);
+            focus::ring_haloed(c, &sh, theme::FOCUS, mat.fill, ea, s);
         }
     }
-
-    if !d.wide {
-        // Nothing outside the pill's zone is left hit-testable, not even a shadow's edge.
-        let z = pill_zone;
-        c.fill_raw(0, 0, ww, z.top, 0);
-        c.fill_raw(0, z.bottom, ww, wh, 0);
-        c.fill_raw(0, z.top, z.left, z.bottom, 0);
-        c.fill_raw(z.right, z.top, ww, z.bottom, 0);
-    }
-    d.canvas = Some(c);
-    (wx, wy)
 }
 
 /// How far a scrolling spine label has moved after `t` seconds, and whether it's still
@@ -246,6 +298,41 @@ fn label_sprite<'a>(t: &'a mut Tab, lf: &Font, text: &str, len: i32, cell_h: i32
     t.sprites.last().unwrap()
 }
 
+/// How long card `i`'s spine label may run, pulled out by `pull`: fitted to the card as it
+/// is once fanned out, so the label doesn't change as the card grows out of its capsule
+/// (the card's edge cuts it meanwhile). Quantised so a card being pulled out doesn't
+/// re-measure its label every frame.
+fn label_room(d: &Deck, i: usize, pull: f32) -> i32 {
+    let s = d.geo.s;
+    let reserve = if d.tabs[i].open { 16.0 * s } else { 0.0 };
+    let tall = lerp(d.geo.tab_h, preview_height(d, i), pull);
+    ((tall - 28.0 * s - reserve).max(10.0) as i32 / 8) * 8
+}
+
+/// Card `i`'s label shortened to `max_len`: (text, length, cell height), measured once.
+fn fitted(d: &mut Deck, i: usize, lf: &Font, max_len: i32) -> (String, i32, i32) {
+    match &d.tabs[i].fitted {
+        Some((m, l, len, ch)) if *m == max_len => (l.clone(), *len, *ch),
+        _ => {
+            let l = lf.fit(&d.tabs[i].label, max_len);
+            let (len, ch) = lf.measure(&l);
+            d.tabs[i].fitted = Some((max_len, l.clone(), len, ch));
+            (l, len, ch)
+        }
+    }
+}
+
+/// Make ahead what the fan-out's first label would make partway through: the spine font
+/// (12 ms the first time, while DirectWrite loads the system fonts; 2 ms after a trim) and
+/// the text engine (1 ms). Made as that label first showed, with it, they cost one frame
+/// 20 ms, and the motion leapt the refreshes it missed. The labels themselves are made as
+/// each card shows, a frame apart in the cascade (1 to 6 ms each, with emoji).
+pub(super) fn warm(d: &mut Deck) {
+    let lf = font(d, 0, 10.5, FW_SEMIBOLD as i32);
+    let mut c = Canvas::new(8, 8);
+    c.text("A", &lf, rect(0, 0, 8, 8), 0, 1.0, DT_LEFT | DT_SINGLELINE);
+}
+
 pub(super) fn draw_card(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, origin_y: f32, dark: bool) {
     c.begin_batch();
     draw_card_inner(d, c, i, w, origin_y, dark);
@@ -260,8 +347,10 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
     let col = theme::color(color);
     let p = clamp01(cp.reveal);
     if p <= 0.003 {
-        // At rest: just the capsule inside the pill.
-        let a = clamp01(d.pill.value);
+        // At rest: just the capsule inside the pill. One waiting its turn to come out, or
+        // just back in, stays solid as the pill fades out or in around it: it would
+        // otherwise have faded with the pill and come back whole as its card set off.
+        let a = if d.tabs[i].open || !d.wide { clamp01(d.pill.value) } else { 1.0 };
         if d.tabs[i].open {
             c.shape(&cp.shape, col.accent, a, 1.0, 1.6 * s);
             if d.tabs[i].pinned {
@@ -307,21 +396,8 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
         y += 8.0 * s;
     }
     let lf = font(d, 0, 10.5, FW_SEMIBOLD as i32);
-    let reserve = if open { 16.0 * s } else { 0.0 };
-    // Fitted to the card as it is once fanned out, so the label doesn't change as the card
-    // grows out of its capsule (the card's edge cuts it meanwhile). Quantised so a card
-    // being pulled out doesn't re-measure its label every frame.
-    let tall = lerp(g.tab_h, preview_height(d, i), cp.pull);
-    let max_len = ((tall - 28.0 * s - reserve).max(10.0) as i32 / 8) * 8;
-    let (label, len, cell_h) = match &d.tabs[i].fitted {
-        Some((m, l, len, ch)) if *m == max_len => (l.clone(), *len, *ch),
-        _ => {
-            let l = lf.fit(&d.tabs[i].label, max_len);
-            let (len, ch) = lf.measure(&l);
-            d.tabs[i].fitted = Some((max_len, l.clone(), len, ch));
-            (l, len, ch)
-        }
-    };
+    let max_len = label_room(d, i, cp.pull);
+    let (label, len, cell_h) = fitted(d, i, &lf, max_len);
     // The hovered tab's label, if it was shortened, scrolls along the spine to show it all.
     let scroll = d.hover == Hit::Tab(i) && d.drag.is_none() && label_a >= 0.999 && label != d.tabs[i].label && !crate::win::render::anim::reduced();
     let (label, len, offset, whole) = if scroll {

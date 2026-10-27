@@ -170,18 +170,14 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
     }
     let reopening = open && d.tabs.iter().any(|t| t.reveal.value > 0.05);
     // With Reduce Motion the springs land at once, and so does the whole cascade: no card
-    // waits its turn.
-    let together = instant || reopening || anim::reduced();
+    // waits its turn. Folding, the cards go in together, the stack shrinking into the pill
+    // as one: one after another, each card folding over the next one, smaller, left a
+    // pile of coloured scraps for a moment.
+    let together = instant || reopening || !open || anim::reduced();
     for t in d.tabs.iter_mut() {
         let i = t.slot;
         t.reveal_goal = if open && !t.open { 1.0 } else { 0.0 };
-        t.delay = if together {
-            0.0
-        } else if open {
-            i as f32 * motion::STAGGER_S
-        } else {
-            (n.saturating_sub(1 + i)) as f32 * motion::STAGGER_S * 0.45
-        };
+        t.delay = if together { 0.0 } else { i as f32 * motion::STAGGER_S };
         if !open {
             t.pull.to(0.0);
             t.bulge.to(0.0);
@@ -192,7 +188,9 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         }
     }
     d.extras_goal = if open { 1.0 } else { 0.0 };
-    d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S } else { 0.0 };
+    // The plus button comes out from under the last card once that card is most of the
+    // way to its place.
+    d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S + 0.12 } else { 0.0 };
     d.pill.to(if open { 0.0 } else { 1.0 });
     if instant {
         d.extras.snap(d.extras_goal);
@@ -215,7 +213,7 @@ pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
             moving = true;
         }
         if t.delay <= 0.0 && t.reveal.target != t.reveal_goal {
-            t.reveal.to(t.reveal_goal);
+            t.reveal.launch(t.reveal_goal);
         }
         if d.open {
             let hot = hover == Hit::Tab(i) || drag_idx == Some(i);

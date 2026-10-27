@@ -320,7 +320,7 @@ pub fn create() {
             open: false,
             wide: false,
             previewing: false,
-            pill: Spring::unit(1.0, motion::DEFAULT),
+            pill: Spring::fade(1.0, motion::DEFAULT),
             extras: Spring::unit(0.0, motion::SHINGLE),
             extras_delay: 0.0,
             extras_goal: 0.0,
@@ -446,6 +446,15 @@ fn advance(d: &mut Deck, dt: f32) -> (bool, bool, bool) {
     }
     d.marquee_live = false;
     (moving, folded, true)
+}
+
+/// Fan the deck out, with what its frames will draw made first (see `draw::warm`).
+fn fan_out(d: &mut Deck) {
+    let cold = !d.wide;
+    set_open(d, true, false);
+    if cold {
+        warm(d);
+    }
 }
 
 fn update_visibility(d: &mut Deck) {
@@ -684,7 +693,7 @@ pub fn take_keys() {
             update_visibility(d);
         }
         unsafe { KillTimer(hwnd, T_COLLAPSE) };
-        set_open(d, true, false);
+        fan_out(d);
         d.kbd = Some(Kbd { at: stops(d).first().copied(), prev });
         show_ring(d);
         render(d);
@@ -1000,7 +1009,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             unsafe { KillTimer(hwnd, T_COLLAPSE) };
             if !d.open {
                 // Respond on the very first movement: switch to the wide window and fan out.
-                set_open(d, true, false);
+                fan_out(d);
                 d.hover = Hit::None;
                 render(d);
                 return Action::None;
