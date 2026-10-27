@@ -37,6 +37,14 @@ impl Spring {
         Spring { keep: true, ..Spring::unit(value, params) }
     }
 
+    /// This spring, settling only within `eps` of its target: a 0..1 spring that moves
+    /// something hundreds of pixels lands within a fraction of a pixel rather than snapping
+    /// the last half pixel in a frame.
+    pub fn fine(mut self, eps: f32) -> Spring {
+        self.eps = eps;
+        self
+    }
+
     pub fn to(&mut self, target: f32) {
         self.target = target;
     }

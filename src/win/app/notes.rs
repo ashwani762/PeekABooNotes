@@ -211,7 +211,7 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             let from_image = if from_card {
                 deck::card_image(id)
             } else if from_plus {
-                deck::plus_image()
+                deck::plus_image(id)
             } else {
                 None
             };

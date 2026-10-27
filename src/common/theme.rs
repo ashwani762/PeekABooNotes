@@ -107,7 +107,6 @@ pub const FACE_SMALL: &str = "Segoe UI Variable Small";
 pub mod motion {
     pub const DEFAULT: (f32, f32) = (1.0, 0.32);
     pub const SNAPPY: (f32, f32) = (1.0, 0.2);
-    pub const SHINGLE: (f32, f32) = (0.82, 0.36);
     pub const MOMENTUM: (f32, f32) = (0.8, 0.3);
     pub const STAGGER_S: f32 = 0.04;
     pub const PREVIEW_DWELL_MS: u32 = 380;

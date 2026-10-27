@@ -198,7 +198,11 @@ fn settle(t: &mut Toast) {
             // It rises at once, from the first frame, rather than easing off.
             t.rise.launch_as(1.0, theme::motion::MOMENTUM);
             t.shown.launch_as(1.0, (1.0, 0.24));
-            unsafe { SetWindowTextW(t.hwnd, wide(&msg).as_ptr()) };
+            unsafe {
+                SetWindowTextW(t.hwnd, wide(&msg).as_ptr());
+                // Over notes in use, which are kept on top of other windows too.
+                SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
             t.said = (msg, t.notice.is_some());
         }
         None => {

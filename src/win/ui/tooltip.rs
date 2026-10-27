@@ -405,6 +405,7 @@ pub fn frame(dt: f32) -> bool {
                     t.fade.launch_as(1.0, IN);
                     t.fade.step(dt);
                     render(t);
+                    unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
                     return true;
                 }
                 hide(t);
