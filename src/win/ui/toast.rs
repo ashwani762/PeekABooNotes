@@ -8,9 +8,11 @@
 //! for Undo never races the clock. A notice (notes can't be saved) shows over it for a
 //! while, with nothing to undo.
 //!
-//! While only the clock runs, the toast is drawn again on a 100 ms timer, and only when
-//! the ring has moved a pixel or the seconds changed: frames at the display's rate are
-//! asked for only while it rises, sinks or lights up.
+//! While only the clock runs, the ring sweeps on at the display's rate: each frame puts
+//! back the few hundred pixels around the ring as they were without its arc, draws the arc
+//! again and hands the compositor just that square (the arc's end moves a pixel every
+//! 160 ms or so, and a 100 ms timer drew it in steps of one to four pixels). The whole
+//! toast is drawn again only as it rises, sinks or lights up, or the seconds change.
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
@@ -29,9 +31,8 @@ use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 
 const CLASS: &str = "PeekABooToast";
-/// The clock's timer while nothing on the toast moves.
-const T_CLOCK: usize = 1;
-const CLOCK_MS: u32 = 100;
+/// How far along the ring (in pixels) its arc's end moves before it's drawn again.
+const ARC_STEP: f32 = 0.2;
 
 struct Toast {
     hwnd: HWND,
@@ -49,17 +50,23 @@ struct Toast {
     /// When the clock last ran; None while the pointer holds it.
     clock_at: Option<Instant>,
     rise: Spring,
+    /// How much of it shows: as it rises and sinks, and with Reduce Motion, where it fades
+    /// in and out without rising.
+    shown: Spring,
     /// The Undo button lights up while the pointer is on the toast (all of it undoes).
     hot: Spring,
     /// Mouse button held down on the toast: the button sinks a little.
     pressed: bool,
     alive: bool,
     canvas: Option<Canvas>,
-    /// What was last drawn while nothing moved: the ring's step, the seconds, pressed.
-    /// None draws again.
-    drawn: Option<(i32, i32, bool)>,
-    /// The clock's timer is running.
-    timer: bool,
+    /// What was last drawn while nothing moved: the seconds and the button pressed. None
+    /// draws again.
+    drawn: Option<(i32, bool)>,
+    /// The ring as last drawn: its centre and radius, the square around it with the pixels
+    /// there without its arc, and how long the arc was (pixels along the ring).
+    ring: Option<Ring>,
+    /// Where the window was last put.
+    placed: (i32, i32),
     /// The work area it rises in (the monitor in use when it was raised) and that
     /// monitor's scale.
     work: RECT,
@@ -134,12 +141,14 @@ fn with_toast(f: impl FnOnce(&mut Toast)) {
                 said: (String::new(), false),
                 clock_at: None,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
+                shown: Spring::fade(0.0, (1.0, 0.24)),
                 hot: Spring::unit(0.0, (1.0, 0.12)),
                 pressed: false,
                 alive: true,
                 canvas: None,
                 drawn: None,
-                timer: false,
+                ring: None,
+                placed: (0, 0),
                 work,
                 s,
                 size: (0, 0.0),
@@ -174,13 +183,18 @@ fn settle(t: &mut Toast) {
         Some(msg) => {
             t.alive = true;
             t.size = measure(t);
-            t.rise.to(1.0);
+            t.rise.retarget(1.0, theme::motion::MOMENTUM);
+            t.shown.retarget(1.0, (1.0, 0.24));
             unsafe { SetWindowTextW(t.hwnd, wide(&msg).as_ptr()) };
             t.said = (msg, t.notice.is_some());
         }
         None => {
+            // It sinks away at once, quicker than it rose.
             t.alive = false;
-            t.rise.to(0.0);
+            t.rise.retarget(0.0, (1.0, 0.22));
+            t.rise.launch(0.0);
+            t.shown.retarget(0.0, (1.0, 0.18));
+            t.shown.launch(0.0);
         }
     }
 }
@@ -206,8 +220,8 @@ pub fn frame(dt: f32) -> bool {
 }
 
 /// Run the clock (the undo stack's and the notice's) and the springs `dt` seconds on, and
-/// draw what changed. Whether frames are wanted: while something moves. Otherwise, while
-/// the clock runs, its timer brings the next step.
+/// draw what changed. Whether frames are wanted: while something moves, or the clock runs
+/// (the ring sweeping on).
 fn step(dt: f32) -> bool {
     // The clock first, outside the toast's borrow: actions whose time ran out are made
     // final, and what the toast says may change with it.
@@ -236,11 +250,11 @@ fn step(dt: f32) -> bool {
                 settle(t);
             }
         }
-        let moving = t.rise.step(dt);
+        let moving = t.rise.step(dt) | t.shown.step(dt);
         t.pressed &= over;
         t.hot.to(if over && t.alive && t.notice.is_none() { 1.0 } else { 0.0 });
         let lighting = t.hot.step(dt);
-        if !t.alive && !moving && t.rise.value <= 0.01 {
+        if !t.alive && (t.shown.value <= 0.01 || !moving) {
             unsafe { DestroyWindow(t.hwnd) };
             *slot = None;
             // What it offered to undo (an archived note kept ready to come back) is gone
@@ -253,31 +267,58 @@ fn step(dt: f32) -> bool {
         if !still || t.drawn != Some(now) {
             render(t);
             t.drawn = still.then_some(now);
+        } else {
+            sweep(t);
         }
         // Held under the pointer, with nothing moving, the clock stops: the pointer moving
         // off it (WM_MOUSEMOVE, WM_MOUSELEAVE) starts it again.
-        let ticking = still && !over;
-        if ticking != t.timer {
-            t.timer = ticking;
-            unsafe {
-                if ticking {
-                    SetTimer(t.hwnd, T_CLOCK, CLOCK_MS, None);
-                } else {
-                    KillTimer(t.hwnd, T_CLOCK);
-                }
-            }
-        }
-        !still
+        !still || !over
     })
 }
 
-/// What a drawing of the still toast shows that changes with the clock: the countdown
-/// ring to the pixel (along its length), the seconds, and the button pressed.
-fn drawn_key(t: &Toast) -> (i32, i32, bool) {
-    let left = t.left.clamp(0.0, SECONDS);
-    let px = (std::f32::consts::TAU * 10.0 * t.s).ceil();
-    let ring = if t.notice.is_some() || t.undo.is_none() { 0 } else { (left / SECONDS * px).ceil() as i32 };
-    (ring, left.ceil() as i32, t.pressed)
+/// What a drawing of the still toast shows that changes with the clock, but for the ring:
+/// the seconds, and the button pressed.
+fn drawn_key(t: &Toast) -> (i32, bool) {
+    (t.left.clamp(0.0, SECONDS).ceil() as i32, t.pressed)
+}
+
+/// The countdown ring as drawn: its centre and radius, the square around it, the pixels
+/// there without the arc, and the arc's length in pixels along the ring.
+struct Ring {
+    cx: f32,
+    cy: f32,
+    r: f32,
+    square: RECT,
+    under: Vec<u32>,
+    arc: f32,
+}
+
+/// The arc's length now, in pixels along the ring.
+fn arc_px(t: &Toast, r: f32) -> f32 {
+    std::f32::consts::TAU * r * t.left.clamp(0.0, SECONDS) / SECONDS
+}
+
+/// The ring's arc, `r` across, at `frac` of a turn, as the toast draws it.
+fn draw_arc(c: &mut Canvas, cx: f32, cy: f32, r: f32, s: f32, frac: f32, a: f32) {
+    c.ring(cx, cy, r, 2.0 * s, frac, theme::COLORS[0].accent, a);
+}
+
+/// The ring swept on, when its arc's end has moved a fifth of a pixel: the square around
+/// it put back as it was without the arc, the arc drawn again, and only that square given
+/// to the compositor.
+fn sweep(t: &mut Toast) {
+    let Some(ring) = t.ring.as_ref() else { return };
+    let arc = arc_px(t, ring.r);
+    if (arc - ring.arc).abs() < ARC_STEP {
+        return;
+    }
+    let (s, (x, y)) = (t.s, t.placed);
+    let Some(c) = t.canvas.as_mut() else { return };
+    let ring = t.ring.as_mut().unwrap();
+    c.copy_in(ring.square, &ring.under);
+    draw_arc(c, ring.cx, ring.cy, ring.r, s, arc / (std::f32::consts::TAU * ring.r), 1.0);
+    ring.arc = arc;
+    c.present_dirty(t.hwnd, x, y, ring.square);
 }
 
 /// Whether the pointer is on the capsule (not on the shadow around it).
@@ -308,8 +349,9 @@ fn render(t: &mut Toast) {
     }
     let c = t.canvas.as_mut().unwrap();
     c.clear(0);
-    let a = clamp01(t.rise.value);
-    let lift = (1.0 - t.rise.value) * 28.0 * s;
+    t.ring = None;
+    let a = clamp01(t.shown.value);
+    let lift = ((1.0 - t.rise.value) * 28.0 * s).round();
     let (x, y) = (m as f32, m as f32 * 0.6 + lift);
     let card = Shape::new(x, y, w as f32, h as f32, h as f32 / 2.0);
     t.capsule = rect(x as i32, y as i32, w, h);
@@ -323,11 +365,10 @@ fn render(t: &mut Toast) {
         present(t, cw, ch);
         return;
     }
-    // Countdown ring.
+    // Countdown ring: its track and the seconds, then (below, once the text is down) its arc.
     let left = t.left.clamp(0.0, SECONDS);
     let (rcx, rcy, rr) = (x + 26.0 * s, y + h as f32 / 2.0, 10.0 * s);
     c.ring(rcx, rcy, rr, 2.0 * s, 1.0, 0xFFFFFF, 0.16 * a);
-    c.ring(rcx, rcy, rr, 2.0 * s, left / SECONDS, theme::COLORS[0].accent, a);
     let secs = rect((rcx - rr) as i32, (rcy - rr) as i32, (2.0 * rr) as i32, (2.0 * rr) as i32);
     c.text(&format!("{}", left.ceil() as i32), &t.tiny, secs, 0xFFFFFF, 0.85 * a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     let bh = 32.0 * s;
@@ -342,6 +383,12 @@ fn render(t: &mut Toast) {
     let br = rect(button.x as i32, button.y as i32, bw as i32, bh as i32);
     c.text(t!("toast_undo"), &t.bold, br, theme::COLORS[0].accent, a, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     c.flush();
+    let reach = (rr + 2.0 * s + 2.0).ceil() as i32;
+    let square = rect(rcx as i32 - reach, rcy as i32 - reach, 2 * reach + 1, 2 * reach + 1);
+    let under = c.copy_out(square);
+    let arc = std::f32::consts::TAU * rr * left / SECONDS;
+    draw_arc(c, rcx, rcy, rr, s, left / SECONDS, a);
+    t.ring = (a >= 0.999).then_some(Ring { cx: rcx, cy: rcy, r: rr, square, under, arc });
     present(t, cw, ch);
 }
 
@@ -374,6 +421,7 @@ fn measure(t: &Toast) -> (i32, f32) {
 /// Put the drawn toast at the bottom of the work area.
 fn present(t: &mut Toast, cw: i32, ch: i32) {
     let (px, py) = crate::win::ui::screen::bottom_centre(t.work, cw, ch, (12.0 * t.s) as i32);
+    t.placed = (px, py);
     if let Some(c) = t.canvas.as_mut() {
         c.present(t.hwnd, px, py);
     }
@@ -388,12 +436,6 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     unsafe {
         match msg {
             WM_MOUSEACTIVATE => return MA_NOACTIVATE as LRESULT,
-            WM_TIMER if wp == T_CLOCK => {
-                if step(0.0) {
-                    anim::wake(Client::Toast);
-                }
-                return 0;
-            }
             // The countdown waits while the pointer is on the capsule: going on, off, or
             // away, it looks again.
             WM_MOUSEMOVE => {
@@ -460,7 +502,46 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::sizes;
+    use super::{draw_arc, sizes};
+    use crate::win::render::gfx::{Canvas, Shape};
+    use crate::win::util::rect;
+
+    /// The toast's capsule with the ring's track, as `render` leaves it before the arc.
+    fn capsule() -> Canvas {
+        let mut c = Canvas::new(80, 60);
+        c.clear(0);
+        c.shape(&Shape::new(4.0, 6.0, 72.0, 48.0, 24.0), 0x1C1C1E, 0.94, 1.0, 0.0);
+        c.ring(30.0, 30.0, 10.0, 2.0, 1.0, 0xFFFFFF, 0.16);
+        c
+    }
+
+    #[test]
+    fn the_ring_swept_on_in_place_is_the_ring_drawn_afresh() {
+        let square = rect(30 - 15, 30 - 15, 31, 31);
+        let mut c = capsule();
+        let under = c.copy_out(square);
+        draw_arc(&mut c, 30.0, 30.0, 10.0, 1.0, 0.73, 1.0);
+        // Many sweeps on, each putting the square back and drawing the arc a little shorter.
+        let mut frac = 0.73;
+        for _ in 0..40 {
+            frac -= 0.0031;
+            c.copy_in(square, &under);
+            draw_arc(&mut c, 30.0, 30.0, 10.0, 1.0, frac, 1.0);
+        }
+        let mut fresh = capsule();
+        draw_arc(&mut fresh, 30.0, 30.0, 10.0, 1.0, frac, 1.0);
+        assert!(c.copy_out(rect(0, 0, 80, 60)) == fresh.copy_out(rect(0, 0, 80, 60)));
+    }
+
+    #[test]
+    fn the_rings_arc_moves_less_than_a_pixel_between_its_drawings() {
+        // Its end moves 2 pi r a turn over the toast's time: at 100% and 200%, a frame at
+        // 60 Hz moves it a fraction of a pixel, and it's drawn again once that's a fifth.
+        for s in [1.0f32, 2.0] {
+            let per_frame = std::f32::consts::TAU * 10.0 * s / crate::common::undo::SECONDS / 60.0;
+            assert!(per_frame < super::ARC_STEP * 2.0, "{per_frame}");
+        }
+    }
 
     #[test]
     fn the_undo_pill_fits_its_label() {

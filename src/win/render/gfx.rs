@@ -11,7 +11,7 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, GetClientRect, HICON, ICONINFO, ULW_ALPHA, UpdateLayeredWindow,
+    CreateIconIndirect, GetClientRect, HICON, ICONINFO, UPDATELAYEREDWINDOWINFO, ULW_ALPHA, UpdateLayeredWindow, UpdateLayeredWindowIndirect,
 };
 
 pub use crate::win::render::dw::Font;
@@ -612,6 +612,33 @@ impl Canvas {
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
             UpdateLayeredWindow(hwnd, null_mut(), &dst, &size, self.img.dc, &src, 0, &bf, ULW_ALPHA);
+        }
+    }
+
+    /// `present`, where only `dirty` (canvas coordinates) changed since the window was last
+    /// given the canvas at the same place and size: the compositor takes just that.
+    pub fn present_dirty(&self, hwnd: HWND, x: i32, y: i32, dirty: RECT) {
+        unsafe {
+            GdiFlush();
+            let dst = POINT { x, y };
+            let size = SIZE { cx: self.w, cy: self.h };
+            let src = POINT { x: 0, y: 0 };
+            let bf = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
+            let info = UPDATELAYEREDWINDOWINFO {
+                cbSize: size_of::<UPDATELAYEREDWINDOWINFO>() as u32,
+                hdcDst: null_mut(),
+                pptDst: &dst,
+                psize: &size,
+                hdcSrc: self.img.dc,
+                pptSrc: &src,
+                crKey: 0,
+                pblend: &bf,
+                dwFlags: ULW_ALPHA,
+                prcDirty: &dirty,
+            };
+            if UpdateLayeredWindowIndirect(hwnd, &info) == 0 {
+                self.present(hwnd, x, y);
+            }
         }
     }
 
