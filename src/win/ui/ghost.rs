@@ -287,8 +287,8 @@ fn progress(g: &Ghost) -> f32 {
 }
 
 fn render(g: &mut Ghost) {
-    let (x, y) = paint(g, app::dark());
-    g.canvas.present(g.hwnd, x, y);
+    let (x, y, alpha) = paint(g, app::dark());
+    g.canvas.present_faded(g.hwnd, x, y, alpha);
 }
 
 /// How strongly a card shows, by how far it has come.
@@ -334,10 +334,17 @@ fn look(g: &Ghost) -> Look {
     Look { card, from, content }
 }
 
-/// Draw the card as it is now; returns where its window goes on screen.
-fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
+/// Draw the card as it is now; returns where its window goes on screen, and how strongly
+/// it shows there. The card is drawn whole, what's on it at its strength on the card, and
+/// the whole put up at the card's: faded as one, a window's picture over its paper stays
+/// the window's pixels. Each drawn at the card's strength instead, the paper showed
+/// through the picture, and a card fading out over the window it opened into lightened
+/// the window's text by a quarter halfway (dark again only once it had gone).
+fn paint(g: &mut Ghost, dark: bool) -> (i32, i32, f32) {
     let s = g.s;
-    let Look { card: alpha, from: from_a, content } = look(g);
+    let Look { card: alpha, from, content } = look(g);
+    let on_card = |v: f32| if alpha > 0.002 { (v / alpha).min(1.0) } else { 0.0 };
+    let (from_a, content) = (on_card(from), on_card(content));
     let c = &mut g.canvas;
     c.clear(0);
     // The window sits on whole pixels where the card is; the card keeps its fraction of one
@@ -346,7 +353,7 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
     let (wx, wy) = (g.x.value.floor(), g.y.value.floor());
     let (cw, ch) = ((c.w as f32 - 2.0 * pad).max(1.0), (c.h as f32 - 2.0 * pad).max(1.0));
     let sh = Shape::new(pad + g.x.value - wx, pad + g.y.value - wy, g.w.value.clamp(1.0, cw), g.h.value.clamp(1.0, ch), g.r.value.max(0.0));
-    c.card(&sh, theme::paper(g.color, dark), alpha, 0x000000, 0.06 * alpha, 1.6 * alpha, s);
+    c.card(&sh, theme::paper(g.color, dark), 1.0, 0x000000, 0.06, 1.6, s);
     c.begin_batch();
     // The deck card it opens from, then the window's picture, both anchored at the card's
     // top-left, as the window lays itself out.
@@ -382,7 +389,7 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
     if content > 0.002 {
         c.shape(&sh, crate::win::ui::note::border_color(g.color, dark), content, 1.0, 1.0);
     }
-    (g.origin.0 + wx as i32 - g.pad, g.origin.1 + wy as i32 - g.pad)
+    (g.origin.0 + wx as i32 - g.pad, g.origin.1 + wy as i32 - g.pad, alpha)
 }
 
 /// Drop every card still in flight (quitting).
@@ -564,6 +571,9 @@ mod tests {
         frames: Vec<Seen>,
         first_misses: Option<usize>,
         last_misses: Option<usize>,
+        /// Opening: the most pixels a frame of the card fading out over the window it
+        /// revealed shows other than the window's own.
+        fade_misses: usize,
         held: u32,
     }
 
@@ -584,13 +594,13 @@ mod tests {
         }
         let mut pacer = Pacer::new();
         // `fly` draws the first frame and puts it up at once.
-        let win = paint(&mut g, false);
+        let (win, _) = at_alpha(paint(&mut g, false));
         // A window's picture has Windows' border over its edge; the deck card's is as it is.
         let border = crate::win::ui::note::border_color(3, false);
         let first = if kind == Kind::Open { from_px.as_deref().map(|px| (from.0, px, 14, None)) } else { Some((from.0, &image_px[..], 8, Some(border))) };
         let first_misses = first.map(|(at, px, r, b)| misses(&mut g, win, at, px, r, b));
         let mut frames = vec![seen(&g, 1, 0.0)];
-        let (mut last_misses, mut held) = (None, 0);
+        let (mut last_misses, mut held, mut fade_misses) = (None, 0, 0);
         for tick in 0..400u32 {
             // The first tick comes right after `fly`, in the same refresh; the rest just after
             // a refresh, as DwmFlush returns.
@@ -605,12 +615,15 @@ mod tests {
             match advance(&mut g, dt, p as f32) {
                 Step::Still => held += 1,
                 Step::Moved => {
-                    paint(&mut g, false);
+                    let (win, alpha) = at_alpha(paint(&mut g, false));
+                    if opening && g.arrived {
+                        fade_misses = fade_misses.max(over_misses(&mut g, win, to.0, &image_px, 8, alpha));
+                    }
                     frames.push(seen(&g, refresh, dt));
                 }
                 Step::Arrived => {
                     if !done(&g) {
-                        let win = paint(&mut g, false);
+                        let (win, _) = at_alpha(paint(&mut g, false));
                         if kind == Kind::Open {
                             last_misses = Some(misses(&mut g, win, to.0, &image_px, 8, Some(border)));
                         }
@@ -622,7 +635,37 @@ mod tests {
                 break;
             }
         }
-        Flight { frames, first_misses, last_misses, held }
+        Flight { frames, first_misses, last_misses, fade_misses, held }
+    }
+
+    /// Where `paint` put the card's window, and the card's strength.
+    fn at_alpha((x, y, a): (i32, i32, f32)) -> ((i32, i32), f32) {
+        ((x, y), a)
+    }
+
+    /// How many pixels inside screen rect `at` (its corners and 1 px edge left out) the
+    /// card, put up at `win` at `alpha` as the compositor puts a layered window up (one
+    /// constant alpha over its premultiplied pixels), shows over `want` other than `want`.
+    fn over_misses(g: &mut Ghost, win: (i32, i32), at: RECT, want: &[u32], r: i32, alpha: f32) -> usize {
+        let local = RECT { left: at.left - win.0, top: at.top - win.1, right: at.right - win.0, bottom: at.bottom - win.1 };
+        let got = g.canvas.copy_out(local);
+        let (w, h) = (at.right - at.left, at.bottom - at.top);
+        let k = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+        let corner = |x: i32, y: i32| (x < r || x >= w - r) && (y < r || y >= h - r);
+        let edge = |x: i32, y: i32| x == 0 || y == 0 || x == w - 1 || y == h - 1;
+        (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| !corner(x, y) && !edge(x, y))
+            .filter(|&(x, y)| {
+                let (s, d) = (got[(y * w + x) as usize], want[(y * w + x) as usize]);
+                let sa = ((s >> 24) * k + 127) / 255;
+                (0..3).any(|c| {
+                    let sh = 8 * c;
+                    let out = (((s >> sh) & 0xFF) * k + 127) / 255 + (((d >> sh) & 0xFF) * (255 - sa) + 127) / 255;
+                    out.abs_diff((d >> sh) & 0xFF) > 1
+                })
+            })
+            .count()
     }
 
     /// The biggest step between frames (any edge, px), and the biggest spike: a step over
@@ -655,6 +698,7 @@ mod tests {
         let f = fly_off_screen(Kind::Open, (TAB, 14.0), (NOTE, 8.0), pattern(320, 360, 2), Some(pattern(304, 160, 3)), 99.0);
         assert_eq!(f.first_misses, Some(0), "the first frame is the deck card's pixels");
         assert_eq!(f.last_misses, Some(0), "the arrival is the window's pixels");
+        assert_eq!(f.fade_misses, 0, "fading out over the window, it shows the window's pixels");
         let at = f.frames.iter().position(|s| s.edges == [1880.0, 300.0, 2200.0, 660.0]).expect("arrives exactly");
         assert!((f.frames[at].look.content - 1.0).abs() < 1e-6 && f.frames[at].look.from < 1e-6);
         // Whole for the refresh the window is revealed in and the one after, then fading

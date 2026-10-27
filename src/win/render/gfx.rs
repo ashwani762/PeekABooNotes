@@ -630,6 +630,13 @@ impl Canvas {
     }
 
     pub fn present(&self, hwnd: HWND, x: i32, y: i32) {
+        self.present_faded(hwnd, x, y, 1.0);
+    }
+
+    /// `present`, the whole surface at `alpha`, as one layer: what's drawn over what in it
+    /// stays as it is (a picture over paper shows no paper through it, however faint the
+    /// whole), where drawing each part at `alpha` would let the parts under it show.
+    pub fn present_faded(&self, hwnd: HWND, x: i32, y: i32, alpha: f32) {
         unsafe {
             GdiFlush();
             let dst = POINT { x, y };
@@ -638,7 +645,7 @@ impl Canvas {
             let bf = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
                 BlendFlags: 0,
-                SourceConstantAlpha: 255,
+                SourceConstantAlpha: (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
             UpdateLayeredWindow(hwnd, null_mut(), &dst, &size, self.img.dc, &src, 0, &bf, ULW_ALPHA);
