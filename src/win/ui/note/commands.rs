@@ -9,8 +9,9 @@ use super::*;
 pub(super) fn run_command(h: HWND, cmd: u32) {
     let Some(st) = state(h) else { return };
     let (id, e) = (st.id, st.edit);
+    // Shown in one frame when it's done (`rich::quiet`), however many steps it takes.
     let fmt = |f: &dyn Fn()| {
-        f();
+        rich::quiet(e, f);
         mark_dirty(h);
     };
     match cmd {
@@ -30,7 +31,7 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
         NC_COPY => {
             rich::send(e, WM_COPY, 0, 0);
         }
-        NC_PASTE => paste(h),
+        NC_PASTE => rich::quiet(e, || paste(h)),
         NC_SELECT_ALL => rich::set_sel(e, 0, -1),
         NC_ALIGN_LEFT => fmt(&|| rich::set_alignment(e, rich::PFA_LEFT)),
         NC_ALIGN_CENTER => fmt(&|| rich::set_alignment(e, rich::PFA_CENTER)),

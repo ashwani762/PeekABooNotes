@@ -4,7 +4,7 @@
 //! Named links ("our roadmap" pointing at https://...), through RichEdit's text object
 //! model: the URL lives in the character format, so the RTF we store keeps it.
 
-use windows::Win32::UI::Controls::RichEdit::{ITextDocument2, ITextRange2};
+use windows::Win32::UI::Controls::RichEdit::{ITextDocument2, ITextRange2, ITextServices};
 use windows::core::{BSTR, IUnknown, Interface};
 
 use super::*;
@@ -39,10 +39,55 @@ fn doc(h: HWND) -> Option<ITextDocument2> {
     Some(d)
 }
 
+thread_local! {
+    /// Each editor's text services, asked for once: they draw it, every frame it changes.
+    static SERVICES: std::cell::RefCell<std::collections::HashMap<isize, ITextServices>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Editor `h`'s text services, which draw it into any DC (`view`). Asked of its OLE
+/// interface by the IID Msftedit exports (the headers' one is RichEdit 2.0's).
+pub fn services(h: HWND) -> Option<ITextServices> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetPropW;
+    // Known only for an editor whose document is (`doc` marks it).
+    if !unsafe { GetPropW(h, DOC_PROP.as_ptr()) }.is_null()
+        && let Some(s) = SERVICES.with(|m| m.borrow().get(&(h as isize)).cloned())
+    {
+        return Some(s);
+    }
+    doc(h)?;
+    let s = new_services(h)?;
+    SERVICES.with(|m| {
+        let mut m = m.borrow_mut();
+        m.retain(|&w, _| unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(w as HWND) } != 0);
+        m.insert(h as isize, s.clone());
+    });
+    Some(s)
+}
+
+fn new_services(h: HWND) -> Option<ITextServices> {
+    use windows::core::GUID;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    let module = unsafe { GetModuleHandleW(crate::win::util::wide("Msftedit.dll").as_ptr()) };
+    if module.is_null() {
+        return None;
+    }
+    let iid = unsafe { GetProcAddress(module, c"IID_ITextServices".as_ptr() as _) }? as *const GUID;
+    let mut p: *mut core::ffi::c_void = null_mut();
+    send(h, EM_GETOLEINTERFACE, 0, &mut p as *mut _ as isize);
+    if p.is_null() {
+        return None;
+    }
+    let unk = unsafe { IUnknown::from_raw(p) };
+    let mut out: *mut core::ffi::c_void = null_mut();
+    unsafe { unk.query(&*iid, &mut out) }.ok().ok()?;
+    (!out.is_null()).then(|| unsafe { ITextServices::from_raw(out) })
+}
+
 /// Editor `h` is going: let its document go (call before RichEdit's own WM_NCDESTROY).
 pub fn forget_doc(h: HWND) {
     use windows_sys::Win32::UI::WindowsAndMessaging::RemovePropW;
     DOCS.with(|m| m.borrow_mut().remove(&(h as isize)));
+    SERVICES.with(|m| m.borrow_mut().remove(&(h as isize)));
     unsafe { RemovePropW(h, DOC_PROP.as_ptr()) };
 }
 
@@ -164,27 +209,105 @@ pub(super) fn still_as<R>(h: HWND, collect: bool, f: impl FnOnce() -> R) -> R {
 fn held<R>(h: HWND, f: impl FnOnce() -> R) -> R {
     let d = doc(h);
     let y = scroll_y(h);
-    if let Some(d) = &d {
-        unsafe {
-            let _ = d.Freeze();
+    // Nothing shown until it's done, in one frame (`quiet`): a caret put back far from the
+    // change scrolls into view as the display thaws, past the scroll position set while it
+    // was frozen, and that never shows either.
+    quiet(h, || {
+        if let Some(d) = &d {
+            unsafe {
+                let _ = d.Freeze();
+            }
         }
-    }
-    let r = f();
-    set_scroll_y(h, y);
-    if let Some(d) = &d {
-        // A caret put back far from the change scrolls into view as the display thaws,
-        // on screen at once, past the scroll position set while it was frozen: hold
-        // drawing until it is set again, so that never shows.
-        const WM_SETREDRAW: u32 = 0x000B;
-        send(h, WM_SETREDRAW, 0, 0);
-        unsafe {
-            let _ = d.Unfreeze();
-        }
+        let r = f();
         set_scroll_y(h, y);
-        send(h, WM_SETREDRAW, 1, 0);
-        unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(h, std::ptr::null(), 0) };
+        if let Some(d) = &d {
+            unsafe {
+                let _ = d.Unfreeze();
+            }
+            set_scroll_y(h, y);
+        }
+        r
+    })
+}
+
+thread_local! {
+    /// Editors kept from drawing (`quiet`): each with how deep, and whether anything inside
+    /// asked to be shown.
+    static QUIET: std::cell::RefCell<Vec<(isize, u32, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Run `f` with editor `h` drawing nothing, then show what it changed in one frame
+/// (`view::present`). RichEdit draws as it goes, a step at a time, and moves what's on
+/// screen itself as lines come and go: a change made in several steps (a tick, a restyle,
+/// a link made of a typed address) showed each of them, and a line pushed down showed in
+/// two places for a frame. Its layout stays up to date meanwhile (a frozen document's
+/// doesn't: every position reads 0). Nests.
+pub fn quiet<R>(h: HWND, f: impl FnOnce() -> R) -> R {
+    quiet_if(h, f, |_| true)
+}
+
+/// `quiet`, showing what changed only when `show` says, from what `f` returned, that it
+/// may have changed anything (a key that only moved the caret drew nothing).
+pub fn quiet_if<R>(h: HWND, f: impl FnOnce() -> R, show: impl FnOnce(&R) -> bool) -> R {
+    use windows_sys::Win32::Graphics::Gdi::{GetUpdateRect, InvalidateRect};
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+    const WM_SETREDRAW: u32 = 0x000B;
+    let depth = QUIET.with(|q| {
+        let mut q = q.borrow_mut();
+        match q.iter_mut().find(|e| e.0 == h as isize) {
+            Some(e) => {
+                e.1 += 1;
+                e.1 - 1
+            }
+            None => {
+                q.push((h as isize, 1, false));
+                0
+            }
+        }
+    });
+    let done = |shown: bool| {
+        QUIET.with(|q| {
+            let mut q = q.borrow_mut();
+            let i = q.iter().position(|e| e.0 == h as isize)?;
+            q[i].1 -= 1;
+            q[i].2 |= shown;
+            (q[i].1 == 0).then(|| q.remove(i).2)
+        })
+    };
+    // Inside another: that one shows it all.
+    if depth > 0 {
+        let r = f();
+        done(show(&r));
+        return r;
+    }
+    // A hidden editor (one being made, a worker) draws nothing anyway, and turning
+    // drawing back on would mark it visible.
+    if unsafe { IsWindowVisible(h) } == 0 {
+        let r = f();
+        done(false);
+        return r;
+    }
+    // A repaint already waiting is lost while drawing is off: it's asked for again after.
+    let mut pending: RECT = unsafe { std::mem::zeroed() };
+    let waiting = unsafe { GetUpdateRect(h, &mut pending, 0) } != 0;
+    send(h, WM_SETREDRAW, 0, 0);
+    let r = f();
+    send(h, WM_SETREDRAW, 1, 0);
+    let asked = show(&r);
+    let inner = done(false).unwrap_or(false);
+    if waiting {
+        unsafe { InvalidateRect(h, &pending, 0) };
+    }
+    if asked || inner || waiting {
+        crate::win::editor::view::present(h);
     }
     r
+}
+
+/// Whether editor `h` is being kept from drawing (`quiet`): what it would draw is shown
+/// when that's done.
+pub fn is_quiet(h: HWND) -> bool {
+    QUIET.with(|q| q.borrow().iter().any(|e| e.0 == h as isize))
 }
 
 /// A change `still` made: the editor, its text before and after, and the selection before.
@@ -821,6 +944,28 @@ mod tests {
             LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
             CreateWindowExW(0, crate::win::util::wide(CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 300, 200, null_mut(), null_mut(), null_mut(), null_mut())
         }
+    }
+
+    /// Drawing held (`quiet`) nests, and lets go only when the outermost is done; a hidden
+    /// editor (one being made, a worker) is left hidden.
+    #[test]
+    fn drawing_is_held_until_the_outermost_is_done() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+        let h = editor();
+        setup(h);
+        assert!(!is_quiet(h));
+        let r = quiet(h, || {
+            assert!(is_quiet(h));
+            quiet_if(h, || assert!(is_quiet(h)), |_| false);
+            still(h, || insert_text(h, "held"));
+            assert!(is_quiet(h));
+            7
+        });
+        assert_eq!(r, 7);
+        assert!(!is_quiet(h));
+        assert_eq!(unsafe { IsWindowVisible(h) }, 0);
+        assert_eq!(text(h), "held".encode_utf16().collect::<Vec<_>>());
+        unsafe { DestroyWindow(h) };
     }
 
     /// Probe (run with --ignored --nocapture): asking for each scroll position in turn, where
