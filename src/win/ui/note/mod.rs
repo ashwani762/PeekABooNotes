@@ -355,11 +355,21 @@ fn reveal_as(h: HWND, activate: bool) {
         scrollbar::hint(h);
         let ex = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
         if ex & WS_EX_LAYERED != 0 {
+            // Out of the layered surface the window has a new one, empty until it's painted:
+            // shown in between, its first frame was see-through but for its border (a note
+            // opened with no card flying, from Reopen Last Note). Kept from the screen
+            // (cloaked) until it's painted whole.
+            let cloak = |on: i32| windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(h, windows_sys::Win32::Graphics::Dwm::DWMWA_CLOAK as u32, &on as *const i32 as _, 4);
+            let cloaked = cloak(1) >= 0;
             SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & !WS_EX_LAYERED) as isize);
             SetWindowPos(h, null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
             // Paint everything now, in one go: out of the layered surface the window shows
             // black wherever it hasn't painted yet (the footer, if only the text had).
             RedrawWindow(h, std::ptr::null(), null_mut(), RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
+            GdiFlush();
+            if cloaked {
+                cloak(0);
+            }
         }
         if !activate {
             ShowWindow(h, SW_SHOWNOACTIVATE);
