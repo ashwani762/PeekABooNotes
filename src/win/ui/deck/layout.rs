@@ -235,8 +235,9 @@ pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
         if d.open {
             let hot = hover == Hit::Tab(i) || drag_idx == Some(i);
             let near = matches!(hover, Hit::Tab(h) if h.abs_diff(i) == 1) && t.pull.target < 0.5;
-            t.bulge.to(if hot { BULGE * s } else if near { 4.0 * s } else { 0.0 });
-            t.lean.to(if hot || t.pull.target > 0.5 { 0.0 } else { LEAN });
+            // The pointed-at tab lifts from the first frame the pointer is on it.
+            t.bulge.launch(if hot { BULGE * s } else if near { 4.0 * s } else { 0.0 });
+            t.lean.launch(if hot || t.pull.target > 0.5 { 0.0 } else { LEAN });
         }
         for sp in t.springs() {
             moving |= sp.step(dt);
