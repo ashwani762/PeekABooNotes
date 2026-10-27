@@ -111,6 +111,8 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     }
 
     // List.
+    // Rows, their highlights and their text all go on whole pixels, so that as they move
+    // (gliding, closing a gap) the text, put down on whole pixels, keeps to its row.
     let top = lay.list_top;
     let bottom = lay.h as f32;
     let la = clamp01(l.list_a.value);
@@ -151,14 +153,14 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // Only on a row that is there: a search can shrink the list under a resting pointer.
     let hover_row = ((l.hover_y.target - lay.list_top) / lay.row_h).round();
     if l.hover_a.value > 0.01 && hover_row >= 0.0 && (hover_row as usize) < l.rows.len() {
-        let y = l.hover_y.value - l.scroll.value + slide;
+        let y = (l.hover_y.value - l.scroll.value + slide).round();
         if y + lay.row_h > top && y < bottom {
             c.shape(&row_shape(y), p.hover.0, p.hover.1 * l.hover_a.value * la, 1.0, 0.0);
         }
     }
     if ring == Some(Focus::List) && primary_index(l).is_some() {
         // Around the selected row, while it's clear of the header above the list.
-        let y = l.sel_y.value - l.scroll.value + slide;
+        let y = (l.sel_y.value - l.scroll.value + slide).round();
         if y >= top && y < bottom {
             focus::ring(c, &Shape::new(row_x, y, row_w, lay.row_h - 2.0 * s, 10.0 * s), p.focus, la, s);
         }
@@ -170,24 +172,46 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     for i in range.clone() {
         let r = &l.rows[i];
         if l.sel.contains(&r.id) && Some(r.id) != primary {
-            c.shape(&row_shape(row_y(l, lay, i) + slide), theme::paper(r.color, dark), la, 1.0, 0.0);
+            c.shape(&row_shape((row_y(l, lay, i) + slide).round()), theme::paper(r.color, dark), la, 1.0, 0.0);
         }
     }
     if let Some(i) = primary_index(l) {
-        let y = l.sel_y.value - l.scroll.value + slide;
+        let y = (l.sel_y.value - l.scroll.value + slide).round();
+        let came = l.arriving.get(&l.rows[i].id).map_or(1.0, |sp| clamp01(sp.value));
         if y + lay.row_h > top && y < bottom {
-            c.shape(&row_shape(y), theme::paper(l.rows[i].color, dark), la, 1.0, 0.0);
+            c.shape(&row_shape(y), theme::paper(l.rows[i].color, dark), la * came, 1.0, 0.0);
         }
+    }
+    // Rows that just left, fading where they were as the rows below close up over them.
+    for g in &l.leaving {
+        let y = (lay.list_top + g.at as f32 * lay.row_h - l.scroll.value + slide).round();
+        let k = la * clamp01(g.fade.value);
+        if y + lay.row_h <= top || y >= bottom || k <= 0.003 {
+            continue;
+        }
+        let tx = (row_x + 30.0 * s) as i32;
+        let right = (row_x + row_w - 14.0 * s) as i32;
+        let tb = (y + ROW_TITLE_BASE * s) as i32;
+        let mb = (y + ROW_META_BASE * s) as i32;
+        let d = 8.0 * s;
+        let dcy = tb as f32 - f.row_title.cap as f32 / 2.0;
+        if dcy - d / 2.0 > top {
+            c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(g.row.color).accent, k, 1.0, 0.0);
+        }
+        c.line_ct(&g.row.title, &f.row_title, tx, tb, right - tx, clip, mix(p.list, p.text, k), DT_LEFT);
+        c.line_ct(&t!("note_edited", g.row.time), &f.row_time, tx, mb, right - tx, clip, mix(p.list, p.sub, k), DT_LEFT);
     }
     let sel_idx: Vec<usize> = range.clone().filter(|i| l.sel.contains(&l.rows[*i].id)).collect();
     let lifted = l.drag.as_ref().filter(|dr| dr.active).map(|dr| dr.from);
     let order: Vec<usize> = range.clone().filter(|i| Some(*i) != lifted).chain(lifted).collect();
     for i in order {
         let r = &l.rows[i];
-        let y = row_y(l, lay, i) + slide;
+        let y = (row_y(l, lay, i) + slide).round();
         if y + lay.row_h <= top || y >= bottom {
             continue;
         }
+        // A row that just came fades in as the rows below make room for it.
+        let la = la * l.arriving.get(&r.id).map_or(1.0, |sp| clamp01(sp.value));
         if Some(i) == lifted {
             // Above everything drawn so far, text included: flush, lift, then draw it.
             c.flush();

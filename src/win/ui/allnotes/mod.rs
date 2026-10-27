@@ -292,9 +292,28 @@ struct Lib {
     editor_id: u64,
     /// A row being dragged to a new place (Notes view only).
     drag: Option<ListDrag>,
-    /// Rows' visual offsets while they make room for a dragged row, by note id.
+    /// Rows' visual offsets while they make room for a dragged row, or close the gap a
+    /// row left (or open one for a row that came), by note id.
     offs: std::collections::HashMap<u64, Spring>,
+    /// The mode and search the rows were last made for: rows are only seen to leave and
+    /// come within one list.
+    listed: (usize, String),
+    /// Rows that just left the list (archived, deleted), fading where they were as the
+    /// rows below close up over them.
+    leaving: Vec<Leaving>,
+    /// Rows that just came into it (an undo), fading in as the rows below make room.
+    arriving: std::collections::HashMap<u64, Spring>,
 }
+
+/// A row that left the list, and the place it had.
+struct Leaving {
+    row: Row,
+    at: usize,
+    fade: Spring,
+}
+
+/// How rows close a gap or open one, and the selection with them.
+const GAP: (f32, f32) = (0.9, 0.3);
 
 struct ListDrag {
     id: u64,
@@ -549,6 +568,14 @@ pub fn frame(dt: f32) -> bool {
         for sp in l.offs.values_mut() {
             moving |= sp.step(dt);
         }
+        for g in l.leaving.iter_mut() {
+            moving |= g.fade.step(dt);
+        }
+        l.leaving.retain(|g| g.fade.value > 0.002);
+        for sp in l.arriving.values_mut() {
+            moving |= sp.step(dt);
+        }
+        l.arriving.retain(|_, sp| sp.value < 0.998);
         (moving || l.bar_a.value > 0.01, l.hwnd)
     });
     match r {
@@ -844,6 +871,9 @@ fn on_create(hwnd: HWND) {
         editor_id: 0,
         drag: None,
         offs: std::collections::HashMap::new(),
+        listed: (usize::MAX, String::new()),
+        leaving: Vec::new(),
+        arriving: std::collections::HashMap::new(),
     };
     lib.list_a.to(1.0);
     LIB.with(|l| *l.borrow_mut() = Some(lib));

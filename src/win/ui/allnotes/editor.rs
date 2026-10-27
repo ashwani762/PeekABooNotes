@@ -61,11 +61,18 @@ pub(super) fn sync_editor() {
                     unsafe { DestroyWindow(have.0) }; // flushes its edits first
                 }
                 if let Some((id, r)) = want {
-                    let h = crate::win::ui::note::create_embedded(id, hwnd, r);
-                    with(|l| {
-                        l.editor = h;
-                        l.editor_id = id;
-                    });
+                    // Not while rows close a gap (a note archived or deleted, or back): a
+                    // new editor's first paint costs a frame 20 ms or more, a hitch in
+                    // their motion. Its note shows as a preview meanwhile.
+                    if with(|l| super::list::gaps_moving(l)).unwrap_or(false) {
+                        unsafe { SetTimer(hwnd, T_SYNC, 320, None) };
+                    } else {
+                        let h = crate::win::ui::note::create_embedded(id, hwnd, r);
+                        with(|l| {
+                            l.editor = h;
+                            l.editor_id = id;
+                        });
+                    }
                 }
             }
         }
