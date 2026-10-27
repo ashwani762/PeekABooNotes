@@ -297,22 +297,23 @@ fn pick(e: HWND, a: i32, b: i32) {
     // menu asking the format) would otherwise show it again, as the negative.
     rich::hold_selection_hidden(e, true);
     PICKED.with(|p| p.set(Some((e as isize, (a, b), obj, shown))));
-    frame_picture(e, obj, shown, true);
+    // Framed as it's drawn (`paint_frame`).
+    crate::win::editor::view::present(e);
 }
 
 /// The picture picked in `e` (if any) is no longer: its selection shows as RichEdit draws
 /// it, and the frame goes.
 fn unpick(e: HWND) {
-    if let Some((_, _, obj, shown)) = take_picked(e) {
+    if take_picked(e).is_some() {
         rich::hold_selection_hidden(e, false);
-        frame_picture(e, obj, shown, false);
+        crate::win::editor::view::present(e);
     }
 }
 
-/// After message `msg` to `e` (which `drew` or not): a picked picture's frame goes on again
-/// over what RichEdit drew, or, the selection having moved on, it's let go.
+/// After message `msg` to `e` (which `drew` or not): the selection having moved on, a
+/// picked picture is let go. (Its frame is drawn with the editor, `paint_frame`.)
 fn picked_after(e: HWND, msg: u32, drew: bool) {
-    let Some((_, at, obj, shown)) = PICKED.with(|p| p.get()).filter(|p| p.0 == e as isize) else { return };
+    let Some((_, at, _, _)) = PICKED.with(|p| p.get()).filter(|p| p.0 == e as isize) else { return };
     const EM_SETSEL: u32 = 0x00B1;
     const EM_EXSETSEL: u32 = 0x0437;
     if !drew && !matches!(msg, WM_KEYDOWN | WM_CHAR | WM_LBUTTONDOWN | WM_RBUTTONDOWN | EM_SETSEL | EM_EXSETSEL | WM_KILLFOCUS) {
@@ -323,12 +324,10 @@ fn picked_after(e: HWND, msg: u32, drew: bool) {
     } else if msg == WM_SETFOCUS {
         // Taking the focus back (after a menu, Settings, another window), RichEdit shows
         // the selection again, the picture as its negative: hidden again, and the picture
-        // drawn afresh, to be framed when it's painted.
+        // drawn afresh, framed.
         rich::send(e, rich::EM_HIDESELECTION, 0, 0);
         rich::send(e, rich::EM_HIDESELECTION, 1, 0);
-        frame_picture(e, obj, shown, false);
-    } else if drew {
-        frame_picture(e, obj, shown, true);
+        crate::win::editor::view::present(e);
     }
 }
 
@@ -338,40 +337,35 @@ fn picture_bottom(top: i32, width: i32, shown: (i32, i32)) -> i32 {
     top + ((width as i64 * shown.1.max(1) as i64 + shown.0.max(1) as i64 / 2) / shown.0.max(1) as i64) as i32
 }
 
-/// Draw the frame round the picture at character `obj` in `e` (`on`), shown at `shown`
-/// (twips), or have RichEdit draw the picture again without it.
-fn frame_picture(e: HWND, obj: i32, shown: (i32, i32), on: bool) {
+/// Where the frame round the picture at character `obj` in `e`, shown at `shown` (twips),
+/// goes: around the picture as it's drawn.
+fn picture_frame(e: HWND, obj: i32, shown: (i32, i32)) -> Option<RECT> {
     let (p0, p1) = (rich::pos_from_char(e, obj), rich::pos_from_char(e, obj + 1));
     if p1.y != p0.y || p1.x <= p0.x {
-        return;
+        return None;
     }
     // As tall as its shape at the width it's drawn: RichEdit sets a picture a little below
     // its line's baseline, so that left the frame's bottom edge 4 px up the picture.
     let bottom = picture_bottom(p0.y, p1.x - p0.x, shown);
-    let r = RECT { left: p0.x, top: p0.y, right: p1.x, bottom };
-    unsafe {
-        if !on {
-            InvalidateRect(e, &r, 0);
-            return;
-        }
-        use windows_sys::Win32::Graphics::Gdi::*;
-        let mut rc: RECT = std::mem::zeroed();
-        GetClientRect(e, &mut rc);
-        let w = (2.0 * scale(e)).round().max(1.0) as i32;
-        let dc = GetDC(e);
-        // RichEdit's DC is its parent's (CS_PARENTDC): keep to the editor.
-        IntersectClipRect(dc, rc.left, rc.top, rc.right, rc.bottom);
-        let brush = CreateSolidBrush(GetSysColor(COLOR_HIGHLIGHT));
-        for edge in [
-            RECT { left: r.left, top: r.top, right: r.right, bottom: r.top + w },
-            RECT { left: r.left, top: r.bottom - w, right: r.right, bottom: r.bottom },
-            RECT { left: r.left, top: r.top, right: r.left + w, bottom: r.bottom },
-            RECT { left: r.right - w, top: r.top, right: r.right, bottom: r.bottom },
-        ] {
-            FillRect(dc, &edge, brush);
-        }
-        DeleteObject(brush);
-        ReleaseDC(e, dc);
+    Some(RECT { left: p0.x, top: p0.y, right: p1.x, bottom })
+}
+
+/// The picked picture's frame, if editor `e` has one, onto `c`, which holds its client rows
+/// from `top` on (`view::set_painter`).
+pub(super) fn paint_frame(e: HWND, c: &mut crate::win::render::gfx::Canvas, top: i32) {
+    let Some((_, _, obj, shown)) = PICKED.with(|p| p.get()).filter(|p| p.0 == e as isize) else { return };
+    let Some(r) = picture_frame(e, obj, shown) else { return };
+    let w = (2.0 * scale(e)).round().max(1.0) as i32;
+    // The system's selection colour, as RGB.
+    let bgr = unsafe { windows_sys::Win32::Graphics::Gdi::GetSysColor(windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHT) };
+    let argb = 0xFF00_0000 | ((bgr & 0xFF) << 16) | (bgr & 0xFF00) | ((bgr >> 16) & 0xFF);
+    for edge in [
+        (r.left, r.top, r.right, r.top + w),
+        (r.left, r.bottom - w, r.right, r.bottom),
+        (r.left, r.top, r.left + w, r.bottom),
+        (r.right - w, r.top, r.right, r.bottom),
+    ] {
+        c.fill_raw(edge.0, edge.1 - top, edge.2, edge.3 - top, argb);
     }
 }
 
@@ -401,6 +395,47 @@ fn text_menu(h: HWND, e: HWND, mut p: POINT) {
 
 
 pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, parent: usize) -> LRESULT {
+    match msg {
+        // Drawn whole off screen, what goes over the text included, and put on the window
+        // in one copy (`view`). Should RichEdit's text services not draw, it paints itself.
+        WM_PAINT if crate::win::editor::view::on_paint(e) => {
+            // Whatever it drew may have moved the text: the scroll bar keeps in step.
+            super::scrollbar::sync(parent as HWND);
+            return 0;
+        }
+        // `view` paints every pixel: nothing to clear first (that showed as a flash).
+        WM_ERASEBKGND if rich::services(e).is_some() => return 1,
+        _ => {}
+    }
+    // What changes the text or the view is done with drawing held, and shown in one frame
+    // when it's done (`rich::quiet`): a key that changes several things (an address made a
+    // link, a box typed and styled, a line pushed down) never shows them a step at a time.
+    // A key that changed nothing that's drawn (a letter's key-down, a key-up, the caret
+    // moved) shows nothing. Not around the menu keys, whose menu waits on its own loop.
+    let quiet = match msg {
+        WM_KEYDOWN => !matches!(wp as u16, VK_APPS | VK_F10),
+        WM_KEYUP | WM_CHAR | WM_PASTE | WM_CUT | WM_CLEAR | WM_UNDO | EM_UNDO | rich::EM_REDO | rich::EM_SETSCROLLPOS | WM_VSCROLL | WM_SIZE | WM_TIMER => true,
+        _ => false,
+    };
+    if !quiet {
+        return unsafe { edit_now(e, msg, wp, lp, parent) };
+    }
+    let before = matches!(msg, WM_KEYDOWN | WM_KEYUP | WM_TIMER).then(|| view_of(e));
+    rich::quiet_if(
+        e,
+        || unsafe { edit_now(e, msg, wp, lp, parent) },
+        |_| match before {
+            Some(b) if msg == WM_TIMER => view_of(e) != b,
+            Some(b) => key_drew(msg, wp as u16, b, view_of(e)),
+            None => true,
+        },
+    )
+}
+
+const EM_UNDO: u32 = 0x00C7;
+
+/// `edit_proc`, with drawing held where it holds it.
+unsafe fn edit_now(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, parent: usize) -> LRESULT {
     let h = parent as HWND;
     // Anything but the pointer moving, or a question, may change what's under it.
     if !matches!(msg, WM_MOUSEMOVE | WM_SETCURSOR | WM_NCHITTEST | WM_MOUSELEAVE) && !asks_only(msg) {
@@ -678,7 +713,7 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
                 rich::hold_selection_hidden(e, false);
             }
             crate::win::editor::checks::forget(e);
-            crate::win::editor::fade::forget(e);
+            crate::win::editor::view::forget(e);
             rich::forget_block_colors(e);
             rich::forget_box_colors(e);
             rich::forget_groups_of(e);
@@ -688,17 +723,6 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         },
         _ => {}
     }
-    // Which fade bands RichEdit is about to paint over (they have to be faded again after;
-    // the others are left alone).
-    let scale = crate::win::editor::checks::paper(e).map_or(1.0, |(_, s)| s);
-    let painted_bands = if msg == WM_PAINT {
-        let mut u: RECT = unsafe { std::mem::zeroed() };
-        let mut rc: RECT = unsafe { std::mem::zeroed() };
-        unsafe { GetClientRect(e, &mut rc) };
-        if unsafe { GetUpdateRect(e, &mut u, 0) } != 0 { crate::win::editor::fade::reach(u.top, u.bottom, rc.bottom, scale) } else { 0 }
-    } else {
-        0
-    };
     // A press on a selected picture may be on a handle that resizes it.
     if msg == WM_LBUTTONDOWN {
         rich::picture_pressed(e);
@@ -726,12 +750,12 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         rich::style_blocks(e);
         rich::refit_picture_widths(e);
     }
-    // RichEdit draws outside WM_PAINT too (typing, selecting, scrolling): put the
-    // checkboxes back over their placeholder glyphs after anything that may have drawn.
+    // Anything that may have changed the text, the selection or the view: the scroll bar
+    // keeps in step, and a picked picture is let go once its selection has moved on. (What
+    // RichEdit draws goes through its WM_PAINT, overlays and all: see `view`.)
     let drew = matches!(
         msg,
-        WM_PAINT
-            | WM_CHAR
+        WM_CHAR
             | WM_LBUTTONDOWN
             | WM_LBUTTONUP
             | WM_LBUTTONDBLCLK
@@ -746,33 +770,10 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             | WM_CUT
             | WM_UNDO
             | rich::EM_REDO
-            // Scrolled (the wheel's glide sets the position every frame): RichEdit draws the
-            // rows coming into view right away, so the circles go on them right away too.
             | rich::EM_SETSCROLLPOS
     ) || (msg == WM_MOUSEMOVE && wp & 0x0001 != 0)
         || key.is_some_and(|before| key_drew(msg, wp as u16, before, view_of(e)));
     if drew {
-        // The text on screen, read once for both.
-        let (t, a0, b0) = rich::screen_text(e);
-        crate::win::editor::checks::paint_in(e, &t, a0, b0);
-        crate::win::editor::emoji::paint_in(e, &t, a0, b0);
-        if let Some((paper, s)) = crate::win::editor::checks::paper(e) {
-            use crate::win::editor::fade;
-            // Scrolling may have drawn anywhere. Typing, selecting and the like draw around
-            // the selection: a band only when that's at its edge.
-            let touched = match msg {
-                WM_PAINT => painted_bands,
-                WM_VSCROLL | WM_MOUSEWHEEL | rich::EM_SETSCROLLPOS => fade::TOP | fade::BOTTOM,
-                _ => {
-                    let mut rc: RECT = unsafe { std::mem::zeroed() };
-                    unsafe { GetClientRect(e, &mut rc) };
-                    let (a, b) = rich::sel(e);
-                    let (ya, yb) = (rich::pos_from_char(e, a).y, rich::pos_from_char(e, b).y);
-                    fade::reach(ya.min(yb) - (24.0 * s) as i32, ya.max(yb) + (40.0 * s) as i32, rc.bottom, s)
-                }
-            };
-            fade::paint(e, paper, s, touched);
-        }
         super::scrollbar::sync(h);
     }
     picked_after(e, msg, drew);

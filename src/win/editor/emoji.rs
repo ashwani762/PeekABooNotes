@@ -8,19 +8,18 @@
 //! under it (paper, or the selection) and drawn again in colour with DirectWrite, at the
 //! size RichEdit gives that character. The text itself is untouched.
 //!
-//! All of them go on one canvas taken from the window and put back in one copy: each
-//! read of the window waits on the screen (a millisecond under load), and one emoji at a
-//! time read it once or twice apiece. Each emoji, once drawn, is kept as a picture
-//! (`SPRITES`): DirectWrite's colour glyphs cost over half a millisecond each, and a
-//! keystroke or a frame of scrolling draws the same ones again.
+//! They go on the canvas RichEdit has just drawn the editor on (`view`), before it reaches
+//! the screen. Each emoji, once drawn, is kept as a picture (`SPRITES`): DirectWrite's
+//! colour glyphs cost over half a millisecond each, and a keystroke or a frame of
+//! scrolling draws the same ones again.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_SINGLELINE, DT_VCENTER, GetDC, IntersectClipRect, ReleaseDC};
+use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_SINGLELINE, DT_VCENTER};
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, HideCaret, ShowCaret};
+use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
 
 use crate::win::editor::rich;
 use crate::win::render::gfx::{Canvas, Font, Image};
@@ -48,9 +47,10 @@ pub fn trim() {
     SPRITES.with(|s| s.borrow_mut().clear());
 }
 
-/// Draw every visible emoji of editor `e` in colour, straight onto its window. `s` holds
-/// the text on screen, `a0..b0` is what shows (`rich::screen_text`).
-pub fn paint_in(e: HWND, s: &rich::Span, a0: usize, b0: usize) {
+/// Draw every visible emoji of editor `e` in colour onto `c`, which holds what RichEdit
+/// drew of its client rows from `top` on (`view::compose`). `s` holds the text on screen,
+/// `a0..b0` is what shows (`rich::screen_text`).
+pub fn draw(e: HWND, c: &mut Canvas, top: i32, s: &rich::Span, a0: usize, b0: usize) {
     let t: Vec<u16> = s.t[a0 - s.from..b0 - s.from].iter().map(|&c| rich::unmark(c)).collect();
     let found = crate::common::emoji::find(&t, &[rich::BOX, rich::CHECKED]);
     if found.is_empty() {
@@ -59,13 +59,11 @@ pub fn paint_in(e: HWND, s: &rich::Span, a0: usize, b0: usize) {
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(e, &mut rc) };
     let sc = unsafe { GetDpiForWindow(e) }.max(96) as f32 / 96.0;
-    // Each emoji's cell, and what goes in it.
-    let mut cells = Vec::with_capacity(found.len());
-    let (mut ux0, mut uy0, mut ux1, mut uy1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    let bottom = (top + c.h).min(rc.bottom);
     for (a, b) in found {
         let (cp, cq) = ((a + a0) as i32, (b + a0) as i32);
         let p0 = rich::pos_from_char(e, cp);
-        if p0.y > rc.bottom || p0.y < rc.top - (80.0 * sc) as i32 {
+        if p0.y > bottom || p0.y < top.max(rc.top) - (80.0 * sc) as i32 {
             continue;
         }
         let p1 = rich::pos_from_char(e, cq);
@@ -74,40 +72,21 @@ pub fn paint_in(e: HWND, s: &rich::Span, a0: usize, b0: usize) {
         // RichEdit's own advance for it, so nothing after it is covered.
         let w = if p1.y == p0.y && p1.x > p0.x { p1.x - p0.x } else { (px * 1.25) as i32 }.max(1);
         let h = ((px * 1.36).ceil() as i32).max(1);
-        ux0 = ux0.min(p0.x);
-        uy0 = uy0.min(p0.y);
-        ux1 = ux1.max(p0.x + w);
-        uy1 = uy1.max(p0.y + h);
-        cells.push((p0, w, h, px, String::from_utf16_lossy(&t[a..b])));
-    }
-    // RichEdit's DC is its parent's (CS_PARENTDC): keep to the editor.
-    let (ux0, uy0, ux1, uy1) = (ux0.max(rc.left), uy0.max(rc.top), ux1.min(rc.right), uy1.min(rc.bottom));
-    if cells.is_empty() || ux1 <= ux0 || uy1 <= uy0 {
-        return;
-    }
-    let mut c = Canvas::new(ux1 - ux0, uy1 - uy0);
-    unsafe {
-        let dc = GetDC(e);
-        IntersectClipRect(dc, ux0, uy0, ux1, uy1);
-        HideCaret(e);
-        c.grab(dc, ux0, uy0);
-        for (p0, w, h, px, s16) in cells {
-            let (x, y) = (p0.x - ux0, p0.y - uy0);
-            // Paper, or the selection's colour, from the cell's corner (inside the editor:
-            // a line cut by its top edge has its corner above it), as it is now: an emoji
-            // just drawn above can reach into this one's cell.
-            let (sx, sy) = (p0.x + 1 - ux0, (p0.y + 1).max(rc.top + 1) - uy0);
-            if sx < 0 || sy < 0 || sx >= c.w || sy >= c.h {
-                continue;
-            }
-            let Some(&under) = c.copy_out(RECT { left: sx, top: sy, right: sx + 1, bottom: sy + 1 }).first() else { continue };
-            c.fill_raw(x, y, x + w, y + h, 0xFF00_0000 | (under & 0xFF_FFFF));
-            with_sprite((s16, px as u32, w, h), |img| c.over(img, x, y));
+        if p0.y + h <= top {
+            continue;
         }
-        c.make_opaque();
-        c.blit(dc, ux0, uy0);
-        ShowCaret(e);
-        ReleaseDC(e, dc);
+        let (x, y) = (p0.x, p0.y - top);
+        // Paper, or the selection's colour, from the cell's corner (inside the editor: a
+        // line cut by its top edge has its corner above it), as it is now: an emoji just
+        // drawn above can reach into this one's cell.
+        let (sx, sy) = (p0.x + 1, (p0.y + 1).max(rc.top + 1).max(top) - top);
+        if sx < 0 || sy < 0 || sx >= c.w || sy >= c.h || sx >= rc.right {
+            continue;
+        }
+        let Some(&under) = c.row(sy).get(sx as usize) else { continue };
+        // Not past the editor's right edge (the canvas can be wider).
+        c.fill_raw(x, y, (x + w).min(rc.right), y + h, 0xFF00_0000 | (under & 0xFF_FFFF));
+        with_sprite((String::from_utf16_lossy(&t[a..b]), px as u32, w, h), |img| c.over(img, x, y));
     }
 }
 

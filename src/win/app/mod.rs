@@ -399,8 +399,7 @@ fn trim_memory() {
     }
     crate::win::render::dw::trim();
     crate::win::editor::emoji::trim();
-    crate::win::editor::checks::trim();
-    crate::win::editor::fade::trim();
+    crate::win::editor::view::trim();
     crate::win::editor::rich::forget_groups();
     crate::win::ui::trim_previews();
     deck::trim();

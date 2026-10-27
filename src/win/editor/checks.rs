@@ -4,17 +4,16 @@
 //! Checklist boxes, drawn over RichEdit.
 //!
 //! The ☐ / ☑ characters stay in the text — they carry the state, the caret, undo and the
-//! saved RTF — but are painted in the paper colour. After RichEdit draws, each visible one
-//! is covered by an anti-aliased circle in the note's hue, optically centred on the line's
-//! capitals. Ticking fills the circle from the centre with a small spring pop and fades
-//! a white check in; unticking drains it the same way.
+//! saved RTF — but are painted in the paper colour. Over what RichEdit draws (`view`), each
+//! visible one is covered by an anti-aliased circle in the note's hue, optically centred on
+//! the line's capitals. Ticking fills the circle from the centre with a small spring pop
+//! and fades a white check in; unticking drains it the same way.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-use windows_sys::Win32::Graphics::Gdi::{GetDC, IntersectClipRect, ReleaseDC};
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, HideCaret, ShowCaret};
+use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
 
 use crate::win::render::anim::{self, Client, Spring, clamp01};
 use crate::win::render::gfx::{Canvas, Shape};
@@ -33,8 +32,6 @@ thread_local! {
     /// Boxes mid-animation, by (editor, character position).
     static ANIMS: RefCell<HashMap<(isize, i32), Spring>> = RefCell::new(HashMap::new());
     static HOT: RefCell<Option<(isize, i32)>> = const { RefCell::new(None) };
-    /// What the boxes are drawn on, kept between paints.
-    static CANVAS: RefCell<Option<Canvas>> = const { RefCell::new(None) };
 }
 
 /// Colours and scale for an editor's boxes: the note's ink and its paper.
@@ -50,11 +47,6 @@ pub fn paper(e: HWND) -> Option<(u32, f32)> {
 pub fn forget(e: HWND) {
     STYLES.with(|m| m.borrow_mut().remove(&(e as isize)));
     ANIMS.with(|a| a.borrow_mut().retain(|k, _| k.0 != e as isize));
-}
-
-/// Let the canvas go (with no note open).
-pub fn trim() {
-    CANVAS.with(|c| c.borrow_mut().take());
 }
 
 /// Start the tick (or untick) animation for the box at `cp`.
@@ -76,11 +68,11 @@ pub fn set_hot(e: HWND, cp: Option<i32>) {
         was != key
     });
     if changed {
-        paint(e);
+        crate::win::editor::view::present(e);
     }
 }
 
-/// Step running animations and redraw just their boxes. Returns true while any move.
+/// Step running animations and redraw their editors. Returns true while any move.
 pub fn frame(dt: f32) -> bool {
     let mut done = Vec::new();
     let live: Vec<(isize, i32)> = ANIMS.with(|a| {
@@ -92,12 +84,12 @@ pub fn frame(dt: f32) -> bool {
         }
         a.keys().copied().collect()
     });
-    let mut by_editor: HashMap<isize, ()> = HashMap::new();
-    for (e, _) in &live {
-        by_editor.insert(*e, ());
-    }
-    for e in by_editor.keys() {
-        paint(*e as HWND);
+    // Settled ones (at rest on their target) are drawn once more, then let go.
+    let mut editors: Vec<isize> = live.iter().map(|k| k.0).collect();
+    editors.sort_unstable();
+    editors.dedup();
+    for e in editors {
+        crate::win::editor::view::present(e as HWND);
     }
     ANIMS.with(|a| {
         let mut a = a.borrow_mut();
@@ -108,21 +100,10 @@ pub fn frame(dt: f32) -> bool {
     })
 }
 
-/// Draw every visible box of editor `e` straight onto its window: all of them on one
-/// canvas, taken from the window and put back in a single copy. One box at a time, the
-/// screen could show RichEdit's fresh text with only some of its circles back (while the
-/// wheel glides, rows came into view bare for a frame), and each box cost its own reads
-/// of the window.
-pub fn paint(e: HWND) {
-    if STYLES.with(|m| m.borrow().contains_key(&(e as isize))) {
-        let (t, a0, b0) = rich::screen_text(e);
-        paint_in(e, &t, a0, b0);
-    }
-}
-
-/// `paint`, with the text on screen in hand: `t` holds it, `a0..b0` is what shows (only
-/// the boxes there: a long checklist has thousands).
-pub fn paint_in(e: HWND, t: &rich::Span, a0: usize, b0: usize) {
+/// Draw every visible box of editor `e` onto `c`, which holds what RichEdit drew of its
+/// client rows from `top` on (`view::compose`). `t` holds the text on screen, `a0..b0` is
+/// what shows (only the boxes there: a long checklist has thousands).
+pub fn draw(e: HWND, c: &mut Canvas, top: i32, t: &rich::Span, a0: usize, b0: usize) {
     let Some(st) = STYLES.with(|m| m.borrow().get(&(e as isize)).copied()) else { return };
     let boxes: Vec<i32> = (a0..b0)
         .filter(|&i| t.get(i).is_some_and(|c| c == rich::BOX || c == rich::CHECKED) && (i == 0 || t.get(i - 1) == Some(rich::CR)))
@@ -135,73 +116,25 @@ pub fn paint_in(e: HWND, t: &rich::Span, a0: usize, b0: usize) {
     unsafe { GetClientRect(e, &mut rc) };
     let hot = HOT.with(|h| *h.borrow());
     let s = st.s;
+    let bottom = (top + c.h).min(rc.bottom);
     let mut items = Vec::with_capacity(boxes.len());
-    // The canvas: from the leftmost circle to just short of the rightmost item's text, and
-    // from the top circle to the bottom one.
-    let (mut ux0, mut uy0, mut ux1, mut uy1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
     for cp in boxes {
         let p0 = rich::pos_from_char(e, cp);
-        if p0.y > rc.bottom || p0.y < rc.top - (40.0 * s) as i32 {
+        if p0.y > bottom || p0.y < top.max(rc.top) - (40.0 * s) as i32 {
             continue;
         }
         let (text_x, cy, d, gap) = place(e, cp, p0, t.get(cp as usize + 1), s);
-        let h = (d * 1.2 + 4.0 * s).ceil() as i32;
-        let y0 = (cy - h as f32 / 2.0).round() as i32;
-        ux0 = ux0.min((text_x as f32 - gap - d - 3.0 * s).floor() as i32);
-        ux1 = ux1.max(text_x - 2);
-        uy0 = uy0.min(y0);
-        uy1 = uy1.max(y0 + h);
         let checked = t.get(cp as usize) == Some(rich::CHECKED);
         let v = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 1.0 } else { 0.0 });
         items.push((text_x, cy, d, gap, v, hot == Some((e as isize, cp))));
     }
-    // Not over a faded edge (unless it's being faded again right after).
-    let (clear_top, clear_bottom) = crate::win::editor::fade::kept_clear(e, s);
-    let (ux0, uy0, ux1, uy1) = (ux0.max(rc.left), uy0.max(rc.top).max(clear_top), ux1.min(rc.right), uy1.min(rc.bottom).min(clear_bottom));
-    if items.is_empty() || ux1 <= ux0 || uy1 <= uy0 {
-        return;
+    for (text_x, cy, d, gap, v, hot) in items {
+        // Paper or selection colour, sampled just left of the item's text, before its
+        // circle goes on.
+        let (x, y) = (text_x - 3, cy as i32 - top);
+        let under = c.row(y).get(x.max(0) as usize).filter(|_| x >= 0 && x < rc.right).map_or(st.bg, |p| p & 0xFF_FFFF);
+        draw_box(c, 0, top, text_x, cy, d, gap, under, st, v, hot);
     }
-    let (w, h) = (ux1 - ux0, uy1 - uy0);
-    CANVAS.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        // Kept between paints (a glide paints every frame); grown, never shrunk, so a
-        // canvas the size of the column is made once.
-        if slot.as_ref().is_none_or(|c| c.w < w || c.h < h) {
-            let (cw, ch) = slot.as_ref().map_or((w, h), |c| (c.w.max(w), c.h.max(h)));
-            *slot = Some(Canvas::new(cw, ch));
-        }
-        let c = slot.as_mut().unwrap();
-        unsafe {
-            let dc = GetDC(e);
-            // RichEdit's class hands out its parent's DC (CS_PARENTDC), which isn't clipped to
-            // the editor: without this, the circle of a line scrolled up under the header
-            // would still be drawn there. The canvas may be larger than this paint needs:
-            // only its `w` x `h` corner goes back.
-            IntersectClipRect(dc, ux0, uy0, ux1, uy1);
-            HideCaret(e);
-            c.grab(dc, ux0, uy0);
-            // Paper or selection colour, sampled just left of each item's text, before any
-            // circle goes on.
-            let unders: Vec<u32> = items
-                .iter()
-                .map(|&(text_x, cy, ..)| {
-                    let (x, y) = (text_x - 3 - ux0, cy as i32 - uy0);
-                    if x >= 0 && y >= 0 && x < w && y < h {
-                        c.copy_out(RECT { left: x, top: y, right: x + 1, bottom: y + 1 }).first().map_or(st.bg, |p| p & 0xFF_FFFF)
-                    } else {
-                        st.bg
-                    }
-                })
-                .collect();
-            for (&(text_x, cy, d, gap, v, hot), &under) in items.iter().zip(&unders) {
-                draw_box(c, ux0, uy0, text_x, cy, d, gap, under, st, v, hot);
-            }
-            c.make_opaque();
-            c.blit(dc, ux0, uy0);
-            ShowCaret(e);
-            ReleaseDC(e, dc);
-        }
-    });
 }
 
 /// The (invisible) marker glyph's size in points, as set by rich::style_boxes.
@@ -339,4 +272,5 @@ mod tests {
             assert!(r.abs_diff(u) > 60, "ring {ring:06x} stands out of {under:06x}");
         }
     }
+
 }

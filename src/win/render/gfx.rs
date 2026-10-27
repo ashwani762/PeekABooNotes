@@ -585,13 +585,22 @@ impl Canvas {
         }
     }
 
-    /// Copy to a DC (normal, non-layered windows).
-    /// Take the canvas's size of pixels from `hdc` at (`x`, `y`), opaque.
-    pub fn grab(&mut self, hdc: HDC, x: i32, y: i32) {
-        unsafe { BitBlt(self.img.dc, 0, 0, self.w, self.h, hdc, x, y, SRCCOPY) };
-        self.make_opaque_rect(RECT { left: 0, top: 0, right: self.w, bottom: self.h });
+    /// The canvas's own DC, for GDI (or a control) to draw into: `GdiFlush` before reading
+    /// the pixels back.
+    pub fn dc(&self) -> HDC {
+        self.img.dc
     }
 
+    /// Row `y`'s pixels (none off the canvas).
+    pub fn row(&mut self, y: i32) -> &[u32] {
+        let (w, h) = (self.w as usize, self.h);
+        if y < 0 || y >= h {
+            return &[];
+        }
+        &self.px()[y as usize * w..(y as usize + 1) * w]
+    }
+
+    /// Copy to a DC (normal, non-layered windows).
     pub fn blit(&self, hdc: HDC, x: i32, y: i32) {
         unsafe {
             GdiFlush();

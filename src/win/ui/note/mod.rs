@@ -849,6 +849,7 @@ const UNDO_STEPS: usize = 110;
 fn connect_editor(h: HWND, edit: HWND) {
     rich::send(edit, rich::EM_SETEVENTMASK, 0, (rich::ENM_CHANGE | rich::ENM_LINK) as isize);
     attach::hook(edit);
+    crate::win::editor::view::set_painter(input::paint_frame);
     unsafe { SetWindowSubclass(edit, Some(edit_proc), 1, h as usize) };
 }
 
@@ -1050,12 +1051,12 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     // The title, the links' colour, the length limit (links and tables added
                     // or taken away change what the note holds out of sight, which doesn't
                     // count toward its length).
-                    if rich::restyle(st.edit) {
+                    // Shown in one frame when it's done, and only what it changed (`quiet`):
+                    // the title's look and its emoji's face, a step at a time, made it jump.
+                    if rich::quiet(st.edit, || rich::restyle(st.edit)) {
                         unselect(h);
                     }
                     st.loading = was;
-                    // No repaint of the whole text here: what changed repaints itself, and a
-                    // full repaint after every burst of typing showed the checkboxes blink out.
                 }
                 return 0;
             }

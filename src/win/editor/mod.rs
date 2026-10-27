@@ -7,3 +7,4 @@ pub mod checks;
 pub mod emoji;
 pub mod fade;
 pub mod rich;
+pub mod view;
