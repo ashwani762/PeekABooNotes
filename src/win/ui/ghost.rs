@@ -159,6 +159,8 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
     GHOSTS.with(|gs| gs.borrow_mut().push(g));
     anim::wake(Client::Ghost);
+    // Its frames keep to the refreshes of the display the window is on.
+    anim::pace_on(window);
 }
 
 /// The card flying from `from` to `to` at scale `s`, drawn in `hwnd`.
@@ -406,7 +408,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::win::render::anim::{Pacer, Vsync};
+    use crate::win::render::anim::{Pacer, Timing};
     use crate::win::render::gfx::Image;
 
     #[test]
@@ -503,7 +505,7 @@ mod tests {
             // The first tick comes right after `fly`, in the same refresh; the rest just after
             // a refresh, as DwmFlush returns.
             let t = if tick == 0 { 0.92 * p } else { (tick as f64 + 0.1) * p };
-            let dt = pacer.step(t, Some(Vsync { vblank: (t / p).floor() * p, period: p }));
+            let dt = pacer.step(t, Some(Timing { period: p, vblank: Some((t / p).floor() * p), display: 1 }));
             let refresh = (t / p).floor() as u32 + 1;
             match advance(&mut g, dt) {
                 Step::Still => held += 1,

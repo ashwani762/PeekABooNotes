@@ -70,33 +70,38 @@ impl Spring {
     }
 }
 
-/// The display's timing at a frame, in seconds on the clock the frame's time is read from:
-/// when one of its refreshes (a vblank) is, before or after now, and how long one lasts.
+/// A display's timing at a frame, in seconds on the clock the frame's time is read from:
+/// how long one of its refreshes lasts, when one of them (a vblank) is, before or after now,
+/// when that's known, and which display it is (frames moving to another one meet another
+/// grid of refreshes).
 #[derive(Clone, Copy, Debug)]
-pub struct Vsync {
-    pub vblank: f64,
+pub struct Timing {
     pub period: f64,
+    pub vblank: Option<f64>,
+    pub display: u64,
 }
 
 /// The longest step a frame takes. A frame later than this (the system busy for a moment)
 /// moves on this far and no further, so the motion carries on rather than leaping to its end.
 const MAX_STEP: f64 = 1.0 / 20.0;
 
-/// How far each frame moves the springs. A frame is seen at a display refresh, so it steps
-/// by the whole refresh periods from the last frame's refresh to its own: one when it's on
-/// time, two when it missed one, so the motion keeps to its time without a step of odd
-/// length. The first frame after a rest steps by exactly one period, at the display's own
-/// rate (the pose before it was on screen a refresh ago), however long the work before it
-/// took. Portable: the platform reads the display's timing and the time.
+/// How far each frame moves the springs. A frame is seen at a refresh of the display it's
+/// on, so it steps by the whole refresh periods from the last frame's refresh to its own:
+/// one when it's on time, two when it missed one, so the motion keeps to its time without a
+/// step of odd length, at whatever rate that display runs (60, 99.99, 144 Hz). The first
+/// frame after a rest steps by exactly one period (the pose before it was on screen a
+/// refresh ago), however long the work before it took. Portable: the platform reads the
+/// display's timing and the time.
 #[derive(Clone, Copy, Debug)]
 pub struct Pacer {
-    /// When the last frame was drawn, and the refresh it was drawn for; None after a rest.
-    last: Option<(f64, f64)>,
+    /// When the last frame was drawn, the refresh it was drawn for (when the display's
+    /// refreshes were known) and the display; None after a rest.
+    last: Option<(f64, Option<f64>, u64)>,
     period: f64,
     /// Whether the frames keep to the refreshes the timing describes. A frame drawn for the
     /// same refresh as the last one when most of a refresh has gone by says they don't (the
-    /// frames are paced by another display than the one timed, or the wait returns just
-    /// short of a refresh): the time since the last frame is the step then, until a rest.
+    /// frames are paced by another display than the one timed): the time since the last
+    /// frame is the step then, until a rest.
     on_grid: bool,
 }
 
@@ -122,28 +127,65 @@ impl Pacer {
         self.period as f32
     }
 
-    /// The step for a frame drawn at `now`, given the display's timing (None where there's
-    /// none to be had: the time since the last frame is the step then).
-    pub fn step(&mut self, now: f64, vsync: Option<Vsync>) -> f32 {
-        let v = vsync.filter(|v| v.period > 1.0 / 500.0 && v.period < 1.0 / 20.0 && v.vblank.is_finite());
-        if let Some(v) = v {
-            self.period = v.period;
+    /// The step for a frame drawn at `now`, given the timing of the display it's on (None
+    /// where there's none to be had: the time since the last frame is the step then).
+    pub fn step(&mut self, now: f64, timing: Option<Timing>) -> f32 {
+        let t = timing.filter(|t| t.period > 1.0 / 500.0 && t.period < 1.0 / 20.0);
+        if let Some(t) = t {
+            self.period = t.period;
         }
         // Shown at the first refresh after now: on the refreshes' grid, so frames on time
         // land exactly a period apart, whatever the jitter in when they were drawn.
-        let at = v.map_or(now, |v| v.vblank + (((now - v.vblank) / v.period).floor() + 1.0) * v.period);
-        let Some((then, last_at)) = self.last.replace((now, at)) else { return self.period as f32 };
-        if let Some(v) = v.filter(|_| self.on_grid) {
-            // Two frames drawn for the same refresh: the second shows the same moment.
-            let periods = ((at - last_at) / v.period).round().max(0.0);
-            if periods > 0.0 || now - then < 0.6 * v.period {
-                let most = (MAX_STEP / v.period).floor().max(1.0);
-                return (periods.min(most) * v.period) as f32;
+        let at = t.and_then(|t| t.vblank.filter(|v| v.is_finite()).map(|v| v + (((now - v) / t.period).floor() + 1.0) * t.period));
+        let display = t.map_or(0, |t| t.display);
+        let Some((then, last_at, last_display)) = self.last.replace((now, at, display)) else { return self.period as f32 };
+        let elapsed = now - then;
+        let Some(t) = t.filter(|_| self.on_grid) else { return elapsed.clamp(0.0, MAX_STEP) as f32 };
+        let periods = match (at, last_at) {
+            (Some(at), Some(last_at)) if display == last_display => {
+                // Two frames drawn for the same refresh: the second shows the same moment.
+                let n = ((at - last_at) / t.period).round().max(0.0);
+                if n == 0.0 && elapsed >= 0.6 * t.period {
+                    self.on_grid = false;
+                    return elapsed.clamp(0.0, MAX_STEP) as f32;
+                }
+                n
             }
-            self.on_grid = false;
-        }
-        (now - then).clamp(0.0, MAX_STEP) as f32
+            // The refreshes not known on one side (the first frame on a display, or moved to
+            // another): the refreshes the time since the last frame comes to, one at least.
+            _ => (elapsed / t.period).round().max(1.0),
+        };
+        let most = (MAX_STEP / t.period).floor().max(1.0);
+        (periods.min(most) * t.period) as f32
     }
+}
+
+/// What to wait for before the next frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Wait {
+    /// The display's next refresh, whenever it comes (none seen yet to time it by).
+    Refresh,
+    /// This many seconds.
+    For(f64),
+    /// Nothing: start the next frame at once.
+    No,
+}
+
+/// What to wait for, at `now`, before drawing the next frame, when this one's turn (its
+/// messages, painting and frame) began at `began`, on a display refreshing every `period`
+/// (one of its refreshes at `vblank`, when known): until a moment (`lead`) after the first
+/// refresh since the turn began, when the compositor has taken what was drawn for it (on
+/// Windows its own wait returns about 2 ms after a refresh). Nothing when that's past
+/// already (a turn that took a refresh or more, or waited for the screen itself, as a paint
+/// that reads a window back does): the next one starts at once, so a turn never waits a
+/// second refresh and halves the frame rate.
+pub fn plan_wait(began: f64, now: f64, period: f64, vblank: Option<f64>) -> Wait {
+    let lead = 0.002f64.min(0.2 * period);
+    let Some(v) = vblank else { return Wait::Refresh };
+    // A turn begun a hair before its moment (a timer's rounding) still counts as begun at it.
+    let early = 0.0005f64.min(0.1 * period);
+    let next = v + (((began + early - lead - v) / period).floor() + 1.0) * period + lead;
+    if now < next { Wait::For(next - now) } else { Wait::No }
 }
 
 thread_local! {
@@ -170,15 +212,17 @@ pub fn clamp01(t: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pacer, Vsync};
+    use super::{Pacer, Timing, Wait, plan_wait};
 
-    const RATES: [f64; 4] = [60.0, 99.0, 120.0, 144.0];
+    /// The refresh rates the clock is tried at: the LG's 99.99 Hz is 100,000/1,000,1 as the
+    /// display configuration gives it.
+    const RATES: [f64; 5] = [60.0, 100_000.0 / 1_000.1, 99.0, 120.0, 144.0];
 
-    /// A display refreshing every `period` from `origin`, as the compositor reports it at
-    /// time `t`: the refresh before `t`, or (`ahead`, as Windows 11 does) the one after it.
-    fn vsync(origin: f64, period: f64, t: f64, ahead: bool) -> Vsync {
+    /// Display `display`, refreshing every `period` from `origin`, as the platform reports it
+    /// at time `t`: a refresh before `t`, or (`ahead`, as Windows 11's compositor does) after it.
+    fn timing(display: u64, origin: f64, period: f64, t: f64, ahead: bool) -> Option<Timing> {
         let k = ((t - origin) / period).floor() + if ahead { 1.0 } else { 0.0 };
-        Vsync { vblank: origin + k * period, period }
+        Some(Timing { period, vblank: Some(origin + k * period), display })
     }
 
     fn close(a: f32, b: f64) -> bool {
@@ -193,12 +237,12 @@ mod tests {
                 let mut c = Pacer::new();
                 // Drawn late in a refresh, after a window's picture and layout took most of it.
                 let t = 1000.0 + 0.9 * p;
-                assert!(close(c.step(t, Some(vsync(1000.0, p, t, ahead))), p), "{hz} Hz");
+                assert!(close(c.step(t, timing(1, 1000.0, p, t, ahead)), p), "{hz} Hz");
                 assert!(close(c.period(), p));
                 // And again after the next rest.
                 c.rest();
                 let t = 1003.0 + 0.1 * p;
-                assert!(close(c.step(t, Some(vsync(1000.0, p, t, ahead))), p), "{hz} Hz after a rest");
+                assert!(close(c.step(t, timing(1, 1000.0, p, t, ahead)), p), "{hz} Hz after a rest");
             }
         }
     }
@@ -209,12 +253,12 @@ mod tests {
             let p = 1.0 / hz;
             for ahead in [false, true] {
                 let mut c = Pacer::new();
-                // Woken anywhere in a refresh, then drawn just after each one (as DwmFlush
-                // returns) with a millisecond or two of jitter, up to most of the refresh.
+                // Woken anywhere in a refresh, then drawn just after each one with a
+                // millisecond or two of jitter, up to most of the refresh.
                 let phases = [0.37, 0.05, 0.6, 0.12, 0.08, 0.55, 0.02, 0.3];
                 for (i, ph) in phases.iter().enumerate() {
                     let t = 50.0 + (i as f64 + ph) * p;
-                    let dt = c.step(t, Some(vsync(50.0, p, t, ahead)));
+                    let dt = c.step(t, timing(1, 50.0, p, t, ahead));
                     assert!(close(dt, p), "{hz} Hz frame {i}: {dt}");
                 }
             }
@@ -230,13 +274,12 @@ mod tests {
             // Refreshes 0, 1, then 4 (a heavy frame missed two), 5, 6.
             for (n, ph) in [(0.0, 0.1), (1.0, 0.1), (4.0, 0.15), (5.0, 0.1), (6.0, 0.2)] {
                 let t = 7.0 + (n + ph) * p;
-                steps.push(c.step(t, Some(vsync(7.0, p, t, true))));
+                steps.push(c.step(t, timing(1, 7.0, p, t, true)));
             }
-            let want = [1.0, 1.0, 3.0, 1.0, 1.0];
-            for (s, w) in steps.iter().zip(want) {
+            for (s, w) in steps.iter().zip([1.0, 1.0, 3.0, 1.0, 1.0]) {
                 assert!(close(*s, w * p), "{hz} Hz: {steps:?}");
             }
-            // The motion keeps to the display's time: six refreshes, six refreshes' steps.
+            // The motion keeps to the display's time: seven refreshes, seven refreshes' steps.
             assert!(close(steps.iter().sum(), 7.0 * p));
         }
     }
@@ -245,9 +288,9 @@ mod tests {
     fn two_frames_for_one_refresh_show_the_same_moment() {
         let p = 1.0 / 99.0;
         let mut c = Pacer::new();
-        assert!(close(c.step(0.2 * p, Some(vsync(0.0, p, 0.2 * p, false))), p));
-        assert!(close(c.step(0.5 * p, Some(vsync(0.0, p, 0.5 * p, false))), 0.0));
-        assert!(close(c.step(1.1 * p, Some(vsync(0.0, p, 1.1 * p, false))), p));
+        assert!(close(c.step(0.2 * p, timing(1, 0.0, p, 0.2 * p, false)), p));
+        assert!(close(c.step(0.5 * p, timing(1, 0.0, p, 0.5 * p, false)), 0.0));
+        assert!(close(c.step(1.1 * p, timing(1, 0.0, p, 1.1 * p, false)), p));
     }
 
     #[test]
@@ -255,9 +298,9 @@ mod tests {
         for hz in RATES {
             let p = 1.0 / hz;
             let mut c = Pacer::new();
-            c.step(0.1 * p, Some(vsync(0.0, p, 0.1 * p, false)));
+            c.step(0.1 * p, timing(1, 0.0, p, 0.1 * p, false));
             let t = 2.0 + 0.1 * p;
-            let dt = c.step(t, Some(vsync(0.0, p, t, false))) as f64;
+            let dt = c.step(t, timing(1, 0.0, p, t, false)) as f64;
             assert!(dt <= 1.0 / 20.0 + 1e-9 && dt > 1.0 / 20.0 - p, "{hz} Hz: {dt}");
             let periods = dt / p;
             assert!((periods - periods.round()).abs() < 1e-6, "{hz} Hz: {periods} refreshes");
@@ -265,30 +308,108 @@ mod tests {
     }
 
     #[test]
+    fn a_display_whose_refreshes_arent_known_yet_steps_whole_refreshes_by_the_time() {
+        // The first frame of a run is drawn before the display's first refresh is seen.
+        for hz in RATES {
+            let p = 1.0 / hz;
+            let mut c = Pacer::new();
+            let unknown = Some(Timing { period: p, vblank: None, display: 1 });
+            assert!(close(c.step(3.0, unknown), p));
+            // The next, just after a refresh 0.3 refreshes on: one refresh, never none.
+            let t = 3.0 + 0.3 * p;
+            assert!(close(c.step(t, timing(1, 3.0 + 0.28 * p, p, t, false)), p), "{hz} Hz");
+            let t = 3.0 + 1.3 * p;
+            assert!(close(c.step(t, timing(1, 3.0 + 0.28 * p, p, t, false)), p), "{hz} Hz");
+        }
+    }
+
+    #[test]
+    fn mixed_displays_each_keep_to_their_own_refreshes() {
+        // The LG at 99.99 Hz and the other display at 60, each with its own refreshes; the
+        // compositor's one clock is neither's business here: a card flies on the LG, then
+        // across onto the 60 Hz display, paced by each one's refreshes in turn.
+        let (lg, other) = (1.0 / (100_000.0 / 1_000.1), 1.0 / 60.0);
+        let mut c = Pacer::new();
+        let (mut t, mut moved) = (20.0 + 0.1 * lg, 0.0);
+        let start = t - lg;
+        for i in 0..30 {
+            let dt = c.step(t, timing(1, 20.0, lg, t, false));
+            assert!(close(dt, lg), "on the LG, frame {i}: {dt}");
+            moved += dt as f64;
+            t += lg;
+        }
+        // Onto the other display, whose refreshes fall anywhere against the LG's.
+        let origin = t - 0.43 * other;
+        let mut t = origin + other + 0.1 * other;
+        for i in 0..30 {
+            let dt = c.step(t, timing(2, origin, other, t, true));
+            assert!(close(dt, other), "on the 60 Hz display, frame {i}: {dt}");
+            moved += dt as f64;
+            t += other;
+        }
+        // The motion kept to the time, give or take a refresh at the crossing.
+        let took = t - other - start;
+        assert!((moved - took).abs() < other, "{moved} for {took}");
+    }
+
+    #[test]
     fn frames_paced_by_another_display_than_the_one_timed_step_by_the_time() {
-        // The compositor says 60 Hz; the frames come at 99 Hz (another monitor sets them).
-        let (grid, p) = (1.0 / 60.0, 1.0 / 99.0);
+        // Timed by a 60 Hz clock, the frames come at 99.99 Hz (another display sets them).
+        let (grid, p) = (1.0 / 60.0, 1.0 / (100_000.0 / 1_000.1));
         let mut c = Pacer::new();
         let mut moved = 0.0;
         let n = 40;
         for i in 0..n {
             let t = 3.0 + (i as f64 + 0.1) * p;
-            let dt = c.step(t, Some(vsync(3.0, grid, t, true)));
+            let dt = c.step(t, timing(1, 3.0, grid, t, true));
             moved += dt as f64;
             // Once a frame came for a refresh already drawn for, every step is the time.
             if i > 3 {
                 assert!(close(dt, p), "frame {i}: {dt}");
             }
         }
-        // The motion kept to the time, give or take the refresh it was taken in by.
-        let took = (n - 1) as f64 * p + 1.0 / 60.0;
-        assert!((moved - took).abs() < 1.0 / 60.0, "{moved} for {took}");
+        let took = (n - 1) as f64 * p + grid;
+        assert!((moved - took).abs() < grid, "{moved} for {took}");
         // A rest trusts the timing again.
         c.rest();
         let t = 9.0 + 0.1 * grid;
-        c.step(t, Some(vsync(3.0, grid, t, true)));
+        c.step(t, timing(1, 3.0, grid, t, true));
         let t = 9.0 + 1.1 * grid;
-        assert!(close(c.step(t, Some(vsync(3.0, grid, t, true))), grid));
+        assert!(close(c.step(t, timing(1, 3.0, grid, t, true)), grid));
+    }
+
+    #[test]
+    fn a_turn_waits_for_the_refresh_after_it_began_and_never_for_a_second_one() {
+        for hz in RATES {
+            let p = 1.0 / hz;
+            let lead = 0.002f64.min(0.2 * p);
+            let until = |began: f64, now: f64| match plan_wait(began, now, p, Some(0.0)) {
+                Wait::For(w) => Some(now + w),
+                Wait::No => None,
+                Wait::Refresh => panic!("{hz} Hz: the refreshes are known"),
+            };
+            let at = |n: f64| Some(n * p + lead);
+            let near = |a: Option<f64>, b: Option<f64>| match (a, b) {
+                (Some(a), Some(b)) => (a - b).abs() < 1e-9,
+                (a, b) => a == b,
+            };
+            // Begun just after refresh 10 (as the last wait returned), done 3 ms later: it
+            // waits until just after refresh 11.
+            let began = 10.0 * p + lead + 0.0001;
+            assert!(near(until(began, began + 0.003f64.min(0.5 * p)), at(11.0)), "{hz} Hz");
+            // Woken a hair early by the timer: the same refresh, not the one before.
+            let began = 10.0 * p + lead - 0.0001;
+            assert!(near(until(began, began + 0.001), at(11.0)), "{hz} Hz early");
+            // Done just after refresh 11: only the rest of the lead.
+            assert!(near(until(10.0 * p + lead + 0.0001, 11.0 * p + 0.0004f64.min(0.1 * p)), at(11.0)), "{hz} Hz");
+            // A turn that waited for the screen itself, or took longer than a refresh: past
+            // its moment already, so the next starts at once.
+            assert_eq!(until(10.0 * p + lead + 0.0001, 11.0 * p + lead + 0.0002), None, "{hz} Hz");
+            // Begun late in a refresh (the turn before ran over): the next refresh, not the one after.
+            assert!(near(until(10.8 * p, 10.8 * p + 0.0001), at(11.0)), "{hz} Hz late");
+            // A display whose refreshes aren't known yet: its next one, whenever it comes.
+            assert_eq!(plan_wait(10.8 * p, 10.8 * p, p, None), Wait::Refresh);
+        }
     }
 
     #[test]
@@ -298,6 +419,6 @@ mod tests {
         assert!(close(c.step(10.007, None), 0.007));
         assert!(close(c.step(12.0, None), 1.0 / 20.0));
         // Nonsense timing (a period of zero) is no timing.
-        assert!(close(c.step(12.01, Some(Vsync { vblank: 0.0, period: 0.0 })), 0.01));
+        assert!(close(c.step(12.01, Some(Timing { period: 0.0, vblank: Some(0.0), display: 1 })), 0.01));
     }
 }

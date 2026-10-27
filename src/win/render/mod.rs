@@ -6,3 +6,4 @@
 pub mod anim;
 pub mod dw;
 pub mod gfx;
+pub mod vblank;

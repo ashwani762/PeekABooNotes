@@ -53,6 +53,8 @@ thread_local! {
 pub fn forget() {
     LIST.with(|l| l.borrow_mut().take());
     DECK.with(|d| d.borrow_mut().take());
+    // The frame clock's displays too: their refresh rates may have changed.
+    crate::win::render::vblank::forget();
 }
 
 /// The displays connected, main one first, then left to right.
@@ -179,6 +181,15 @@ struct Target {
     path: String,
     name: Option<String>,
     builtin: bool,
+    /// Its refresh rate exactly, as numerator and denominator (99.99 Hz comes as 99990/1000
+    /// or the like), when the configuration gives one.
+    refresh: Option<(u32, u32)>,
+}
+
+/// How long a refresh of the display GDI calls `gdi` (`\\.\DISPLAY1`) lasts, in seconds, from
+/// the display configuration's exact rate (99.99 Hz is not 100).
+pub fn refresh_period(gdi: &str) -> Option<f64> {
+    targets().into_iter().find(|t| t.gdi.eq_ignore_ascii_case(gdi)).and_then(|t| t.refresh).map(|(n, d)| d as f64 / n as f64)
 }
 
 /// Every active display path's GDI name, monitor device path and friendly name.
@@ -231,7 +242,9 @@ fn targets() -> Vec<Target> {
                 tech,
                 DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL | DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED | DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED
             );
-            out.push(Target { gdi: from_wide(&src.viewGdiDeviceName), path, name, builtin });
+            let r = p.targetInfo.refreshRate;
+            let refresh = (r.Numerator > 0 && r.Denominator > 0).then_some((r.Numerator, r.Denominator));
+            out.push(Target { gdi: from_wide(&src.viewGdiDeviceName), path, name, builtin, refresh });
         }
     }
     out
