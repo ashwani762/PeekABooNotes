@@ -107,24 +107,25 @@ pub(super) fn clamp_to_work(r: RECT, work: RECT) -> RECT {
 }
 
 pub(super) fn placement(id: u64) -> RECT {
+    let (ex, cy, s, work, left) = deck::anchor(Some(id));
     let saved = store(|s| s.note(id).and_then(|n| n.rect));
     if let Some([l, t, r, b]) = saved
         && r - l > 50
         && b - t > 50
     {
-        // Back where it was; a monitor gone since (or a different arrangement) leaves it
-        // on the nearest one, with enough of it on screen to take hold of.
+        // Back where it was, on the deck's display: a spot on another one (the displays
+        // rearranged, or the deck moved since) would open it out of sight there, so it
+        // opens beside its card instead. With enough of it on screen to take hold of.
         let rc = RECT { left: l, top: t, right: r, bottom: b };
         unsafe {
             let mon = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
             let mut mi: MONITORINFO = std::mem::zeroed();
             mi.cbSize = size_of::<MONITORINFO>() as u32;
-            if !mon.is_null() && GetMonitorInfoW(mon, &mut mi) != 0 {
+            if !mon.is_null() && GetMonitorInfoW(mon, &mut mi) != 0 && same_display(mi.rcWork, work) {
                 return clamp_to_work(rc, mi.rcWork);
             }
         }
     }
-    let (ex, cy, s, work, left) = deck::anchor(Some(id));
     let (w, h) = ((320.0 * s) as i32, (360.0 * s) as i32);
     let gap = (8.0 * s) as i32;
     let x = if left { ex + gap } else { ex - w - gap };
@@ -138,6 +139,12 @@ pub(super) fn placement(id: u64) -> RECT {
         })
         .collect();
     cascade(RECT { left: x, top: y, right: x + w, bottom: y + h }, &open, (24.0 * s) as i32, work, left)
+}
+
+/// Whether work areas `a` and `b` are on the same display: one's centre lies in the other.
+fn same_display(a: RECT, b: RECT) -> bool {
+    let (cx, cy) = ((a.left + a.right) / 2, (a.top + a.bottom) / 2);
+    cx >= b.left && cx < b.right && cy >= b.top && cy < b.bottom
 }
 
 /// Where a note first opening at `r` goes when an open note's corner (of `taken`) is there
