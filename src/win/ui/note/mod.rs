@@ -220,9 +220,11 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         glide: Spring::px(0.0, theme::motion::SNAPPY),
         canvas: None,
     });
-    // Hidden-until-arrival windows are created layered at alpha 0 so they can take focus
-    // now (while we still hold the user's input) and become visible when the ghost lands.
-    let ex = WS_EX_TOOLWINDOW | if pinned { WS_EX_TOPMOST } else { 0 } | if show == Show::Later { WS_EX_LAYERED } else { 0 };
+    // Windows are created layered at alpha 0, so they can take focus now (while we still
+    // hold the user's input) and paint before anyone sees them: become visible when the
+    // ghost lands, or (with no flight) as soon as they've painted. Shown at once instead, a
+    // window's first frame was unpainted, see-through but for its border.
+    let ex = WS_EX_TOOLWINDOW | if pinned { WS_EX_TOPMOST } else { 0 } | WS_EX_LAYERED;
     let style = WS_POPUP | WS_THICKFRAME | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
     let h = unsafe {
         CreateWindowExW(
@@ -251,14 +253,19 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
     // Dropping the system frame just grew the text area to its real size: place the text
     // again for it, before the opening card takes its picture of the window.
     open_at_place(h);
-    match show {
-        Show::Later => unsafe {
-            SetLayeredWindowAttributes(h, 0, 0, LWA_ALPHA);
+    unsafe {
+        SetLayeredWindowAttributes(h, 0, 0, LWA_ALPHA);
+        if show == Show::Quiet {
+            ShowWindow(h, SW_SHOWNOACTIVATE);
+        } else {
             ShowWindow(h, SW_SHOW);
             SetForegroundWindow(h);
-        },
-        Show::Now => reveal(h),
-        Show::Quiet => reveal_as(h, false),
+        }
+    }
+    if show != Show::Later {
+        // Painted while it can't be seen, then shown (`reveal` paints again what's left).
+        unsafe { RedrawWindow(h, std::ptr::null(), null_mut(), RDW_UPDATENOW | RDW_ALLCHILDREN) };
+        reveal_as(h, show == Show::Now);
     }
     h
 }
