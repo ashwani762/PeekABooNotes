@@ -183,8 +183,11 @@ fn settle(t: &mut Toast) {
         Some(msg) => {
             t.alive = true;
             t.size = measure(t);
+            // It rises at once, from the first frame, rather than easing off.
             t.rise.retarget(1.0, theme::motion::MOMENTUM);
+            t.rise.launch(1.0);
             t.shown.retarget(1.0, (1.0, 0.24));
+            t.shown.launch(1.0);
             unsafe { SetWindowTextW(t.hwnd, wide(&msg).as_ptr()) };
             t.said = (msg, t.notice.is_some());
         }
