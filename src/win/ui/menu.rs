@@ -410,8 +410,7 @@ pub fn frame(dt: f32) -> bool {
             }
             if ms > 110 && o.menus[0].fade.target > 0.0 {
                 for m in &mut o.menus {
-                    m.fade.retarget(0.0, (1.0, 0.1));
-                    m.fade.launch(0.0);
+                    m.fade.launch_as(0.0, (1.0, 0.1));
                 }
             }
             draw_all(o);
@@ -573,8 +572,7 @@ fn dismiss(o: &mut Open) {
     for m in &mut o.menus {
         m.hot = Target::None;
         // It starts going at once, from the frame after the click.
-        m.fade.retarget(0.0, (1.0, 0.12));
-        m.fade.launch(0.0);
+        m.fade.launch_as(0.0, (1.0, 0.12));
         unsafe {
             let ex = GetWindowLongW(m.hwnd, GWL_EXSTYLE) as u32;
             SetWindowLongW(m.hwnd, GWL_EXSTYLE, (ex | WS_EX_TRANSPARENT) as i32);

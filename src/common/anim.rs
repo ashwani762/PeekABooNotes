@@ -45,12 +45,22 @@ impl Spring {
     /// damped spring would leave with, so it moves from the first frame and slows from
     /// there, with no slow first step and a leap in the second (a spring let go from rest
     /// moves 2.2 times as far in its second frame as in its first). Already moving, it
-    /// keeps its speed, as `to` does.
+    /// keeps its speed, as `to` does; and asked again for the target it has, it does
+    /// nothing (called every frame, a kick each time it slowed near its end would have
+    /// drawn that end out).
     pub fn launch(&mut self, target: f32) {
+        let new = target != self.target;
         self.target = target;
-        if self.velocity.abs() < self.eps * 8.0 {
+        if new && self.velocity.abs() < self.eps * 8.0 {
             self.velocity = (target - self.value) * PI / self.response;
         }
+    }
+
+    /// `launch`, with new damping and response.
+    pub fn launch_as(&mut self, target: f32, params: (f32, f32)) {
+        self.damping = params.0;
+        self.response = params.1;
+        self.launch(target);
     }
 
     pub fn retarget(&mut self, target: f32, params: (f32, f32)) {
@@ -227,6 +237,40 @@ pub fn set_reduced_motion(on: bool) {
 
 pub fn reduced() -> bool {
     REDUCED.with(|r| r.get())
+}
+
+/// A fade out over a set time that comes to nothing exactly at its end, never leaving a
+/// faint remainder to be cut (a spring only nears its end: a window hidden once it was
+/// faint enough vanished from 2 to 5 levels of 255 in one frame). It falls fastest at
+/// first and eases into its end, the last steps a level or two.
+#[derive(Clone, Copy, Debug)]
+pub struct FadeOut {
+    from: f32,
+    t: f32,
+    dur: f32,
+}
+
+impl FadeOut {
+    /// From opacity `from`, over `dur` seconds.
+    pub fn new(from: f32, dur: f32) -> FadeOut {
+        FadeOut { from, t: 0.0, dur: dur.max(1e-3) }
+    }
+
+    /// `dt` seconds on: the opacity now.
+    pub fn step(&mut self, dt: f32) -> f32 {
+        self.t = (self.t + dt).min(self.dur);
+        self.value()
+    }
+
+    pub fn value(&self) -> f32 {
+        let k = 1.0 - self.t / self.dur;
+        self.from * k * k
+    }
+
+    /// Faded to nothing.
+    pub fn done(&self) -> bool {
+        self.t >= self.dur
+    }
 }
 
 /// Linear interpolation helpers.
@@ -504,6 +548,36 @@ mod spring_tests {
                 assert!(launched.len() <= from_rest.len() + 2, "{params:?} at {hz} Hz");
             }
         }
+    }
+
+    #[test]
+    fn a_fade_out_comes_to_nothing_smoothly_and_on_time() {
+        for hz in [60.0f32, 99.99, 144.0] {
+            let mut f = super::FadeOut::new(1.0, 0.12);
+            let mut levels = vec![255.0];
+            while !f.done() {
+                levels.push((f.step(1.0 / hz) * 255.0).round());
+            }
+            // Down to exactly nothing, each step no bigger than the one before, and the
+            // last ones a level or two: nothing left over to cut.
+            assert_eq!(*levels.last().unwrap(), 0.0);
+            let steps: Vec<f32> = levels.windows(2).map(|w| w[0] - w[1]).collect();
+            assert!(steps.windows(2).all(|w| w[1] <= w[0] + 1.0), "{hz} Hz: {levels:?}");
+            assert!(steps[steps.len() - 1] <= 3.0, "{hz} Hz: {levels:?}");
+            assert!(levels.len() as f32 <= 0.12 * hz + 2.0);
+        }
+    }
+
+    #[test]
+    fn launching_again_for_the_same_target_changes_nothing() {
+        let mut sp = Spring::px(0.0, (1.0, 0.32));
+        sp.launch(100.0);
+        for _ in 0..30 {
+            sp.step(1.0 / 60.0);
+        }
+        let v = sp.velocity;
+        sp.launch(100.0);
+        assert_eq!(sp.velocity, v);
     }
 
     #[test]

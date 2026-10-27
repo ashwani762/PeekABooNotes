@@ -426,8 +426,9 @@ fn probe_motion_steps() {
         warm(&mut d);
         out += &format!(" {hz} Hz, cold: fanning out and warming up {:.2} ms\n", t0.elapsed().as_secs_f64() * 1000.0);
         out += &show("fan out", &steps(&mut d, &base, hz));
-        d.hover = Hit::Tab(1);
-        begin_preview(&mut d, 1);
+        // The running plan: a body longer than a card can show.
+        d.hover = Hit::Tab(5);
+        begin_preview(&mut d, 5);
         out += &show("peek", &steps(&mut d, &base, hz));
         d.hover = Hit::None;
         set_open(&mut d, false, false);

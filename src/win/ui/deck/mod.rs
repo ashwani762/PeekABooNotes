@@ -41,6 +41,7 @@ mod layout;
 mod draw;
 mod keys;
 mod fullscreen;
+mod fader;
 #[cfg(test)]
 mod probe;
 use layout::*;
@@ -69,6 +70,11 @@ const PREVIEW_MAX: f32 = 300.0; // tallest a pulled-out card grows for its previ
 const BULGE: f32 = 14.0;
 const LEAN: f32 = -0.022; // radians; cards lean very slightly, like a deck of index cards
 const PULL_GAP: f32 = 18.0; // gap between the screen edge and a pulled-out card
+/// How a card comes out of the deck and goes back: a touch under critical damping, it
+/// lands within a pixel in about 0.3 s where a critically damped spring crept the last
+/// few pixels a pixel at a time for a quarter of a second more (its overshoot, 0.15%, is
+/// under half a pixel).
+const PEEK: (f32, f32) = (0.9, 0.28);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Hit {
@@ -125,10 +131,10 @@ impl Tab {
             delay: 0.0,
             reveal_goal: 0.0,
             bulge: Spring::px(0.0, motion::SNAPPY),
-            lean: Spring::unit(LEAN, motion::DEFAULT),
+            lean: Spring::unit(LEAN, PEEK),
             y: Spring::px(y, motion::DEFAULT),
             press: Spring::unit(1.0, motion::SNAPPY),
-            pull: Spring::unit(0.0, motion::DEFAULT),
+            pull: Spring::unit(0.0, PEEK),
             cap: Spring::px(0.0, motion::DEFAULT),
             born: Spring::fade(1.0, (0.75, 0.34)),
             fitted: None,
@@ -302,10 +308,15 @@ pub fn monitor_geo() -> (RECT, f32) {
 }
 
 /// The deck is going to another display, or the other edge: fold it at once and fade the
-/// pill in there, rather than have it blink from one place to the other (with Reduce
-/// Motion too: it moves nothing).
+/// pill in there, while what was on screen fades out where it was, rather than have it
+/// blink from one place to the other (with Reduce Motion too: it moves nothing).
 pub fn arrive() {
     with(|d| {
+        if d.visible && !d.hiding
+            && let Some(c) = d.canvas.as_mut()
+        {
+            fader::start(d.hwnd, c);
+        }
         set_open(d, false, true);
         d.pill.snap(0.0);
         d.pill.to(1.0);
@@ -383,6 +394,7 @@ pub fn create() {
 }
 
 pub fn shutdown() {
+    fader::close();
     // Taken out first, so no frame still in flight draws it back; its canvas and fonts go with it.
     if let Some(d) = DECK.with(|d| d.borrow_mut().take()) {
         unsafe {
@@ -447,6 +459,7 @@ pub fn frame(dt: f32) -> bool {
         (moving || d.marquee_live, folded)
     })
     .unwrap_or((false, false));
+    let more = fader::frame(dt) | more;
     if folded {
         // What the cards' text took (Direct2D, fonts, layouts) goes back to Windows once
         // the deck has rested folded for a moment, as it does when a window closes.
@@ -887,6 +900,9 @@ fn menu_for(d: &mut Deck, hit: Hit, by_key: bool) -> Action {
 
 fn begin_preview(d: &mut Deck, i: usize) {
     measure_body(d, i);
+    // The title's font too, before the frames: made in the first frame the text shows,
+    // it cost that frame a refresh, and the card caught up 6 px the next.
+    font(d, 1, 15.0, FW_SEMIBOLD as i32);
     for (j, t) in d.tabs.iter_mut().enumerate() {
         t.pull.to(if j == i { 1.0 } else { 0.0 });
     }
