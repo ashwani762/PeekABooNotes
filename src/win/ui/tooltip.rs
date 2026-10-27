@@ -19,7 +19,7 @@ use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::win::app;
-use crate::win::render::anim::{self, Client, Spring, clamp01};
+use crate::win::render::anim::{self, Client, FadeOut, Spring, clamp01};
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::win::theme;
 use crate::win::util::{rect, wide};
@@ -34,8 +34,8 @@ const WARM_MS: u128 = 900;
 /// message loop runs no frames, and would hold it half faded over the dialog).
 const T_GONE: usize = 2;
 const GONE_MS: u32 = 120;
-/// How quickly it fades out (in, it fades as a menu does).
-const OUT: (f32, f32) = (1.0, 0.09);
+/// How long it takes to fade out, to nothing (in, it fades as a menu does).
+const OUT_S: f32 = 0.12;
 const IN: (f32, f32) = (1.0, 0.12);
 /// How it slides to the next button.
 const SLIDE: (f32, f32) = (1.0, 0.16);
@@ -61,6 +61,8 @@ struct Tip {
     shown: bool,
     hidden_at: Option<Instant>,
     fade: Spring,
+    /// Fading out: to nothing, on time (see `FadeOut`), then hidden.
+    out: Option<FadeOut>,
     /// Where the card is (its window's top-left) and how wide, sliding to the next
     /// button's tip.
     at: (Spring, Spring),
@@ -130,6 +132,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 shown: false,
                 hidden_at: None,
                 fade: Spring::fade(0.0, IN),
+                out: None,
                 at: (Spring::px(0.0, SLIDE), Spring::px(0.0, SLIDE)),
                 width: Spring::px(0.0, SLIDE),
                 was: None,
@@ -255,8 +258,9 @@ fn go_away(t: &mut Tip) {
     if t.shown {
         t.shown = false;
         t.hidden_at = Some(Instant::now());
-        t.fade.retarget(0.0, OUT);
-        t.fade.launch(0.0);
+        // From the first frame, to nothing: a spring's tail left a faint card a few
+        // frames that was then cut.
+        t.out = Some(FadeOut::new(clamp01(t.fade.value), OUT_S));
         anim::wake(Client::Tip);
     }
 }
@@ -331,6 +335,8 @@ fn show(t: &mut Tip, swap: bool) {
     t.shown = true;
     t.showing = (t.label.clone(), t.keys.clone());
     unsafe { KillTimer(t.hwnd, T_GONE) };
+    // Back while fading out: from where the fade had got to.
+    t.out = None;
     t.fade.retarget(1.0, IN);
     render(t);
     // Above everything, pinned notes included.
@@ -378,7 +384,18 @@ pub fn frame(dt: f32) -> bool {
         if t.swap.value >= 0.999 {
             t.was = None;
         }
-        if !t.shown && t.fade.value < 0.02 {
+        if let Some(out) = t.out.as_mut() {
+            let a = out.step(dt);
+            let done = out.done();
+            let was = t.fade.value;
+            t.fade.snap(a);
+            // Hidden once a frame of nothing has been shown, not cut from the faint last one.
+            if done && was <= 0.0 {
+                hide(t);
+                return false;
+            }
+            moving = true;
+        } else if !t.shown && t.fade.value < 0.002 {
             hide(t);
             return false;
         }
@@ -395,6 +412,7 @@ fn hide(t: &mut Tip) {
         ShowWindow(t.hwnd, SW_HIDE);
     }
     t.fade.snap(0.0);
+    t.out = None;
     t.canvas = None;
     t.was = None;
 }

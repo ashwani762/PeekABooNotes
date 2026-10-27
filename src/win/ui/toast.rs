@@ -189,20 +189,16 @@ fn settle(t: &mut Toast) {
             t.alive = true;
             t.size = measure(t);
             // It rises at once, from the first frame, rather than easing off.
-            t.rise.retarget(1.0, theme::motion::MOMENTUM);
-            t.rise.launch(1.0);
-            t.shown.retarget(1.0, (1.0, 0.24));
-            t.shown.launch(1.0);
+            t.rise.launch_as(1.0, theme::motion::MOMENTUM);
+            t.shown.launch_as(1.0, (1.0, 0.24));
             unsafe { SetWindowTextW(t.hwnd, wide(&msg).as_ptr()) };
             t.said = (msg, t.notice.is_some());
         }
         None => {
             // It sinks away at once, quicker than it rose.
             t.alive = false;
-            t.rise.retarget(0.0, (1.0, 0.22));
-            t.rise.launch(0.0);
-            t.shown.retarget(0.0, (1.0, 0.18));
-            t.shown.launch(0.0);
+            t.rise.launch_as(0.0, (1.0, 0.22));
+            t.shown.launch_as(0.0, (1.0, 0.18));
         }
     }
 }
