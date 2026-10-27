@@ -546,7 +546,10 @@ fn fly_home(h: HWND) {
     }
     let Some((r, color, content)) = snapshot(h) else { return };
     if content.title == t!("note_untitled") && content.body.is_empty() {
-        return; // an empty note simply vanishes
+        // Nothing to take home: it fades where it is, as an archived note does, rather
+        // than vanishing in a frame.
+        sink(r, color, content, st.s);
+        return;
     }
     let home = crate::win::ui::deck::home_rect(id);
     crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Close, (r, 8.0 * st.s), home, color, content, None);
@@ -556,9 +559,14 @@ fn fly_home(h: HWND) {
 pub fn dissolve(h: HWND) {
     let Some(st) = state(h) else { return };
     let Some((r, color, content)) = snapshot(h) else { return };
+    sink(r, color, content, st.s);
+}
+
+/// A card that sinks and fades where a window at `r` (at scale `s`) was.
+fn sink(r: RECT, color: u8, content: crate::win::ui::ghost::Content, s: f32) {
     let (w, hh) = (r.right - r.left, r.bottom - r.top);
     let to = RECT { left: r.left + w / 20, top: r.top + hh / 12, right: r.right - w / 20, bottom: r.bottom - hh / 40 };
-    crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Dissolve, (r, 8.0 * st.s), (to, 8.0 * st.s), color, content, None);
+    crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Dissolve, (r, 8.0 * s), (to, 8.0 * s), color, content, None);
 }
 
 /// Fade header controls for every note that is mid-transition.
