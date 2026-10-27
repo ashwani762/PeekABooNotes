@@ -317,6 +317,9 @@ struct Lib {
     /// taken as it closed, for that.
     old_detail: Option<(RECT, Vec<u32>)>,
     editor_pic: Option<(RECT, crate::win::render::gfx::Image)>,
+    /// Rows or the card just changed: the next frame steps one refresh, however long the
+    /// work that changed them (a delete, an undo) kept the frames waiting.
+    fresh: bool,
     /// The list before a switch to Notes, Archive or All, as it was on screen (its rect
     /// and pixels), cross-fading into the new one.
     old_list: Option<(RECT, Vec<u32>)>,
@@ -601,6 +604,7 @@ fn swap_detail(l: &mut Lib) {
     }
     l.detail_a.snap(0.0);
     l.detail_a.launch(1.0);
+    l.fresh = true;
 }
 
 /// The selection's colour as it shows now, for the note at row `i`.
@@ -618,6 +622,7 @@ pub fn frame(dt: f32) -> bool {
         if l.last_scroll.elapsed().as_secs_f32() > 0.9 {
             l.bar_a.to(0.0);
         }
+        let dt = if std::mem::take(&mut l.fresh) { dt.min(anim::period()) } else { dt };
         let mut moving = false;
         for sp in [&mut l.seg_x, &mut l.scroll, &mut l.hover_y, &mut l.hover_a, &mut l.list_a, &mut l.detail_a, &mut l.bar_a, &mut l.sel_k] {
             moving |= sp.step(dt);
@@ -972,6 +977,7 @@ fn on_create(hwnd: HWND) {
         sel_last: None,
         old_detail: None,
         editor_pic: None,
+        fresh: false,
         old_list: None,
     };
     lib.list_a.to(1.0);

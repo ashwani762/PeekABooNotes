@@ -125,6 +125,7 @@ fn close_gaps(l: &mut Lib, before: &std::collections::HashMap<u64, usize>, gone:
         l.leaving.push(Leaving { row, at, fade: FadeOut::new(1.0, LEAVE_S), selected: was == Some(id) });
         l.hold = LEAVE_S;
     }
+    l.fresh = true;
     anim::wake(Client::List);
 }
 
