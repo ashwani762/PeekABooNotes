@@ -345,6 +345,9 @@ struct Win {
     /// Keys let go after a shortcut got its keys go nowhere (Alt's would open the window
     /// menu), until no modifier is held.
     eat_keys: bool,
+    /// The page before a switch, as it was on screen (its rect and pixels), cross-fading
+    /// into the new one.
+    old_page: Option<(RECT, Vec<u32>)>,
 }
 
 /// The shown page's rows. Building them formats every label, counts the notes and looks
@@ -780,7 +783,12 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         }
         Key::HideUnpinned => app::update_settings(|s| s.keep_open = v == 0),
         Key::ShowDeck => app::update_settings(|s| s.deck_hidden = v == 0),
-        Key::Edge => app::update_settings(|s| s.edge_left = v == 0),
+        Key::Edge => {
+            if app::store(|s| s.d.settings.edge_left) != (v == 0) {
+                crate::win::ui::deck::arrive();
+            }
+            app::update_settings(|s| s.edge_left = v == 0)
+        }
         Key::Cards => app::update_settings(|s| s.deck_max = CARDS[v.min(2)]),
         Key::NewAt => app::update_settings(|s| s.new_on_top = v == 0),
         Key::Fullscreen => app::update_settings(|s| s.over_fullscreen = v == 1),
@@ -856,7 +864,9 @@ fn sync_knobs(w: &mut Win) {
     let keys: Vec<Key> = groups(w).iter().flat_map(|g| g.rows.iter().filter_map(|r| r.key)).collect();
     for k in keys {
         let v = value(w, k) as f32;
-        w.knobs.entry(k).or_insert_with(|| Spring::unit(v, (0.86, 0.3))).to(v);
+        // With Reduce Motion a control cross-fades to its new value rather than sliding
+        // there (see `draw_ctl`), over the same time.
+        w.knobs.entry(k).or_insert_with(|| Spring::fade(v, (0.86, 0.3))).to(v);
     }
 }
 
@@ -940,7 +950,7 @@ fn on_create(hwnd: HWND) {
         side_y: Spring::px(0.0, motion::MOMENTUM),
         hover_y: Spring::px(0.0, (1.0, 0.16)),
         hover_a: Spring::unit(0.0, motion::SNAPPY),
-        page_a: Spring::unit(1.0, motion::DEFAULT),
+        page_a: Spring::fade(1.0, motion::DEFAULT),
         press: Spring::unit(0.0, motion::SNAPPY),
         result: None,
         result_a: Spring::unit(0.0, motion::DEFAULT),
@@ -950,6 +960,7 @@ fn on_create(hwnd: HWND) {
         edit: Edit::default(),
         held: 0,
         eat_keys: false,
+        old_page: None,
     };
     sync_knobs(&mut w);
     WIN.with(|c| *c.borrow_mut() = Some(w));
@@ -961,13 +972,18 @@ fn set_page(w: &mut Win, i: usize) {
         return;
     }
     w.page = i;
+    // The page as it shows now cross-fades into the new one, which settles into place.
+    w.old_page = w.canvas.as_mut().map(|c| {
+        let r = rect((SIDE_W * w.s) as i32, 0, c.w - (SIDE_W * w.s) as i32, c.h);
+        (r, c.copy_out(r))
+    });
     w.scroll.snap(0.0);
     w.side_y.to(i as f32 * SIDE_ROW * w.s);
     // Controls on the new page appear at their values; only the page itself moves.
     w.knobs.clear();
     sync_knobs(w);
     w.page_a.snap(0.0);
-    w.page_a.to(1.0);
+    w.page_a.launch(1.0);
     anim::wake(Client::Settings);
 }
 
@@ -979,6 +995,9 @@ pub fn frame(dt: f32) -> bool {
         }
         for sp in w.knobs.values_mut() {
             moving |= sp.step(dt);
+        }
+        if w.page_a.value >= 0.999 {
+            w.old_page = None;
         }
         (moving, w.hwnd)
     });

@@ -292,9 +292,31 @@ struct Lib {
     editor_id: u64,
     /// A row being dragged to a new place (Notes view only).
     drag: Option<ListDrag>,
-    /// Rows' visual offsets while they make room for a dragged row, by note id.
+    /// Rows' visual offsets while they make room for a dragged row, or close the gap a
+    /// row left (or open one for a row that came), by note id.
     offs: std::collections::HashMap<u64, Spring>,
+    /// The mode and search the rows were last made for: rows are only seen to leave and
+    /// come within one list.
+    listed: (usize, String),
+    /// Rows that just left the list (archived, deleted), fading where they were as the
+    /// rows below close up over them.
+    leaving: Vec<Leaving>,
+    /// Rows that just came into it (an undo), fading in as the rows below make room.
+    arriving: std::collections::HashMap<u64, Spring>,
+    /// The list before a switch to Notes, Archive or All, as it was on screen (its rect
+    /// and pixels), cross-fading into the new one.
+    old_list: Option<(RECT, Vec<u32>)>,
 }
+
+/// A row that left the list, and the place it had.
+struct Leaving {
+    row: Row,
+    at: usize,
+    fade: Spring,
+}
+
+/// How rows close a gap or open one, and the selection with them.
+const GAP: (f32, f32) = (0.9, 0.3);
 
 struct ListDrag {
     id: u64,
@@ -548,6 +570,17 @@ pub fn frame(dt: f32) -> bool {
         }
         for sp in l.offs.values_mut() {
             moving |= sp.step(dt);
+        }
+        for g in l.leaving.iter_mut() {
+            moving |= g.fade.step(dt);
+        }
+        l.leaving.retain(|g| g.fade.value > 0.002);
+        for sp in l.arriving.values_mut() {
+            moving |= sp.step(dt);
+        }
+        l.arriving.retain(|_, sp| sp.value < 0.998);
+        if l.list_a.value >= 0.999 {
+            l.old_list = None;
         }
         (moving || l.bar_a.value > 0.01, l.hwnd)
     });
@@ -834,7 +867,7 @@ fn on_create(hwnd: HWND) {
         sel_y: Spring::px(0.0, (0.9, 0.3)),
         hover_y: Spring::px(0.0, (1.0, 0.16)),
         hover_a: Spring::unit(0.0, motion::SNAPPY),
-        list_a: Spring::unit(0.0, motion::DEFAULT),
+        list_a: Spring::fade(0.0, motion::DEFAULT),
         detail_a: Spring::unit(0.0, motion::DEFAULT),
         bar_a: Spring::unit(0.0, motion::DEFAULT),
         last_scroll: now,
@@ -844,6 +877,10 @@ fn on_create(hwnd: HWND) {
         editor_id: 0,
         drag: None,
         offs: std::collections::HashMap::new(),
+        listed: (usize::MAX, String::new()),
+        leaving: Vec::new(),
+        arriving: std::collections::HashMap::new(),
+        old_list: None,
     };
     lib.list_a.to(1.0);
     LIB.with(|l| *l.borrow_mut() = Some(lib));
@@ -1367,6 +1404,21 @@ mod tests {
         assert!(editors_key_is_ours(VK_TAB, true, false, || false));
         assert!(editors_key_is_ours(VK_TAB, false, false, || true));
         assert!(!editors_key_is_ours(VK_TAB, false, false, || false), "Tab in the text indents");
+    }
+
+    /// The preview finds where the editor sets a note's lines: the title at the top, the
+    /// body below it, one-line paragraphs a reading line and its space after apart, more
+    /// at a larger scale.
+    #[test]
+    fn the_preview_paces_its_lines_as_the_editor_does() {
+        unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide("Msftedit.dll").as_ptr()) };
+        crate::win::editor::rich::set_typography(0, 1);
+        let (title, first, step) = editor::editor_pace(1.0).expect("measured");
+        assert!(title.abs() < 1.0, "{title}");
+        assert!(first > 20.0 && first < 60.0, "{first}");
+        assert!(step > 18.0 && step < 40.0, "{step}");
+        let (_, first2, step2) = editor::editor_pace(2.0).expect("measured");
+        assert!((first2 - 2.0 * first).abs() < 3.0 && (step2 - 2.0 * step).abs() < 3.0, "{first2} {step2}");
     }
 
     #[test]

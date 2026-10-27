@@ -13,8 +13,14 @@ pub(super) fn set_mode(l: &mut Lib, mode: usize) {
         }
         l.mode = mode;
         l.seg_x.to(mode as f32);
+        // The list as it shows now cross-fades into the new one, which settles into place.
+        let lay = layout(l);
+        l.old_list = l.canvas.as_mut().map(|c| {
+            let r = rect(0, lay.list_top as i32, (lay.list_w as i32).min(c.w), c.h - lay.list_top as i32);
+            (r, c.copy_out(r))
+        });
         l.list_a.snap(0.0);
-        l.list_a.to(1.0);
+        l.list_a.launch(1.0);
         l.scroll.snap(0.0);
         l.sel.clear();
         rebuild(l);
@@ -28,6 +34,9 @@ pub(super) fn rebuild(l: &mut Lib) {
     let mode = l.mode;
     // When the selected note goes (archived, deleted), select its neighbour, not the top.
     let was = primary_index(l);
+    let before: std::collections::HashMap<u64, usize> = l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
+    let same_list = l.listed == (mode, l.query.clone()) && l.drag.is_none();
+    l.listed = (mode, l.query.clone());
     let prev: std::collections::HashMap<u64, usize> = if editor_focused(l) { l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect() } else { Default::default() };
     // The last list's titles and previews, taken again for the notes they're still right
     // for: a search keystroke made every row anew (a preview is most of a row's cost).
@@ -43,7 +52,7 @@ pub(super) fn rebuild(l: &mut Lib) {
             .filter_map(|n| row_again(n, &q, searching, last.remove(&n.id)))
             .collect()
     });
-    drop(last);
+    // What's left of the last list is the rows that have gone from it.
     if searching && !editor_focused(l) {
         // Best matches first; among equals, the most recently edited.
         rows.sort_by(|a, b| b.score.cmp(&a.score).then(b.updated.cmp(&a.updated)));
@@ -62,6 +71,12 @@ pub(super) fn rebuild(l: &mut Lib) {
         0
     };
     l.rows = rows;
+    if same_list {
+        close_gaps(l, &before, last);
+    } else {
+        l.leaving.clear();
+        l.arriving.clear();
+    }
     l.sel.retain(|id| l.rows.iter().any(|r| r.id == *id));
     if l.sel.is_empty() {
         let near = was.unwrap_or(0).min(l.rows.len().saturating_sub(1));
@@ -70,8 +85,10 @@ pub(super) fn rebuild(l: &mut Lib) {
             l.anchor = Some(r.id);
             l.detail_a.snap(0.0);
             l.detail_a.to(1.0);
+            // From where its row is drawn now (still where it was, about to close the gap).
+            let off = l.offs.get(&r.id).map_or(0.0, |sp| sp.value);
             let lay = layout(l);
-            l.sel_y.snap(lay.list_top + near as f32 * lay.row_h);
+            l.sel_y.snap(lay.list_top + near as f32 * lay.row_h + off);
         }
     }
     if let Some(i) = primary_index(l) {
@@ -80,6 +97,59 @@ pub(super) fn rebuild(l: &mut Lib) {
     }
     clamp_scroll(l);
     anim::wake(Client::List);
+}
+
+/// Rows left the list (`gone`, from what was at `before`) or came into it: those that
+/// stayed move from where they were drawn to their new places, closing the gaps or
+/// opening them; a row that left fades where it was, and one that came fades in. A
+/// reordering (the same rows) moves nothing here: the drag that made it already has.
+fn close_gaps(l: &mut Lib, before: &std::collections::HashMap<u64, usize>, gone: std::collections::HashMap<u64, Row>) {
+    let now: Vec<u64> = l.rows.iter().map(|r| r.id).collect();
+    let (moved, came) = shifts(before, &now);
+    if gone.is_empty() && came.is_empty() {
+        return;
+    }
+    let lay = layout(l);
+    for (id, rows) in moved {
+        let from = l.offs.get(&id).map_or(0.0, |sp| sp.value) + rows as f32 * lay.row_h;
+        let mut sp = Spring::px(from, GAP);
+        sp.to(0.0);
+        l.offs.insert(id, sp);
+    }
+    for id in came {
+        let mut sp = Spring::fade(0.0, (1.0, 0.3));
+        sp.to(1.0);
+        l.arriving.insert(id, sp);
+    }
+    for (id, row) in gone {
+        let Some(&at) = before.get(&id) else { continue };
+        l.offs.remove(&id);
+        let mut fade = Spring::fade(1.0, (1.0, 0.16));
+        fade.launch(0.0);
+        l.leaving.push(Leaving { row, at, fade });
+    }
+    anim::wake(Client::List);
+}
+
+/// For the list `now` (note ids) after the list whose places were `before`: each row that
+/// moved, with how many rows below its new place it was (up is negative), and the rows
+/// that came.
+fn shifts(before: &std::collections::HashMap<u64, usize>, now: &[u64]) -> (Vec<(u64, isize)>, Vec<u64>) {
+    let mut moved = Vec::new();
+    let mut came = Vec::new();
+    for (i, id) in now.iter().enumerate() {
+        match before.get(id) {
+            Some(&was) if was != i => moved.push((*id, was as isize - i as isize)),
+            Some(_) => {}
+            None => came.push(*id),
+        }
+    }
+    (moved, came)
+}
+
+/// Whether rows are still closing or opening a gap (the inline editor waits for them).
+pub(super) fn gaps_moving(l: &Lib) -> bool {
+    !l.leaving.is_empty() || !l.arriving.is_empty() || l.offs.values().any(|sp| !sp.settled())
 }
 
 /// Note `n`'s row, or None when a search is on and it doesn't match.
@@ -322,5 +392,33 @@ pub(super) fn click(l: &mut Lib, hit: Hit) -> Action {
         Hit::Min => Action::Min,
         Hit::Max => Action::MaxToggle,
         _ => Action::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shifts;
+
+    fn places(ids: &[u64]) -> std::collections::HashMap<u64, usize> {
+        ids.iter().enumerate().map(|(i, id)| (*id, i)).collect()
+    }
+
+    #[test]
+    fn rows_below_one_that_left_close_up_from_where_they_were() {
+        // 3 deleted: 4 and 5, a row lower than they are now, slide up a row.
+        let (moved, came) = shifts(&places(&[1, 2, 3, 4, 5]), &[1, 2, 4, 5]);
+        assert_eq!(moved, vec![(4, 1), (5, 1)]);
+        assert!(came.is_empty());
+        // Two gone at once, one above the other.
+        let (moved, _) = shifts(&places(&[1, 2, 3, 4, 5]), &[2, 4, 5]);
+        assert_eq!(moved, vec![(2, 1), (4, 2), (5, 2)]);
+    }
+
+    #[test]
+    fn a_row_that_came_back_opens_a_gap_for_itself() {
+        // 3 restored: it fades in where the rows below it were, and they slide down.
+        let (moved, came) = shifts(&places(&[1, 2, 4, 5]), &[1, 2, 3, 4, 5]);
+        assert_eq!(moved, vec![(4, -1), (5, -1)]);
+        assert_eq!(came, vec![3]);
     }
 }

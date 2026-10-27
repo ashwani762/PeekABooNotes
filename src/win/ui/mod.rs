@@ -35,19 +35,27 @@ use crate::win::util::{mix, rect};
 /// the height used and whether all of it fitted.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_body(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32) -> (i32, bool) {
-    body_pass(Some(c), body, f, r, color, dark, alpha, s)
+    body_pass(Some(c), body, f, r, color, dark, alpha, s, None)
+}
+
+/// `draw_body` as the note's editor sets it: `gap` pixels after each paragraph (its
+/// rhythm), in the editor's ink rather than the lighter preview ink.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_body_paced(c: &mut Canvas, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32, gap: i32) -> (i32, bool) {
+    body_pass(Some(c), body, f, r, color, dark, alpha, s, Some(gap))
 }
 
 /// Height of `body` laid out by `draw_body` at width `w`.
 pub fn body_height(body: &str, f: &Font, w: i32, s: f32) -> i32 {
-    body_pass(None, body, f, crate::win::util::rect(0, 0, w, i32::MAX / 2), 0, false, 1.0, s).0
+    body_pass(None, body, f, crate::win::util::rect(0, 0, w, i32::MAX / 2), 0, false, 1.0, s, None).0
 }
 
 #[allow(clippy::too_many_arguments)]
-fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32) -> (i32, bool) {
+fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u8, dark: bool, alpha: f32, s: f32, paced: Option<i32>) -> (i32, bool) {
     let paper = crate::win::theme::paper(color, dark);
     let ink = crate::win::theme::paper_ink(color, dark);
-    let text_rgb = crate::win::theme::paper_subtext(color, dark);
+    let text_rgb = if paced.is_some() { crate::win::theme::PAPER_TEXT } else { crate::win::theme::paper_subtext(color, dark) };
+    let para_gap = paced.unwrap_or(0);
     let done_rgb = mix(text_rgb, paper, 0.3);
     let struck = f.struck();
     let line_h = (f.ascent + f.descent).max(1);
@@ -117,7 +125,7 @@ fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u
         let (font, rgb) = if task == Some(true) { (&struck, done_rgb) } else { (f, text_rgb) };
         let h = font.wrapped_height(text, w);
         let Some(c) = c.as_deref_mut() else {
-            y += h.max(line_h);
+            y += h.max(line_h) + para_gap;
             continue;
         };
         match task {
@@ -149,7 +157,7 @@ fn body_pass(mut c: Option<&mut Canvas>, body: &str, f: &Font, r: RECT, color: u
             c.text_above(text, font, crate::win::util::rect(tx, y, w, room), r.bottom, rgb, alpha, flags);
             return fade_out(Some(c), r, line_h, paper);
         }
-        y += h.max(line_h);
+        y += h.max(line_h) + para_gap;
     }
     (y - r.top, true)
 }

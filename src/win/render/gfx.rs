@@ -11,7 +11,7 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, GetClientRect, HICON, ICONINFO, ULW_ALPHA, UpdateLayeredWindow,
+    CreateIconIndirect, GetClientRect, HICON, ICONINFO, UPDATELAYEREDWINDOWINFO, ULW_ALPHA, UpdateLayeredWindow, UpdateLayeredWindowIndirect,
 };
 
 pub use crate::win::render::dw::Font;
@@ -541,6 +541,27 @@ impl Canvas {
         }
     }
 
+    /// Blend a rectangle toward `src` (its pixels, as `copy_out` took them from a rect of
+    /// the same size), keeping `a` of what's there: one picture cross-fading into another.
+    pub fn mix_in(&mut self, r: RECT, src: &[u32], a: f32) {
+        let (w, h) = (self.w, self.h);
+        let r = RECT { left: r.left.max(0), top: r.top.max(0), right: r.right.min(w), bottom: r.bottom.min(h) };
+        let rw = (r.right - r.left).max(0) as usize;
+        if a >= 0.999 || src.len() != rw * (r.bottom - r.top).max(0) as usize {
+            return;
+        }
+        let k = (a.clamp(0.0, 1.0) * 256.0) as u32;
+        let px = self.px();
+        for (n, y) in (r.top..r.bottom).enumerate() {
+            let row = (y * w) as usize + r.left as usize;
+            for (p, s) in px[row..row + rw].iter_mut().zip(&src[n * rw..(n + 1) * rw]) {
+                let (v, o) = (*p, *s);
+                let ch = |sh: u32| ((((v >> sh) & 0xFF) * k + ((o >> sh) & 0xFF) * (256 - k)) >> 8) << sh;
+                *p = ch(24) | ch(16) | ch(8) | ch(0);
+            }
+        }
+    }
+
     /// An anti-aliased disc whose colour sweeps around the centre through `stops`
     /// (a colour wheel), blended over an opaque canvas.
     pub fn conic_disc(&mut self, cx: f32, cy: f32, r: f32, stops: &[u32]) {
@@ -621,6 +642,33 @@ impl Canvas {
                 AlphaFormat: AC_SRC_ALPHA as u8,
             };
             UpdateLayeredWindow(hwnd, null_mut(), &dst, &size, self.img.dc, &src, 0, &bf, ULW_ALPHA);
+        }
+    }
+
+    /// `present`, where only `dirty` (canvas coordinates) changed since the window was last
+    /// given the canvas at the same place and size: the compositor takes just that.
+    pub fn present_dirty(&self, hwnd: HWND, x: i32, y: i32, dirty: RECT) {
+        unsafe {
+            GdiFlush();
+            let dst = POINT { x, y };
+            let size = SIZE { cx: self.w, cy: self.h };
+            let src = POINT { x: 0, y: 0 };
+            let bf = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
+            let info = UPDATELAYEREDWINDOWINFO {
+                cbSize: size_of::<UPDATELAYEREDWINDOWINFO>() as u32,
+                hdcDst: null_mut(),
+                pptDst: &dst,
+                psize: &size,
+                hdcSrc: self.img.dc,
+                pptSrc: &src,
+                crKey: 0,
+                pblend: &bf,
+                dwFlags: ULW_ALPHA,
+                prcDirty: &dirty,
+            };
+            if UpdateLayeredWindowIndirect(hwnd, &info) == 0 {
+                self.present(hwnd, x, y);
+            }
         }
     }
 

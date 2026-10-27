@@ -46,9 +46,10 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     let (cw, ch) = (c.w, c.h);
     c.clear(0xFF00_0000 | p.bg);
 
-    // Content first, so the page fade can blend it (text included) toward the background.
+    // Content first, so the page fade can blend it (text included) with the page before.
+    // It settles in whole pixels, so its text (on whole pixels) and its boxes move together.
     let a = clamp01(w.page_a.value);
-    let rise = (1.0 - a) * 8.0 * s;
+    let rise = if anim::reduced() { 0.0 } else { ((1.0 - a) * 8.0 * s).round() };
     c.begin_batch();
     let (x0, _) = content_x(w);
     let groups = groups(w);
@@ -100,7 +101,10 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     c.begin_batch();
     c.line_ct(crate::common::i18n::get(PAGES[w.page].0), &f.title, x0 as i32, (PAGE_BASE * s + rise) as i32, px(300.0), None, p.text, DT_LEFT);
     c.flush();
-    c.fade_rect(rect((SIDE_W * s) as i32, 0, cw, ch), p.bg, a);
+    match w.old_page.as_ref() {
+        Some((r, px)) if r.right == cw && r.bottom == ch => c.mix_in(*r, px, a),
+        _ => c.fade_rect(rect((SIDE_W * s) as i32, 0, cw, ch), p.bg, a),
+    }
 
     // Sidebar.
     c.begin_batch();
@@ -242,17 +246,36 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             // The knob stretches while pressed, like a finger squashing it.
             let d = sh.h - 4.0 * s;
             let kw = d + if pressed(0) { 6.0 * s * clamp01(w.press.value) } else { 0.0 };
-            let kx = sh.x + 2.0 * s + t * (sh.w - 4.0 * s - kw);
-            let k = Shape::new(kx, sh.y + 2.0 * s, kw, d, d / 2.0);
-            c.card(&k, dim(0xFFFFFF), 1.0, 0x000000, 0.04 * fade, 0.5 * fade, s);
+            let knob_at = |c: &mut Canvas, t: f32, a: f32| {
+                let kx = sh.x + 2.0 * s + t * (sh.w - 4.0 * s - kw);
+                let k = Shape::new(kx, sh.y + 2.0 * s, kw, d, d / 2.0);
+                c.card(&k, dim(0xFFFFFF), a, 0x000000, 0.04 * fade * a, 0.5 * fade * a, s);
+            };
+            if anim::reduced() && t > 0.0 && t < 1.0 {
+                // Reduce Motion: the knob fades from one end to the other.
+                knob_at(c, 0.0, 1.0 - t);
+                knob_at(c, 1.0, t);
+            } else {
+                knob_at(c, t, 1.0);
+            }
         }
         Ctl::Seg(labels) => {
             let (sh, item) = seg_metrics(w, labels, &r);
             c.shape(&sh, p.field.0, p.field.1 * fade, 1.0, 0.0);
             ring(c, &sh);
             let pos = knob.clamp(0.0, labels.len() as f32 - 1.0);
-            let pill = Shape::new(sh.x + 2.0 * s + pos * item, sh.y + 2.0 * s, item, sh.h - 4.0 * s, 6.5 * s);
-            c.card(&pill, dim(p.pill), 1.0, 0x000000, 0.04 * fade, 0.35 * fade, s);
+            let pill_at = |c: &mut Canvas, pos: f32, a: f32| {
+                let pill = Shape::new(sh.x + 2.0 * s + pos * item, sh.y + 2.0 * s, item, sh.h - 4.0 * s, 6.5 * s);
+                c.card(&pill, dim(p.pill), a, 0x000000, 0.04 * fade * a, 0.35 * fade * a, s);
+            };
+            // Reduce Motion: the pill fades from one segment to the next.
+            match (anim::reduced(), pos.fract()) {
+                (true, k) if k > 0.0 => {
+                    pill_at(c, pos.floor(), 1.0 - k);
+                    pill_at(c, pos.floor() + 1.0, k);
+                }
+                _ => pill_at(c, pos, 1.0),
+            }
             let on = row.key.map(|k| value(w, k)).unwrap_or(0);
             for (i, l) in labels.iter().enumerate() {
                 let x = (sh.x + 2.0 * s + i as f32 * item) as i32;
@@ -280,8 +303,18 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             let pos = knob.clamp(0.0, n);
             let (x, y) = swatch_x(w, &r, 0);
             let step = (SWATCH + SWATCH_GAP) * s;
-            let ring = Shape::new(x + pos * step - 3.0 * s, y - 3.0 * s, SWATCH * s + 6.0 * s, SWATCH * s + 6.0 * s, SWATCH * s / 2.0 + 3.0 * s);
-            c.shape(&ring, p.text, 0.55, 1.0, 1.6 * s);
+            let ring_at = |c: &mut Canvas, pos: f32, a: f32| {
+                let ring = Shape::new(x + pos * step - 3.0 * s, y - 3.0 * s, SWATCH * s + 6.0 * s, SWATCH * s + 6.0 * s, SWATCH * s / 2.0 + 3.0 * s);
+                c.shape(&ring, p.text, 0.55 * a, 1.0, 1.6 * s);
+            };
+            // Reduce Motion: the ring fades from one swatch to the next.
+            match (anim::reduced(), pos.fract()) {
+                (true, k) if k > 0.0 => {
+                    ring_at(c, pos.floor(), 1.0 - k);
+                    ring_at(c, pos.floor() + 1.0, k);
+                }
+                _ => ring_at(c, pos, 1.0),
+            }
             if focused {
                 let (x, y) = swatch_x(w, &r, w.swatch_k);
                 focus::ring(c, &Shape::new(x, y, SWATCH * s, SWATCH * s, SWATCH * s / 2.0), p.accent, 1.0, s);

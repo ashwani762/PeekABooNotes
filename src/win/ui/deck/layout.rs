@@ -70,14 +70,24 @@ pub(super) fn sync(d: &mut Deck) {
         // Titles and previews only for the cards there are, not for every note.
         let (title, body) = tab_texts(id);
         let i = slot;
+        let k = d.tabs.len();
         let mut t = old.remove(&id).unwrap_or_else(|| {
             let mut t = Tab::new(id, g.slot_y(i));
-            if d.open && !is_open {
+            t.cap.snap(k as f32);
+            if d.synced {
+                // A card that came into the deck (made, or back on Undo) grows in from its
+                // capsule, making room in the pill, and comes out of it if the deck is out.
+                t.born.snap(0.0);
+                t.born.to(1.0);
+            } else if d.open && !is_open {
                 t.reveal.snap(1.0);
+            }
+            if d.open && !is_open {
                 t.reveal_goal = 1.0;
             }
             t
         });
+        t.cap.to(k as f32);
         t.slot = slot;
         if !is_open {
             slot += 1;
@@ -107,6 +117,13 @@ pub(super) fn sync(d: &mut Deck) {
         d.tabs.push(t);
     }
     g.caps = d.tabs.len();
+    // The pill grows or shrinks to its capsules, and they slide to their places in it.
+    if d.synced {
+        d.caps.to(g.caps as f32);
+    } else {
+        d.caps.snap(g.caps as f32);
+    }
+    d.synced = true;
     g.ch = (g.pill_h() + 36.0 * g.s).round() as i32;
     g.cy = (g.centre - g.ch / 2).clamp(g.work.top, (g.work.bottom - g.ch).max(g.work.top));
     d.geo = g;
@@ -170,18 +187,14 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
     }
     let reopening = open && d.tabs.iter().any(|t| t.reveal.value > 0.05);
     // With Reduce Motion the springs land at once, and so does the whole cascade: no card
-    // waits its turn.
-    let together = instant || reopening || anim::reduced();
+    // waits its turn. Folding, the cards go in together, the stack shrinking into the pill
+    // as one: one after another, each card folding over the next one, smaller, left a
+    // pile of coloured scraps for a moment.
+    let together = instant || reopening || !open || anim::reduced();
     for t in d.tabs.iter_mut() {
         let i = t.slot;
         t.reveal_goal = if open && !t.open { 1.0 } else { 0.0 };
-        t.delay = if together {
-            0.0
-        } else if open {
-            i as f32 * motion::STAGGER_S
-        } else {
-            (n.saturating_sub(1 + i)) as f32 * motion::STAGGER_S * 0.45
-        };
+        t.delay = if together { 0.0 } else { i as f32 * motion::STAGGER_S };
         if !open {
             t.pull.to(0.0);
             t.bulge.to(0.0);
@@ -192,7 +205,9 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         }
     }
     d.extras_goal = if open { 1.0 } else { 0.0 };
-    d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S } else { 0.0 };
+    // The plus button comes out from under the last card once that card is most of the
+    // way to its place.
+    d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S + 0.12 } else { 0.0 };
     d.pill.to(if open { 0.0 } else { 1.0 });
     if instant {
         d.extras.snap(d.extras_goal);
@@ -215,13 +230,14 @@ pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
             moving = true;
         }
         if t.delay <= 0.0 && t.reveal.target != t.reveal_goal {
-            t.reveal.to(t.reveal_goal);
+            t.reveal.launch(t.reveal_goal);
         }
         if d.open {
             let hot = hover == Hit::Tab(i) || drag_idx == Some(i);
             let near = matches!(hover, Hit::Tab(h) if h.abs_diff(i) == 1) && t.pull.target < 0.5;
-            t.bulge.to(if hot { BULGE * s } else if near { 4.0 * s } else { 0.0 });
-            t.lean.to(if hot || t.pull.target > 0.5 { 0.0 } else { LEAN });
+            // The pointed-at tab lifts from the first frame the pointer is on it.
+            t.bulge.launch(if hot { BULGE * s } else if near { 4.0 * s } else { 0.0 });
+            t.lean.launch(if hot || t.pull.target > 0.5 { 0.0 } else { LEAN });
         }
         for sp in t.springs() {
             moving |= sp.step(dt);
@@ -236,7 +252,7 @@ pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
     }
     d.plus_hot.to(if d.hover == Hit::Plus { 1.0 } else { 0.0 });
     d.more_hot.to(if d.hover == Hit::More { 1.0 } else { 0.0 });
-    for sp in [&mut d.pill, &mut d.extras, &mut d.plus_hot, &mut d.more_hot] {
+    for sp in [&mut d.pill, &mut d.caps, &mut d.extras, &mut d.plus_hot, &mut d.more_hot] {
         moving |= sp.step(dt);
     }
     moving
@@ -267,7 +283,7 @@ pub(super) fn pose(d: &Deck, i: usize, w: i32, origin_y: f32) -> CardPose {
     }
     // Capsule (p = 0) in the same coordinates: the pill sits PILL_INSET from the edge.
     let cap_near = (PILL_INSET + (PILL_W - CAP_W) / 2.0) * s;
-    let cap_top = g.pill_top() - origin_y + ((PILL_W - CAP_W) / 2.0) * s + i as f32 * (CAP_H + CAP_GAP) * s;
+    let cap_top = g.pill_top_for(d.caps.value) - origin_y + ((PILL_W - CAP_W) / 2.0) * s + t.cap.value * (CAP_H + CAP_GAP) * s;
     let near = lerp(cap_near, out - CARD_W * s, p);
     let far = lerp(cap_near + CAP_W * s, out, p);
     let (x, wd) = span(g, w, near, far);

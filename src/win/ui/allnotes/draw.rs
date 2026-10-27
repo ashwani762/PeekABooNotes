@@ -111,10 +111,14 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     }
 
     // List.
+    // Rows, their highlights and their text all go on whole pixels, so that as they move
+    // (gliding, closing a gap) the text, put down on whole pixels, keeps to its row.
     let top = lay.list_top;
     let bottom = lay.h as f32;
-    let la = clamp01(l.list_a.value);
-    let slide = (1.0 - l.list_a.value) * 10.0 * s;
+    // Switching lists, the new one is drawn whole and cross-fades with the one before
+    // (below); opening, it fades in from the window's colour.
+    let la = if l.old_list.is_some() { 1.0 } else { clamp01(l.list_a.value) };
+    let slide = if anim::reduced() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
     let clip = Some(rect(0, top as i32, lay.list_w as i32, lay.h - top as i32));
     if l.rows.is_empty() {
         let (headline, sub) = if !l.query.is_empty() {
@@ -151,14 +155,14 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // Only on a row that is there: a search can shrink the list under a resting pointer.
     let hover_row = ((l.hover_y.target - lay.list_top) / lay.row_h).round();
     if l.hover_a.value > 0.01 && hover_row >= 0.0 && (hover_row as usize) < l.rows.len() {
-        let y = l.hover_y.value - l.scroll.value + slide;
+        let y = (l.hover_y.value - l.scroll.value + slide).round();
         if y + lay.row_h > top && y < bottom {
             c.shape(&row_shape(y), p.hover.0, p.hover.1 * l.hover_a.value * la, 1.0, 0.0);
         }
     }
     if ring == Some(Focus::List) && primary_index(l).is_some() {
         // Around the selected row, while it's clear of the header above the list.
-        let y = l.sel_y.value - l.scroll.value + slide;
+        let y = (l.sel_y.value - l.scroll.value + slide).round();
         if y >= top && y < bottom {
             focus::ring(c, &Shape::new(row_x, y, row_w, lay.row_h - 2.0 * s, 10.0 * s), p.focus, la, s);
         }
@@ -170,24 +174,46 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     for i in range.clone() {
         let r = &l.rows[i];
         if l.sel.contains(&r.id) && Some(r.id) != primary {
-            c.shape(&row_shape(row_y(l, lay, i) + slide), theme::paper(r.color, dark), la, 1.0, 0.0);
+            c.shape(&row_shape((row_y(l, lay, i) + slide).round()), theme::paper(r.color, dark), la, 1.0, 0.0);
         }
     }
     if let Some(i) = primary_index(l) {
-        let y = l.sel_y.value - l.scroll.value + slide;
+        let y = (l.sel_y.value - l.scroll.value + slide).round();
+        let came = l.arriving.get(&l.rows[i].id).map_or(1.0, |sp| clamp01(sp.value));
         if y + lay.row_h > top && y < bottom {
-            c.shape(&row_shape(y), theme::paper(l.rows[i].color, dark), la, 1.0, 0.0);
+            c.shape(&row_shape(y), theme::paper(l.rows[i].color, dark), la * came, 1.0, 0.0);
         }
+    }
+    // Rows that just left, fading where they were as the rows below close up over them.
+    for g in &l.leaving {
+        let y = (lay.list_top + g.at as f32 * lay.row_h - l.scroll.value + slide).round();
+        let k = la * clamp01(g.fade.value);
+        if y + lay.row_h <= top || y >= bottom || k <= 0.003 {
+            continue;
+        }
+        let tx = (row_x + 30.0 * s) as i32;
+        let right = (row_x + row_w - 14.0 * s) as i32;
+        let tb = (y + ROW_TITLE_BASE * s) as i32;
+        let mb = (y + ROW_META_BASE * s) as i32;
+        let d = 8.0 * s;
+        let dcy = tb as f32 - f.row_title.cap as f32 / 2.0;
+        if dcy - d / 2.0 > top {
+            c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(g.row.color).accent, k, 1.0, 0.0);
+        }
+        c.line_ct(&g.row.title, &f.row_title, tx, tb, right - tx, clip, mix(p.list, p.text, k), DT_LEFT);
+        c.line_ct(&t!("note_edited", g.row.time), &f.row_time, tx, mb, right - tx, clip, mix(p.list, p.sub, k), DT_LEFT);
     }
     let sel_idx: Vec<usize> = range.clone().filter(|i| l.sel.contains(&l.rows[*i].id)).collect();
     let lifted = l.drag.as_ref().filter(|dr| dr.active).map(|dr| dr.from);
     let order: Vec<usize> = range.clone().filter(|i| Some(*i) != lifted).chain(lifted).collect();
     for i in order {
         let r = &l.rows[i];
-        let y = row_y(l, lay, i) + slide;
+        let y = (row_y(l, lay, i) + slide).round();
         if y + lay.row_h <= top || y >= bottom {
             continue;
         }
+        // A row that just came fades in as the rows below make room for it.
+        let la = la * l.arriving.get(&r.id).map_or(1.0, |sp| clamp01(sp.value));
         if Some(i) == lifted {
             // Above everything drawn so far, text included: flush, lift, then draw it.
             c.flush();
@@ -262,6 +288,11 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
                 c.rrect(tx as f32, sy, (right - tx) as f32 + 14.0 * s, 1.0, 0.0, mix(p.list, p.line, la), 1.0);
             }
         }
+    }
+    if let Some((r, px)) = l.old_list.as_ref() {
+        c.flush();
+        c.mix_in(*r, px, clamp01(l.list_a.value));
+        c.begin_batch();
     }
     // Overlay scrollbar, shown while scrolling.
     let max = max_scroll(l, lay);
@@ -418,14 +449,34 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
     let rule_y = sw[0].top as f32 - 18.0 * s;
     let editing_inline = l.editor_id == r.id && !l.editor.is_null();
     if !editing_inline {
-        // Static preview while the inline editor is being made.
-        c.line_ct(&r.title, &f.card_title, x0, (card.y + 52.0 * s) as i32, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
-        let br = rect(x0, (card.y + 72.0 * s) as i32, x1 - x0, (rule_y - 44.0 * s - card.y - 72.0 * s).max(0.0) as i32);
-        if r.body.is_empty() {
-            c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
-        } else {
-            // As the deck draws it: lists, checklists, quotes, code and tables, not their markup.
-            crate::win::ui::draw_body(c, &r.body, &f.card_body, br, r.color, dark, a, s);
+        // Static preview while the inline editor is being made: its lines where the
+        // editor will set them (`editor_pace`), in its ink, so it takes over in place.
+        let er = editor_rect(l, lay);
+        match editor_pace(s) {
+            Some((title, first, step)) => {
+                let base = er.top + title.round() as i32 + f.card_title.ascent;
+                c.line_ct(&r.title, &f.card_title, x0, base, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
+                // DirectWrite sets a line's glyphs a pixel lower than RichEdit does.
+                let top = er.top + first.round() as i32 - 1;
+                let right = er.right - (12.0 * s) as i32;
+                let br = rect(x0, top, right - x0, (er.bottom - top).max(0));
+                let gap = (step.round() as i32 - (f.card_body.ascent + f.card_body.descent)).max(0);
+                if r.body.is_empty() {
+                    c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
+                } else {
+                    crate::win::ui::draw_body_paced(c, &r.body, &f.card_body, br, r.color, dark, a, s, gap);
+                }
+            }
+            None => {
+                c.line_ct(&r.title, &f.card_title, x0, (card.y + 52.0 * s) as i32, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
+                let br = rect(x0, (card.y + 72.0 * s) as i32, x1 - x0, (rule_y - 44.0 * s - card.y - 72.0 * s).max(0.0) as i32);
+                if r.body.is_empty() {
+                    c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
+                } else {
+                    // As the deck draws it: lists, checklists, quotes, code and tables, not their markup.
+                    crate::win::ui::draw_body(c, &r.body, &f.card_body, br, r.color, dark, a, s);
+                }
+            }
         }
     }
     // Footer: when it was edited, then a hairline and the colour swatches.

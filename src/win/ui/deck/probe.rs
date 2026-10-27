@@ -28,6 +28,7 @@ pub(super) fn deck() -> Deck {
         .map(|(i, (title, body))| {
             let mut t = Tab::new(i as u64 + 1, geo.slot_y(i));
             t.slot = i;
+            t.cap.snap(i as f32);
             t.title = title.to_string();
             t.label = title.to_uppercase();
             t.body = body_of(&format!("{title}\n{body}"));
@@ -41,7 +42,9 @@ pub(super) fn deck() -> Deck {
         open: false,
         wide: false,
         previewing: false,
-        pill: Spring::unit(1.0, motion::DEFAULT),
+        pill: Spring::fade(1.0, motion::DEFAULT),
+        caps: Spring::px(NOTES.len() as f32, motion::DEFAULT),
+        synced: true,
         extras: Spring::unit(0.0, motion::SHINGLE),
         extras_delay: 0.0,
         extras_goal: 0.0,
@@ -54,6 +57,7 @@ pub(super) fn deck() -> Deck {
         drag: None,
         fullscreen: false,
         visible: true,
+        hiding: false,
         geo,
         fonts: HashMap::new(),
         font_scale: 1.0,
@@ -308,4 +312,188 @@ fn probe_frame_costs() {
     settle_for(&mut d, Duration::from_millis(500));
     let pulled_long = avg(&mut d);
     eprintln!("PROBE deck frame: folded {folded:?}, fanned {fanned:?}, a long title scrolling {marquee:?}, a card out {pulled:?}, a long card out {pulled_long:?}");
+}
+
+/// A frame as a screenshot sees it: the window's place and size, and each pixel's
+/// luminance over a grey desktop.
+struct Shot {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    lum: Vec<u8>,
+}
+
+const GREY: u32 = 0x6E;
+
+impl Shot {
+    fn of(d: &mut Deck) -> Shot {
+        let (x, y) = paint(d, false);
+        let c = d.canvas.as_mut().unwrap();
+        let (w, h) = (c.w, c.h);
+        let lum = c
+            .copy_out(rect(0, 0, w, h))
+            .iter()
+            .map(|p| {
+                let a = (p >> 24) & 0xFF;
+                let ch = |sh: u32| ((p >> sh) & 0xFF) + GREY * (255 - a) / 255;
+                ((ch(16) * 3 + ch(8) * 6 + ch(0)) / 10).min(255) as u8
+            })
+            .collect();
+        Shot { x, y, w, h, lum }
+    }
+
+    fn at(&self, x: i32, y: i32) -> i32 {
+        let (lx, ly) = (x - self.x, y - self.y);
+        if lx < 0 || ly < 0 || lx >= self.w || ly >= self.h { GREY as i32 } else { self.lum[(ly * self.w + lx) as usize] as i32 }
+    }
+
+    /// The box of what differs from `base` by more than `motion.py`'s threshold.
+    fn moved(&self, base: &Shot) -> Option<(i32, i32, i32, i32)> {
+        let mut b: Option<(i32, i32, i32, i32)> = None;
+        for y in self.y.min(base.y)..(self.y + self.h).max(base.y + base.h) {
+            for x in self.x.min(base.x)..(self.x + self.w).max(base.x + base.w) {
+                if (self.at(x, y) - base.at(x, y)).abs() > 24 {
+                    b = Some(b.map_or((x, y, x, y), |(a, t, r, m)| (a.min(x), t.min(y), r.max(x), m.max(y))));
+                }
+            }
+        }
+        b
+    }
+}
+
+/// Frames at `hz` until the deck rests: each one's cost, and how far the box of what
+/// differs from `base` moved (the largest of its edges' steps).
+fn steps(d: &mut Deck, base: &Shot, hz: f32) -> Vec<(f64, i32)> {
+    let mut v = Vec::new();
+    let mut last: Option<(i32, i32, i32, i32)> = None;
+    for _ in 0..200 {
+        let t0 = Instant::now();
+        let (moving, _, draw) = advance(d, 1.0 / hz);
+        let b = if draw { Shot::of(d).moved(base) } else { None };
+        let cost = t0.elapsed().as_secs_f64() * 1000.0;
+        let step = match (last, b) {
+            (Some((a, t, r, m)), Some((a2, t2, r2, m2))) => [(a2 - a).abs(), (t2 - t).abs(), (r2 - r).abs(), (m2 - m).abs()].into_iter().max().unwrap(),
+            _ => 0,
+        };
+        if b.is_some() {
+            last = b;
+        }
+        v.push((cost, step));
+        if !moving && !d.marquee_live {
+            break;
+        }
+    }
+    v
+}
+
+#[test]
+#[ignore]
+fn probe_motion_steps() {
+    crate::common::i18n::init("en");
+    let mut d = deck();
+    {
+        // What the warm-up costs, piece by piece, cold and after a trim.
+        for round in 0..3 {
+            let m0 = private_mb();
+            let t0 = Instant::now();
+            let f = font(&mut d, 0, 10.5, FW_SEMIBOLD as i32);
+            let t1 = t0.elapsed();
+            let mut c = Canvas::new(40, 40);
+            c.text("A", &f, rect(0, 0, 40, 40), 0, 1.0, 0);
+            let t2 = t0.elapsed();
+            let m1 = private_mb();
+            warm(&mut d);
+            let t3 = t0.elapsed();
+            eprintln!("warm round {round}: font {t1:.2?}, engine+first text {:.2?}, labels {:.2?}; private {m0:.1} -> {m1:.1} -> {:.1} MB", t2 - t1, t3 - t2, private_mb());
+            crate::win::render::dw::trim();
+            trim_deck(&mut d);
+            eprintln!("  trimmed: {:.1} MB", private_mb());
+        }
+    }
+    let base = Shot::of(&mut d);
+    crate::win::render::dw::trim();
+    trim_deck(&mut d);
+    let show = |name: &str, v: &[(f64, i32)]| {
+        let costs: Vec<String> = v.iter().map(|(c, _)| format!("{c:.1}")).collect();
+        let st: Vec<String> = v.iter().map(|(_, s)| s.to_string()).collect();
+        format!("  {name}: {} frames\n    ms {}\n    px {}\n", v.len(), costs.join(" "), st.join(" "))
+    };
+    let mut out = String::new();
+    for hz in [60.0, 99.0] {
+        let t0 = Instant::now();
+        set_open(&mut d, true, false);
+        warm(&mut d);
+        out += &format!(" {hz} Hz, cold: fanning out and warming up {:.2} ms\n", t0.elapsed().as_secs_f64() * 1000.0);
+        out += &show("fan out", &steps(&mut d, &base, hz));
+        d.hover = Hit::Tab(1);
+        begin_preview(&mut d, 1);
+        out += &show("peek", &steps(&mut d, &base, hz));
+        d.hover = Hit::None;
+        set_open(&mut d, false, false);
+        out += &show("fold", &steps(&mut d, &base, hz));
+        crate::win::render::dw::trim();
+        trim_deck(&mut d);
+    }
+    eprintln!("PROBE deck motion:\n{out}");
+}
+
+fn trim_deck(d: &mut Deck) {
+    d.fonts.clear();
+    for t in d.tabs.iter_mut() {
+        t.sprites = Vec::new();
+    }
+}
+
+/// A note leaves the folded deck (deleted) and comes back (Undo): the capsules below its
+/// place slide up and back down a step at a time, the pill shrinks and grows with them, and
+/// the one that came back grows in, rather than any of it jumping in a frame.
+#[test]
+fn capsules_make_room_and_close_up_smoothly() {
+    let mut d = deck();
+    let tops = |d: &Deck| -> Vec<f32> { (0..d.tabs.len()).map(|i| pose(d, i, d.geo.cw, d.geo.cy as f32).shape.y).collect() };
+    let pill = |d: &Deck| d.geo.pill_top_for(d.caps.value);
+    let step = (CAP_H + CAP_GAP) * d.geo.s;
+    // Gone: the fourth note.
+    let gone = d.tabs.remove(3);
+    for (k, t) in d.tabs.iter_mut().enumerate() {
+        t.cap.to(k as f32);
+    }
+    d.caps.to(d.tabs.len() as f32);
+    let mut last = (tops(&d), pill(&d));
+    let mut frames = 0;
+    while step_deck(&mut d) {
+        let now = (tops(&d), pill(&d));
+        for (a, b) in last.0.iter().zip(&now.0) {
+            assert!((b - a).abs() < 0.45 * step, "a capsule leapt {} px", b - a);
+        }
+        assert!((now.1 - last.1).abs() < 0.3 * step);
+        last = now;
+        frames += 1;
+    }
+    assert!(frames > 8, "{frames} frames");
+    // The ones below it closed up a step; the pill is a capsule shorter, still centred.
+    let t = tops(&d);
+    assert!((t[3] - t[2] - step).abs() < 0.5);
+    // Back: it grows in at its place, and the ones below slide down to make room.
+    let mut back = gone;
+    back.born.snap(0.0);
+    back.born.to(1.0);
+    back.cap.snap(3.0);
+    d.tabs.insert(3, back);
+    for (k, t) in d.tabs.iter_mut().enumerate() {
+        t.cap.to(k as f32);
+    }
+    d.caps.to(d.tabs.len() as f32);
+    let mut grew = vec![d.tabs[3].born.value];
+    while step_deck(&mut d) {
+        grew.push(d.tabs[3].born.value);
+    }
+    assert!(grew.windows(2).all(|w| w[1] >= w[0] - 0.08), "{grew:?}");
+    assert!((d.tabs[3].born.value - 1.0).abs() < 0.01);
+}
+
+/// One frame at 60 Hz; whether anything still moves.
+fn step_deck(d: &mut Deck) -> bool {
+    step(d, 1.0 / 60.0)
 }

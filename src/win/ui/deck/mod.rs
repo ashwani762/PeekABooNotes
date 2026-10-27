@@ -98,6 +98,10 @@ struct Tab {
     y: Spring,
     press: Spring,
     pull: Spring, // 0 = tucked, 1 = pulled out (preview)
+    /// Its capsule's place in the pill (its index), sliding when one before it comes or goes.
+    cap: Spring,
+    /// 0 to 1 as a card that came into the deck (a new note, or one back on Undo) grows in.
+    born: Spring,
     /// Cached spine label layout: (max length, fitted text, text length, cell height).
     fitted: Option<(i32, String, i32, i32)>,
     /// The spine label drawn (see `draw::label_sprite`), let go with `fitted`.
@@ -125,6 +129,8 @@ impl Tab {
             y: Spring::px(y, motion::DEFAULT),
             press: Spring::unit(1.0, motion::SNAPPY),
             pull: Spring::unit(0.0, motion::DEFAULT),
+            cap: Spring::px(0.0, motion::DEFAULT),
+            born: Spring::fade(1.0, (0.75, 0.34)),
             fitted: None,
             sprites: Vec::new(),
             body_h: None,
@@ -138,8 +144,8 @@ impl Tab {
         self.sprites.clear();
     }
 
-    fn springs(&mut self) -> [&mut Spring; 6] {
-        [&mut self.reveal, &mut self.bulge, &mut self.lean, &mut self.y, &mut self.press, &mut self.pull]
+    fn springs(&mut self) -> [&mut Spring; 8] {
+        [&mut self.reveal, &mut self.bulge, &mut self.lean, &mut self.y, &mut self.press, &mut self.pull, &mut self.cap, &mut self.born]
     }
 }
 
@@ -183,12 +189,19 @@ impl Geo {
         self.top + i as f32 * self.step
     }
     fn pill_h(&self) -> f32 {
-        let n = self.caps.max(1) as f32;
+        self.pill_h_for(self.caps as f32)
+    }
+    /// The pill's height holding `n` capsules (a fraction while it grows or shrinks).
+    fn pill_h_for(&self, n: f32) -> f32 {
+        let n = n.max(1.0);
         (n * CAP_H + (n - 1.0) * CAP_GAP + 2.0 * (PILL_W - CAP_W) / 2.0) * self.s
     }
     /// Pill top in screen coordinates.
     fn pill_top(&self) -> f32 {
         self.centre as f32 - self.pill_h() / 2.0
+    }
+    fn pill_top_for(&self, n: f32) -> f32 {
+        self.centre as f32 - self.pill_h_for(n) / 2.0
     }
     fn more_y(&self) -> f32 {
         self.slot_y(self.n) + 8.0 * self.s
@@ -206,6 +219,10 @@ struct Deck {
     wide: bool, // window currently uses the expanded geometry
     previewing: bool,
     pill: Spring,
+    /// How many capsules the pill is sized for, growing and shrinking as notes come and go.
+    caps: Spring,
+    /// The cards have been made once: any made after that came into the deck.
+    synced: bool,
     extras: Spring, // plus button and "+N" tile
     extras_delay: f32,
     extras_goal: f32,
@@ -219,6 +236,8 @@ struct Deck {
     drag: Option<Drag>,
     fullscreen: bool,
     visible: bool,
+    /// Hidden, and its pill still fading out: the window goes once it has.
+    hiding: bool,
     geo: Geo,
     fonts: HashMap<(u8, i32, i32, u8), Font>,
     font_scale: f32,
@@ -277,9 +296,9 @@ pub fn monitor_geo() -> (RECT, f32) {
     crate::win::ui::displays::deck()
 }
 
-/// The deck is going to another display: fold it at once and fade the pill in there,
-/// rather than have it blink from one screen to the other (with reduced motion the
-/// spring settles at once, so it just appears).
+/// The deck is going to another display, or the other edge: fold it at once and fade the
+/// pill in there, rather than have it blink from one place to the other (with Reduce
+/// Motion too: it moves nothing).
 pub fn arrive() {
     with(|d| {
         set_open(d, false, true);
@@ -320,7 +339,9 @@ pub fn create() {
             open: false,
             wide: false,
             previewing: false,
-            pill: Spring::unit(1.0, motion::DEFAULT),
+            pill: Spring::fade(1.0, motion::DEFAULT),
+            caps: Spring::px(0.0, motion::DEFAULT),
+            synced: false,
             extras: Spring::unit(0.0, motion::SHINGLE),
             extras_delay: 0.0,
             extras_goal: 0.0,
@@ -333,6 +354,7 @@ pub fn create() {
             drag: None,
             fullscreen: false,
             visible: false,
+            hiding: false,
             geo: Geo::default(),
             fonts: HashMap::new(),
             font_scale: 0.0,
@@ -431,6 +453,11 @@ pub fn frame(dt: f32) -> bool {
 /// One frame's motion: (still moving, just folded, anything to draw).
 fn advance(d: &mut Deck, dt: f32) -> (bool, bool, bool) {
     let moving = step(d, dt);
+    if d.hiding && (!moving || d.pill.value < 0.01) {
+        d.hiding = false;
+        unsafe { ShowWindow(d.hwnd, SW_HIDE) };
+        return (false, false, false);
+    }
     let folded = !d.open && !moving && d.wide;
     if folded {
         d.wide = false; // fully folded: shrink back to the small pill window
@@ -448,6 +475,15 @@ fn advance(d: &mut Deck, dt: f32) -> (bool, bool, bool) {
     (moving, folded, true)
 }
 
+/// Fan the deck out, with what its frames will draw made first (see `draw::warm`).
+fn fan_out(d: &mut Deck) {
+    let cold = !d.wide;
+    set_open(d, true, false);
+    if cold {
+        warm(d);
+    }
+}
+
 fn update_visibility(d: &mut Deck) {
     let (hidden, over_fs) = app::store(|s| (s.d.settings.deck_hidden, s.d.settings.over_fullscreen));
     let show = (!hidden && (!d.fullscreen || over_fs)) || d.summoned;
@@ -456,9 +492,16 @@ fn update_visibility(d: &mut Deck) {
         if !show {
             // Hiding the window hands its keys to whatever Windows picks next.
             drop_keys(d);
-            unsafe { ShowWindow(d.hwnd, SW_HIDE) };
         }
         set_open(d, false, true);
+        // The pill fades in, or out before the window goes, rather than blinking (at
+        // start, shown or hidden from the tray, or stepping aside for a full-screen app).
+        d.hiding = !show && !d.hwnd.is_null() && unsafe { IsWindowVisible(d.hwnd) } != 0;
+        if show {
+            d.pill.snap(0.0);
+        }
+        d.pill.to(if show { 1.0 } else { 0.0 });
+        anim::wake(Client::Deck);
     }
 }
 
@@ -684,7 +727,7 @@ pub fn take_keys() {
             update_visibility(d);
         }
         unsafe { KillTimer(hwnd, T_COLLAPSE) };
-        set_open(d, true, false);
+        fan_out(d);
         d.kbd = Some(Kbd { at: stops(d).first().copied(), prev });
         show_ring(d);
         render(d);
@@ -998,9 +1041,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 d.tracking = true;
             }
             unsafe { KillTimer(hwnd, T_COLLAPSE) };
+            if !d.visible {
+                // Fading out as it's hidden.
+                return Action::None;
+            }
             if !d.open {
                 // Respond on the very first movement: switch to the wide window and fan out.
-                set_open(d, true, false);
+                fan_out(d);
                 d.hover = Hit::None;
                 render(d);
                 return Action::None;
