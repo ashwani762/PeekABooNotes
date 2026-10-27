@@ -65,11 +65,18 @@ pub fn forget(e: HWND) {
     LOOKS.with(|l| l.borrow_mut().retain(|k, _| k.0 != e as isize));
 }
 
+/// How a tick fills (and an untick drains) a circle: (damping, response).
+const TICK: (f32, f32) = (1.0, 0.28);
+
 /// Start the tick (or untick) animation for the box at `cp`.
 pub fn animate(e: HWND, cp: i32, checked: bool) {
-    let from = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).map(|sp| sp.value)).unwrap_or(if checked { 0.0 } else { 1.0 });
-    let mut sp = Spring::unit(from, (0.62, 0.34));
-    sp.to(if checked { 1.0 } else { 0.0 });
+    // Already on its way: from where it is, at the speed it has.
+    let mut sp = ANIMS.with(|a| a.borrow().get(&(e as isize, cp)).copied()).unwrap_or_else(|| Spring::unit(if checked { 0.0 } else { 1.0 }, TICK));
+    // It comes to rest without passing its end and coming back: an underdamped spring
+    // swelled the circle past its size, held there three frames, then shrank it back over
+    // ten more, a move after the tick looked done. The pop is the circle's own swell
+    // (`draw_box`), and it sets off on the first frame.
+    sp.launch(if checked { 1.0 } else { 0.0 });
     ANIMS.with(|a| a.borrow_mut().insert((e as isize, cp), sp));
     anim::wake(Client::Notes);
 }
@@ -255,8 +262,8 @@ fn draw_box(c: &mut Canvas, ox: i32, oy: i32, text_x: i32, cy: f32, d: f32, gap:
     let selected = under == highlight().0;
     let (ink, tick) = if selected { (highlight().1, under) } else { (st.ink, 0xFFFFFF) };
     let k = clamp01(v);
-    // A brief pop while the state changes (either way), springing back to size.
-    let pop = 1.0 + 0.10 * (std::f32::consts::PI * k).sin() + (v - 1.0).max(0.0) * 0.6;
+    // A brief pop while the state changes (either way), back to size as it ends.
+    let pop = 1.0 + 0.10 * (std::f32::consts::PI * k).sin();
     let dd = d * pop;
     let cx = text_x as f32 - gap - d / 2.0 - ox as f32;
     let ly = cy - oy as f32;
@@ -324,6 +331,41 @@ fn fonts(s: f32) -> Metrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tick's circle grows from the first frame and comes to rest once: never past its
+    /// size and back, so once it stops changing by a visible amount, it doesn't start
+    /// again. (It swelled past its size, held three frames, then shrank back for ten.)
+    #[test]
+    fn a_tick_comes_to_rest_once() {
+        for hz in [60.0f32, 99.99, 144.0] {
+            for checked in [true, false] {
+                let mut sp = Spring::unit(if checked { 0.0 } else { 1.0 }, TICK);
+                sp.launch(if checked { 1.0 } else { 0.0 });
+                // The circle's diameter and its fill's, 16 px across.
+                let size = |v: f32| {
+                    let k = clamp01(v);
+                    let dd = 16.0 * (1.0 + 0.10 * (std::f32::consts::PI * k).sin());
+                    (dd, dd * k)
+                };
+                let mut last = size(sp.value);
+                let (mut frames, mut resting) = (0, false);
+                while sp.step(1.0 / hz) {
+                    frames += 1;
+                    assert!((-0.001..=1.001).contains(&sp.value), "{hz} Hz: {}", sp.value);
+                    let now = size(sp.value);
+                    let moved = (now.0 - last.0).abs().max((now.1 - last.1).abs());
+                    if frames == 1 {
+                        assert!(moved > 0.5, "{hz} Hz: the first frame moves {moved} px");
+                    }
+                    assert!(!(resting && moved > 0.05), "{hz} Hz: moved {moved} px after resting, frame {frames}");
+                    resting |= frames > 1 && moved < 0.02;
+                    last = now;
+                }
+                // About a quarter of a second to look done, and it lets go soon after.
+                assert!(frames as f32 / hz < 0.6, "{hz} Hz: {frames} frames");
+            }
+        }
+    }
 
     /// An open circle in a selection is drawn in the selection's text colour, so it shows
     /// on the selection's blue; on the paper, in the note's ink.
