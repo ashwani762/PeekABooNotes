@@ -31,8 +31,9 @@ use crate::win::util::{WM_MOUSELEAVE, rect, wide, x_of, y_of};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 
 const CLASS: &str = "PeekABooToast";
-/// How far along the ring (in pixels) its arc's end moves before it's drawn again.
-const ARC_STEP: f32 = 0.2;
+/// How far along the ring (in pixels) its arc's end moves before it's drawn again: any
+/// way at all, so every frame while it moves (a few hundred pixels a frame).
+const ARC_STEP: f32 = 0.0;
 
 struct Toast {
     hwnd: HWND,
@@ -53,6 +54,10 @@ struct Toast {
     /// How much of it shows: as it rises and sinks, and with Reduce Motion, where it fades
     /// in and out without rising.
     shown: Spring,
+    /// It has just set off rising or sinking: its first step is one refresh, however
+    /// long the work that raised it (a delete, an undo) kept the frames waiting. Stepped by
+    /// that wait, its first frame came already half shown, or a fifth of the way down.
+    fresh: bool,
     /// The Undo button lights up while the pointer is on the toast (all of it undoes).
     hot: Spring,
     /// Mouse button held down on the toast: the button sinks a little.
@@ -147,6 +152,7 @@ fn with_toast(f: impl FnOnce(&mut Toast)) {
                 clock_at: None,
                 rise: Spring::unit(0.0, theme::motion::MOMENTUM),
                 shown: Spring::fade(0.0, (1.0, 0.24)),
+                fresh: false,
                 hot: Spring::unit(0.0, (1.0, 0.12)),
                 pressed: false,
                 alive: true,
@@ -186,6 +192,7 @@ fn settle(t: &mut Toast) {
     t.drawn = None;
     match message(t) {
         Some(msg) => {
+            t.fresh |= !t.alive || t.shown.target < 1.0;
             t.alive = true;
             t.size = measure(t);
             // It rises at once, from the first frame, rather than easing off.
@@ -196,6 +203,7 @@ fn settle(t: &mut Toast) {
         }
         None => {
             // It sinks away at once, quicker than it rose.
+            t.fresh |= t.alive;
             t.alive = false;
             t.rise.launch_as(0.0, (1.0, 0.22));
             t.shown.launch_as(0.0, (1.0, 0.18));
@@ -254,6 +262,7 @@ fn step(dt: f32) -> bool {
                 settle(t);
             }
         }
+        let dt = if std::mem::take(&mut t.fresh) { dt.min(anim::period()) } else { dt };
         let moving = t.rise.step(dt) | t.shown.step(dt);
         t.pressed &= over;
         t.hot.to(if over && t.alive && t.notice.is_none() { 1.0 } else { 0.0 });
@@ -307,13 +316,13 @@ fn draw_arc(c: &mut Canvas, cx: f32, cy: f32, r: f32, s: f32, frac: f32, a: f32)
     c.ring(cx, cy, r, 2.0 * s, frac, theme::COLORS[0].accent, a);
 }
 
-/// The ring swept on, when its arc's end has moved a fifth of a pixel: the square around
-/// it put back as it was without the arc, the arc drawn again, and only that square given
-/// to the compositor.
+/// The ring swept on, each frame its arc's end has moved: the square around it put back as
+/// it was without the arc, the arc drawn again, and only that square given to the
+/// compositor.
 fn sweep(t: &mut Toast) {
     let Some(ring) = t.ring.as_ref() else { return };
     let arc = arc_px(t, ring.r);
-    if (arc - ring.arc).abs() < ARC_STEP {
+    if (arc - ring.arc).abs() <= ARC_STEP {
         return;
     }
     let (s, (x, y)) = (t.s, t.placed);
@@ -538,12 +547,12 @@ mod tests {
     }
 
     #[test]
-    fn the_rings_arc_moves_less_than_a_pixel_between_its_drawings() {
+    fn the_rings_arc_moves_a_fraction_of_a_pixel_a_frame_and_is_drawn_each_time() {
         // Its end moves 2 pi r a turn over the toast's time: at 100% and 200%, a frame at
-        // 60 Hz moves it a fraction of a pixel, and it's drawn again once that's a fifth.
+        // 60 Hz moves it a fraction of a pixel, and any move is drawn.
         for s in [1.0f32, 2.0] {
             let per_frame = std::f32::consts::TAU * 10.0 * s / crate::common::undo::SECONDS / 60.0;
-            assert!(per_frame < super::ARC_STEP * 2.0, "{per_frame}");
+            assert!(per_frame < 0.25 && per_frame > super::ARC_STEP, "{per_frame}");
         }
     }
 
