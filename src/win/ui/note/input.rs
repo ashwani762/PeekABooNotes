@@ -405,6 +405,11 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         }
         // `view` paints every pixel: nothing to clear first (that showed as a flash).
         WM_ERASEBKGND if rich::services(e).is_some() => return 1,
+        // The caret is drawn with the rest of the frame (`view`), and blinks there.
+        WM_TIMER if wp == crate::win::editor::view::CARET_TIMER => {
+            crate::win::editor::view::blink(e);
+            return 0;
+        }
         _ => {}
     }
     // What changes the text or the view is done with drawing held, and shown in one frame
@@ -427,10 +432,21 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         r
     };
     if !quiet {
-        return now();
+        let r = now();
+        match msg {
+            WM_SETFOCUS | WM_KILLFOCUS => crate::win::editor::view::focus(e, msg == WM_SETFOCUS),
+            // What may move the caret without drawing anything else (a click, a drag, a
+            // composed character): it's drawn where it went.
+            WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_CAPTURECHANGED | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION | WM_IME_CHAR => {
+                crate::win::editor::view::caret_moved(e)
+            }
+            WM_MOUSEMOVE if wp & 0x0001 != 0 => crate::win::editor::view::caret_moved(e),
+            _ => {}
+        }
+        return r;
     }
     let before = matches!(msg, WM_KEYDOWN | WM_KEYUP | WM_TIMER).then(|| view_of(e));
-    rich::quiet_if(
+    let r = rich::quiet_if(
         e,
         now,
         |_| match before {
@@ -438,7 +454,11 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
             Some(b) => key_drew(msg, wp as u16, b, view_of(e)),
             None => true,
         },
-    )
+    );
+    // A key that only moved the caret (an arrow) drew nothing else: the caret is drawn
+    // where it went (nothing, when the frame just shown has it there).
+    crate::win::editor::view::caret_moved(e);
+    r
 }
 
 const EM_UNDO: u32 = 0x00C7;
@@ -692,7 +712,12 @@ unsafe fn edit_now(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, parent: usize) -> 
             unsafe { TrackMouseEvent(&mut tme) };
             crate::win::editor::checks::set_hot(e, hot);
             pointer_in(h);
-            link_tip(e, x_of(lp), y_of(lp));
+            // No link's or picture's tip in the middle of selecting by dragging.
+            if wp & 0x0001 != 0 {
+                crate::win::ui::tooltip::leave(e);
+            } else {
+                link_tip(e, x_of(lp), y_of(lp));
+            }
             if hot.is_some() && wp & 0x0001 == 0 {
                 // RichEdit may set its own cursor as it takes the move: the hand stays.
                 let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
@@ -798,9 +823,9 @@ fn view_of(e: HWND) -> (usize, (i32, i32), i32) {
 /// Whether key message `msg` (key `vk`) may have drawn, from what it changed (`before`,
 /// `after`: `view_of`). A key that changed none of it drew nothing, but one with Ctrl
 /// (other than a move, or Ctrl itself) may have changed formatting alone. A caret only
-/// moved, by an arrow or the like, draws nothing either: the caret is Windows' own. The
-/// overlays went on three times a keystroke (down, character, up), each a read of the
-/// window.
+/// moved, by an arrow or the like, draws nothing else (`view::caret_moved` draws the caret
+/// where it went). The overlays went on three times a keystroke (down, character, up),
+/// each a read of the window.
 fn key_drew(msg: u32, vk: u16, before: (usize, (i32, i32), i32), after: (usize, (i32, i32), i32)) -> bool {
     let moved = matches!(vk, VK_HOME | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_PRIOR | VK_NEXT | VK_END);
     let modifier = matches!(vk, VK_SHIFT | VK_CONTROL | VK_MENU | VK_LWIN | VK_RWIN | VK_CAPITAL);
@@ -859,6 +884,181 @@ mod tests {
         // A line without a picture (a file's chip) is just selected.
         pick(e, 0, 1);
         assert_eq!(PICKED.with(|p| p.get()), None);
+        unsafe { DestroyWindow(e) };
+    }
+
+    /// A checklist note in a hidden editor, `w` x `h`, its caret drawn by the view and its
+    /// keys taken by `edit_proc` (with no note window around it).
+    fn typing_editor(w: i32, h: i32) -> HWND {
+        let e = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, w, h, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(e);
+        let mut s = String::from("Garden \u{1F331}\rSome words to start with");
+        for i in 1..=12 {
+            s.push_str(&format!("\r\u{2610} item number {i} \u{1F680}"));
+        }
+        rich::insert_text(e, &s);
+        rich::apply_base_format(e, 0x1D1D1F, 0xF3E9C6);
+        rich::style_boxes(e);
+        rich::restyle(e);
+        crate::win::editor::checks::set_style(e, 0x303030, 0xF3E9C6, 1.0);
+        crate::win::editor::view::own_caret(e);
+        unsafe { SetWindowSubclass(e, Some(edit_proc), 1, 0) };
+        e
+    }
+
+    /// Editor `e`'s caret as it should be: (RichEdit's own caret, which it places at the
+    /// selection, unseen; the selection's end where RichEdit says it is).
+    fn system_caret(e: HWND) -> (RECT, POINT) {
+        let mut g: GUITHREADINFO = unsafe { std::mem::zeroed() };
+        g.cbSize = size_of::<GUITHREADINFO>() as u32;
+        unsafe { GetGUIThreadInfo(windows_sys::Win32::System::Threading::GetCurrentThreadId(), &mut g) };
+        assert_eq!(g.hwndCaret, e);
+        // Kept unseen: the view draws it.
+        assert_eq!(g.flags & GUI_CARETBLINKING, 0, "Windows' caret shows");
+        (g.rcCaret, rich::pos_from_char(e, rich::sel(e).1))
+    }
+
+    /// The caret is drawn in the editor's frame, one bar where RichEdit's caret goes, and
+    /// never left behind. After every key (letters, spaces, Backspace, Enter, undo and
+    /// redo, a paste, arrows, a selection, a scroll, the focus out and back): Windows'
+    /// caret (unseen, for screen readers) is at the selection's end, the frame differs from
+    /// the editor drawn without a caret in exactly the caret's bar there (none with nothing
+    /// to show it, or without the focus), and the window, painted only the rows each frame
+    /// changed and the caret's pixels at a blink, shows just what a fresh frame does.
+    #[test]
+    fn the_caret_is_one_bar_where_the_selection_is() {
+        use crate::win::editor::view::{CARET_COLOR, Parts, Screen, compose, frame_now};
+        let (w, h) = (360, 240);
+        let e = typing_editor(w, h);
+        let send = |msg: u32, wp: usize| unsafe { SendMessageW(e, msg, wp, 0) };
+        send(WM_SETFOCUS, 0);
+        // At the end of the second line.
+        let t = rich::text(e);
+        let end = t.iter().enumerate().filter(|&(_, &c)| c == rich::CR).nth(1).unwrap().0 as i32;
+        rich::set_sel(e, end, end);
+        let mut screen = Screen::new(e);
+        let bare = || {
+            let mut c = crate::win::render::gfx::Canvas::new(w, h);
+            assert!(compose(e, &mut c, 0, w, h, Parts::All));
+            c.copy_out(RECT { left: 0, top: 0, right: w, bottom: h })
+        };
+        let (mut carets, mut blinks) = (0, 0);
+        let mut check = |screen: &mut Screen, step: &str, focused: bool| {
+            screen.present(e);
+            let (px, at, on) = frame_now(e);
+            let plain = bare();
+            let (a, b) = rich::sel(e);
+            // The editor drawn without a caret, and with one bar of the caret at `at`.
+            let drawn = at.map(|r| {
+                let mut d = plain.clone();
+                for y in r.top..r.bottom {
+                    d[(y * w + r.left) as usize..(y * w + r.right) as usize].fill(CARET_COLOR);
+                }
+                d
+            });
+            match at {
+                Some(r) => {
+                    assert!(focused && a == b, "{step}: a caret");
+                    let (sys, end) = system_caret(e);
+                    let mut caret = POINT { x: 0, y: 0 };
+                    unsafe { GetCaretPos(&mut caret) };
+                    // Where RichEdit's caret is, and as tall; Windows' caret there too.
+                    assert_eq!((r.left, r.top, r.bottom), (sys.left, sys.top.max(0), sys.bottom.min(h)), "{step}");
+                    assert_eq!((caret.x, caret.y), (sys.left, sys.top), "{step}");
+                    assert_eq!(caret.x, end.x, "{step}: at the selection's end");
+                    assert!(r.right - r.left >= 1 && r.bottom - r.top >= 10, "{step}: a bar");
+                    // One bar, all of it the caret's, and nothing else of it anywhere (none
+                    // in the hidden half of a blink).
+                    assert!(px == if on { drawn.clone().unwrap() } else { plain.clone() }, "{step}: not one caret");
+                    carets += 1;
+                }
+                None => {
+                    assert!(!focused || a != b, "{step}: no caret");
+                    assert!(px == plain, "{step}: caret pixels with no caret");
+                }
+            }
+            // The window shows the frame: nothing left behind.
+            assert!(screen.px == px, "{step}: the window differs from a fresh frame");
+            // A blink takes it away (or brings it back) and back again, and only it.
+            if let Some(drawn) = drawn {
+                let (first, second) = if on { (&plain, &drawn) } else { (&drawn, &plain) };
+                screen.blink(e);
+                assert!(screen.px == *first, "{step}: the window after a blink");
+                screen.blink(e);
+                assert!(screen.px == *second, "{step}: the window after two blinks");
+                blinks += 1;
+                // Every other time left as the blink after leaves it, for the next key.
+                if blinks % 2 == 0 {
+                    screen.blink(e);
+                }
+            }
+        };
+        check(&mut screen, "start", true);
+        let key = |vk: u16, ch: Option<u16>| {
+            send(WM_KEYDOWN, vk as usize);
+            if let Some(c) = ch {
+                send(WM_CHAR, c as usize);
+            }
+            send(WM_KEYUP, vk as usize);
+        };
+        // Thirty-odd characters, spaces among them (one at the line's end, two together).
+        for (i, c) in " quick brown fox  jumps over the".encode_utf16().enumerate() {
+            let vk = if c == b' ' as u16 { VK_SPACE } else { (c as u8).to_ascii_uppercase() as u16 };
+            let at = |r: Option<RECT>| r.map(|r| (r.left, r.top));
+            let before = at(frame_now(e).1);
+            key(vk, Some(c));
+            // Every character moves the caret on at once, a space too (along its line, or
+            // to the next one where the line wraps).
+            let after = at(frame_now(e).1);
+            assert!(after.zip(before).is_some_and(|(a, b)| a.0 > b.0 || a.1 > b.1), "typed {i}: the caret moved on, {before:?} to {after:?}");
+            check(&mut screen, &format!("typed {i}"), true);
+        }
+        for i in 0..4 {
+            key(VK_BACK, Some(0x08));
+            check(&mut screen, &format!("backspace {i}"), true);
+        }
+        key(VK_RETURN, Some(0x0D));
+        check(&mut screen, "enter", true);
+        for c in "new".encode_utf16() {
+            key((c as u8).to_ascii_uppercase() as u16, Some(c));
+            check(&mut screen, "typed on the new line", true);
+        }
+        send(WM_UNDO, 0);
+        check(&mut screen, "undo", true);
+        send(rich::EM_REDO, 0);
+        check(&mut screen, "redo", true);
+        // A paste's worth of text at once.
+        rich::replace_sel(e, "pasted text");
+        crate::win::editor::view::caret_moved(e);
+        check(&mut screen, "paste", true);
+        key(VK_LEFT, None);
+        check(&mut screen, "left", true);
+        key(VK_HOME, None);
+        check(&mut screen, "home", true);
+        key(VK_END, None);
+        check(&mut screen, "end", true);
+        key(VK_UP, None);
+        check(&mut screen, "up", true);
+        // A selection: no caret; collapsed again: one.
+        let (a, _) = rich::sel(e);
+        unsafe { SendMessageW(e, 0x00B1, (a - 3) as usize, a as isize) };
+        crate::win::editor::view::caret_moved(e);
+        check(&mut screen, "selected", true);
+        rich::set_sel(e, a, a);
+        crate::win::editor::view::caret_moved(e);
+        check(&mut screen, "collapsed", true);
+        // Scrolled, the caret with its line.
+        unsafe { SendMessageW(e, rich::EM_SETSCROLLPOS, 0, &POINT { x: 0, y: 40 } as *const _ as isize) };
+        check(&mut screen, "scrolled", true);
+        // The focus away and back.
+        send(WM_KILLFOCUS, 0);
+        check(&mut screen, "focus out", false);
+        send(WM_SETFOCUS, 0);
+        check(&mut screen, "focus in", true);
+        assert!(carets >= 50 && blinks >= 50, "{carets} carets, {blinks} blinks");
         unsafe { DestroyWindow(e) };
     }
 

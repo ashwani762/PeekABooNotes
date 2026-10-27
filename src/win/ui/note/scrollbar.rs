@@ -83,21 +83,37 @@ fn caret_line_in_view(edit: HWND) -> bool {
     top >= 0 && top + line_h <= rc.bottom
 }
 
-/// Before a key that may type: the selection, and whether the caret's line is wholly in
-/// view.
-pub(super) type Typing = ((i32, i32), bool);
+/// Before a key that may type: the selection, whether the caret's line is wholly in view,
+/// the scroll position, and the caret's line's top in the text (px from its top).
+pub(super) type Typing = ((i32, i32), bool, i32, i32);
 
 pub(super) fn before_typing(edit: HWND) -> Typing {
-    (rich::sel(edit), caret_line_in_view(edit))
+    let scroll = rich::scroll_y(edit);
+    (rich::sel(edit), caret_line_in_view(edit), scroll, caret_line(edit).0 + scroll)
 }
 
 /// After a key that may have typed (`before` it): typed on to a new line at the bottom
 /// edge (an item that wraps), RichEdit left the caret's line below the view, and the text
 /// 3 px lower, until the next key scrolled it into view (the note jumped down, then 27 px
-/// up). The caret's line comes into view at once, as Enter's does.
+/// up), or scrolled it in itself, as far as the note's end (35 px for a 20 px line, the
+/// bottom's faded edge left over nothing). The caret's line comes into view at once, as
+/// Enter's does: the text goes up as far as that line went down, one line, so the new line
+/// is where the one it came out of was.
 pub(super) fn follow_typing(edit: HWND, before: Typing) {
-    let (sel, in_view) = before;
-    if sel.0 == sel.1 && in_view && rich::sel(edit) != sel && !caret_line_in_view(edit) {
+    let (sel, in_view, scroll, top) = before;
+    if sel.0 != sel.1 || !in_view || rich::sel(edit) == sel {
+        return;
+    }
+    let down = caret_line(edit).0 + rich::scroll_y(edit) - top;
+    if down > 0 {
+        if rich::scroll_y(edit) != scroll {
+            rich::set_scroll_y(edit, scroll);
+        }
+        if !caret_line_in_view(edit) {
+            rich::set_scroll_y(edit, (scroll + down).min(max_scroll(edit)));
+        }
+    }
+    if !caret_line_in_view(edit) {
         keep_caret_in_view(edit);
     }
 }
@@ -596,6 +612,55 @@ mod tests {
             assert!(caret_line_in_view(e), "after {:?}", char::from_u32(c as u32));
         }
         assert!(wrapped, "the item wrapped");
+        unsafe { DestroyWindow(e) };
+    }
+
+    /// An item that wraps at the bottom edge, with more of the note below it, moves the
+    /// text up by the one line it grew, its new line where the line it came out of was:
+    /// not as far as the note's end (RichEdit scrolled 35 px for a 20 px line there, the
+    /// faded bottom edge left over nothing), and not under the edge either.
+    #[test]
+    fn a_wrap_at_the_bottom_moves_the_text_up_one_line() {
+        let w = 280;
+        let e = unsafe {
+            LoadLibraryW(wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | (ES_MULTILINE | ES_AUTOVSCROLL) as u32, 0, 0, w, 600, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(e);
+        let mut s = String::from("Tick test");
+        for i in 1..=10 {
+            s.push_str(&format!("\r\u{2610} task number {i} to do"));
+        }
+        rich::insert_text(e, &s);
+        rich::apply_base_format(e, 0, 0xFFFFFF);
+        rich::style_title(e);
+        rich::style_boxes(e);
+        let t = rich::text(e);
+        let last = t.iter().rposition(|&c| c == rich::CR).unwrap() as i32;
+        // The last item cut in half by the bottom edge, the one before it in view.
+        let h = rich::pos_from_char(e, last + 1).y + 10;
+        unsafe { SetWindowPos(e, null_mut(), 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) };
+        rich::set_sel(e, last, last);
+        rich::set_scroll_y(e, 0);
+        assert!(caret_line_in_view(e));
+        let mut moves = Vec::new();
+        for c in " jumps over the lazy dog and more".encode_utf16() {
+            let before = before_typing(e);
+            let (scroll, line) = (rich::scroll_y(e), caret_line(e).0);
+            rich::send(e, WM_CHAR, c as usize, 0);
+            follow_typing(e, before);
+            assert!(caret_line_in_view(e), "after {:?}", char::from_u32(c as u32));
+            let moved = rich::scroll_y(e) - scroll;
+            if moved != 0 {
+                // Where the line it came out of was.
+                assert_eq!(caret_line(e).0, line, "after {:?}", char::from_u32(c as u32));
+                moves.push(moved);
+            }
+        }
+        // One move, of one line (as tall as a body line, not two), and more note below.
+        assert_eq!(moves.len(), 1, "{moves:?}");
+        assert!((15..=24).contains(&moves[0]), "{moves:?}");
+        assert!(rich::scroll_y(e) < max_scroll(e), "scrolled to the end");
         unsafe { DestroyWindow(e) };
     }
 }
