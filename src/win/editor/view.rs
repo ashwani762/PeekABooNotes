@@ -27,7 +27,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, IsWindow, IsWindowVisible};
 
 use crate::win::editor::{checks, emoji, fade, rich};
-use crate::win::render::gfx::Canvas;
+use crate::win::render::gfx::{Canvas, Image};
 
 /// What an editor's window shows, as last painted.
 struct Shown {
@@ -58,9 +58,18 @@ pub fn set_painter(f: Painter) {
     PAINTER.set(Some(f));
 }
 
+/// What a drawing of an editor takes in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Parts {
+    /// All of it.
+    All,
+    /// The text as it reads (in colour emoji): what a checklist item's tick fades from.
+    Text,
+}
+
 /// Draw client rows `top..top + rows` of editor `e`, `w` wide, onto `c` (its row 0 at
 /// `top`): RichEdit's text, then what goes over it. False when RichEdit can't draw there.
-pub fn compose(e: HWND, c: &mut Canvas, top: i32, w: i32, rows: i32) -> bool {
+pub fn compose(e: HWND, c: &mut Canvas, top: i32, w: i32, rows: i32, parts: Parts) -> bool {
     use windows::Win32::Graphics::Gdi::HDC;
     use windows::Win32::System::Com::DVASPECT_CONTENT;
     /// The view a windowed editor shows (TXTVIEW_ACTIVE): its own scroll and selection.
@@ -81,12 +90,25 @@ pub fn compose(e: HWND, c: &mut Canvas, top: i32, w: i32, rows: i32) -> bool {
     c.make_opaque_rect(RECT { left: 0, top: 0, right: w, bottom: rows });
     let (t, a0, b0) = rich::screen_text(e);
     emoji::draw(e, c, top, &t, a0, b0);
-    checks::draw(e, c, top, &t, a0, b0);
-    if let Some(f) = PAINTER.get() {
-        f(e, c, top);
+    if parts == Parts::All {
+        checks::draw(e, c, top, w, &t, a0, b0);
+        if let Some(f) = PAINTER.get() {
+            f(e, c, top);
+        }
+        fade::draw(e, c, top);
     }
-    fade::draw(e, c, top);
     true
+}
+
+/// Client rows `top..top + rows` of editor `e` as their text reads now (`Parts::Text`).
+pub fn look(e: HWND, top: i32, rows: i32) -> Option<Image> {
+    let w = client(e).0;
+    if w <= 0 || rows <= 0 {
+        return None;
+    }
+    let mut c = Canvas::new(w, rows);
+    compose(e, &mut c, top, w, rows, Parts::Text).then_some(())?;
+    c.snapshot(RECT { left: 0, top: 0, right: w, bottom: rows })
 }
 
 fn client(e: HWND) -> (i32, i32) {
@@ -146,7 +168,7 @@ pub fn on_paint(e: HWND) -> bool {
         with_canvas(w, h, |c| {
             // Drawn whole even for a part: what goes over the text looks around it (the
             // paper or selection under a circle).
-            if !fresh && compose(e, c, 0, w, h) {
+            if !fresh && compose(e, c, 0, w, h, Parts::All) {
                 rows = (0..h).map(|y| hash(&c.row(y)[..w as usize])).collect();
             }
             if rows.len() == h as usize {
@@ -190,7 +212,7 @@ pub fn present(e: HWND) {
         return;
     }
     let scroll = rich::scroll_y(e);
-    let Some(rows) = with_canvas(w, h, |c| compose(e, c, 0, w, h).then(|| (0..h).map(|y| hash(&c.row(y)[..w as usize])).collect::<Vec<u64>>())) else {
+    let Some(rows) = with_canvas(w, h, |c| compose(e, c, 0, w, h, Parts::All).then(|| (0..h).map(|y| hash(&c.row(y)[..w as usize])).collect::<Vec<u64>>())) else {
         // RichEdit paints itself.
         unsafe { InvalidateRect(e, std::ptr::null(), 0) };
         return;
@@ -275,7 +297,7 @@ mod tests {
 
     fn drawn(e: HWND, top: i32, w: i32, rows: i32) -> Vec<u32> {
         let mut c = Canvas::new(w, rows);
-        assert!(compose(e, &mut c, top, w, rows));
+        assert!(compose(e, &mut c, top, w, rows, Parts::All));
         c.copy_out(RECT { left: 0, top: 0, right: w, bottom: rows })
     }
 

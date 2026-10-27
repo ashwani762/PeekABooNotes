@@ -17,6 +17,10 @@ pub(super) fn toggle_check(e: HWND, cp: i32) {
         return;
     }
     let checked = c == rich::CHECKED;
+    // Its text fades to its new look as the circle fills or empties: under way before the
+    // change is shown, so its first frame is the item as it was.
+    crate::win::editor::checks::keep_look(e, cp);
+    crate::win::editor::checks::animate(e, cp, !checked);
     // Held still: putting the caret back would otherwise scroll to it, away from the box
     // that was just ticked.
     rich::still(e, || {
@@ -31,7 +35,6 @@ pub(super) fn toggle_check(e: HWND, cp: i32) {
         rich::set_sel(e, a, b);
         rich::style_boxes_in(e, cp, cp); // completed items turn secondary; reopened ones regain full ink
     });
-    crate::win::editor::checks::animate(e, cp, !checked);
 }
 
 pub(super) fn toggle_check_at_caret(e: HWND) {
