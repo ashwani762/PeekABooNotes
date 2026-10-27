@@ -17,6 +17,46 @@ pub(super) fn editor_rect(l: &Lib, lay: &Layout) -> RECT {
     rect(x0 as i32, y0 as i32, (x1 - x0).max(10.0) as i32, (y1 - y0).max(10.0) as i32)
 }
 
+/// Where the inline editor sets a note's lines, in pixels at scale `s` from the top of its
+/// window: (the title line's top, the first body line's top, the step from one one-line
+/// paragraph to the next). The preview drawn until the editor is made sets its lines there
+/// too, so the editor takes over without the text moving (the title sat 8 to 15 px lower
+/// in the preview, its body lines closer together and lighter). Measured once for each
+/// typography and scale in a hidden editor set up as a note's is.
+pub(super) fn editor_pace(s: f32) -> Option<(f32, f32, f32)> {
+    use crate::win::editor::rich;
+    type Pace = Option<(f32, f32, f32)>;
+    type Key = (u8, i32, i32, u32);
+    thread_local! {
+        static PACE: std::cell::Cell<Option<(Key, Pace)>> = const { std::cell::Cell::new(None) };
+    }
+    let key = (rich::font_index(), rich::body_size(), rich::title_size(), s.to_bits());
+    if let Some((k, pace)) = PACE.with(|p| p.get())
+        && k == key
+    {
+        return pace;
+    }
+    let pace = (|| {
+        let h = unsafe {
+            CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, 600, 300, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        if h.is_null() {
+            return None;
+        }
+        rich::setup(h);
+        rich::load_markdown(h, "Title\nFirst\nSecond");
+        rich::apply_base_format(h, theme::PAPER_TEXT, 0xFFFFFF);
+        rich::style_title(h);
+        let k = s / (unsafe { GetDpiForWindow(h) }.max(96) as f32 / 96.0);
+        let top = |cp: i32| rich::pos_from_char(h, cp).y as f32 * k;
+        let (title, first, second) = (top(0), top(6), top(12));
+        unsafe { DestroyWindow(h) };
+        (second > first && first > title).then_some((title, first, second - first))
+    })();
+    PACE.with(|p| p.set(Some((key, pace))));
+    pace
+}
+
 /// The note to edit inline: the single selected note, unless it's open in its own window
 /// (one note is never edited in two places at once).
 pub(super) fn wanted_editor(l: &Lib) -> Option<(u64, RECT)> {

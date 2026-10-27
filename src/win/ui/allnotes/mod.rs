@@ -1399,6 +1399,21 @@ mod tests {
         assert!(!editors_key_is_ours(VK_TAB, false, false, || false), "Tab in the text indents");
     }
 
+    /// The preview finds where the editor sets a note's lines: the title at the top, the
+    /// body below it, one-line paragraphs a reading line and its space after apart, more
+    /// at a larger scale.
+    #[test]
+    fn the_preview_paces_its_lines_as_the_editor_does() {
+        unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide("Msftedit.dll").as_ptr()) };
+        crate::win::editor::rich::set_typography(0, 1);
+        let (title, first, step) = editor::editor_pace(1.0).expect("measured");
+        assert!(title.abs() < 1.0, "{title}");
+        assert!(first > 20.0 && first < 60.0, "{first}");
+        assert!(step > 18.0 && step < 40.0, "{step}");
+        let (_, first2, step2) = editor::editor_pace(2.0).expect("measured");
+        assert!((first2 - 2.0 * first).abs() < 3.0 && (step2 - 2.0 * step).abs() < 3.0, "{first2} {step2}");
+    }
+
     #[test]
     fn quiet_text_still_reads() {
         for dark in [false, true] {

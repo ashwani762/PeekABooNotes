@@ -442,14 +442,34 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
     let rule_y = sw[0].top as f32 - 18.0 * s;
     let editing_inline = l.editor_id == r.id && !l.editor.is_null();
     if !editing_inline {
-        // Static preview while the inline editor is being made.
-        c.line_ct(&r.title, &f.card_title, x0, (card.y + 52.0 * s) as i32, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
-        let br = rect(x0, (card.y + 72.0 * s) as i32, x1 - x0, (rule_y - 44.0 * s - card.y - 72.0 * s).max(0.0) as i32);
-        if r.body.is_empty() {
-            c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
-        } else {
-            // As the deck draws it: lists, checklists, quotes, code and tables, not their markup.
-            crate::win::ui::draw_body(c, &r.body, &f.card_body, br, r.color, dark, a, s);
+        // Static preview while the inline editor is being made: its lines where the
+        // editor will set them (`editor_pace`), in its ink, so it takes over in place.
+        let er = editor_rect(l, lay);
+        match editor_pace(s) {
+            Some((title, first, step)) => {
+                let base = er.top + title.round() as i32 + f.card_title.ascent;
+                c.line_ct(&r.title, &f.card_title, x0, base, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
+                // DirectWrite sets a line's glyphs a pixel lower than RichEdit does.
+                let top = er.top + first.round() as i32 - 1;
+                let right = er.right - (12.0 * s) as i32;
+                let br = rect(x0, top, right - x0, (er.bottom - top).max(0));
+                let gap = (step.round() as i32 - (f.card_body.ascent + f.card_body.descent)).max(0);
+                if r.body.is_empty() {
+                    c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
+                } else {
+                    crate::win::ui::draw_body_paced(c, &r.body, &f.card_body, br, r.color, dark, a, s, gap);
+                }
+            }
+            None => {
+                c.line_ct(&r.title, &f.card_title, x0, (card.y + 52.0 * s) as i32, x1 - x0, None, ink(theme::PAPER_TEXT, 1.0), DT_LEFT);
+                let br = rect(x0, (card.y + 72.0 * s) as i32, x1 - x0, (rule_y - 44.0 * s - card.y - 72.0 * s).max(0.0) as i32);
+                if r.body.is_empty() {
+                    c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
+                } else {
+                    // As the deck draws it: lists, checklists, quotes, code and tables, not their markup.
+                    crate::win::ui::draw_body(c, &r.body, &f.card_body, br, r.color, dark, a, s);
+                }
+            }
         }
     }
     // Footer: when it was edited, then a hairline and the colour swatches.
