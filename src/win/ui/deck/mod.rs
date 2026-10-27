@@ -229,6 +229,15 @@ struct Deck {
     caps: Spring,
     /// The cards have been made once: any made after that came into the deck.
     synced: bool,
+    /// The deck's notes at the last sync, to see which came back (Undo) or are new.
+    known: std::collections::HashSet<u64>,
+    /// A note came into the deck past the cards it shows (Undo of one of those, the
+    /// deck full): the pill, or the "+N" tile, swells and brightens for a moment, seconds
+    /// in; the card itself would have grown into its place.
+    pulse: Option<f32>,
+    /// Notes just came or went: the next frame steps one refresh, however long the work
+    /// that changed them (an Undo, a delete) kept the frames waiting.
+    fresh: bool,
     extras: Spring, // plus button and "+N" tile
     extras_delay: f32,
     extras_goal: f32,
@@ -358,6 +367,9 @@ pub fn create() {
             pill: Spring::fade(1.0, motion::DEFAULT),
             caps: Spring::px(0.0, motion::DEFAULT),
             synced: false,
+            known: std::collections::HashSet::new(),
+            pulse: None,
+            fresh: false,
             extras: Spring::unit(0.0, motion::SHINGLE),
             extras_delay: 0.0,
             extras_goal: 0.0,

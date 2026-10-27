@@ -348,6 +348,9 @@ struct Win {
     /// The page before a switch, as it was on screen (its rect and pixels), cross-fading
     /// into the new one.
     old_page: Option<(RECT, Vec<u32>)>,
+    /// The whole window before the appearance changed, cross-fading into the new one.
+    old_theme: Option<Vec<u32>>,
+    theme_a: Spring,
 }
 
 /// The shown page's rows. Building them formats every label, counts the notes and looks
@@ -871,7 +874,16 @@ fn sync_knobs(w: &mut Win) {
 }
 
 pub fn retheme() {
-    if let Some(h) = with(|w| w.hwnd) {
+    // From the colours it had to the new ones, rather than in one frame.
+    if let Some(h) = with(|w| {
+        if let Some(c) = w.canvas.as_mut() {
+            w.old_theme = Some(c.copy_out(rect(0, 0, c.w, c.h)));
+            w.theme_a.snap(0.0);
+            w.theme_a.launch(1.0);
+            anim::wake(Client::Settings);
+        }
+        w.hwnd
+    }) {
         theme::set_dark_titlebar(h, app::dark());
         paint_now(h);
     }
@@ -961,6 +973,8 @@ fn on_create(hwnd: HWND) {
         held: 0,
         eat_keys: false,
         old_page: None,
+        old_theme: None,
+        theme_a: Spring::fade(1.0, motion::DEFAULT),
     };
     sync_knobs(&mut w);
     WIN.with(|c| *c.borrow_mut() = Some(w));
@@ -990,11 +1004,14 @@ fn set_page(w: &mut Win, i: usize) {
 pub fn frame(dt: f32) -> bool {
     let r = with(|w| {
         let mut moving = false;
-        for sp in [&mut w.side_y, &mut w.hover_y, &mut w.hover_a, &mut w.page_a, &mut w.press, &mut w.result_a, &mut w.scroll] {
+        for sp in [&mut w.side_y, &mut w.hover_y, &mut w.hover_a, &mut w.page_a, &mut w.press, &mut w.result_a, &mut w.scroll, &mut w.theme_a] {
             moving |= sp.step(dt);
         }
         for sp in w.knobs.values_mut() {
             moving |= sp.step(dt);
+        }
+        if w.theme_a.value >= 0.999 {
+            w.old_theme = None;
         }
         if w.page_a.value >= 0.999 {
             w.old_page = None;

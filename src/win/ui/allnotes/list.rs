@@ -34,6 +34,7 @@ pub(super) fn rebuild(l: &mut Lib) {
     let mode = l.mode;
     // When the selected note goes (archived, deleted), select its neighbour, not the top.
     let was = primary_index(l);
+    let was_id = l.sel.last().copied();
     let before: std::collections::HashMap<u64, usize> = l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
     let same_list = l.listed == (mode, l.query.clone()) && l.drag.is_none();
     l.listed = (mode, l.query.clone());
@@ -72,7 +73,7 @@ pub(super) fn rebuild(l: &mut Lib) {
     };
     l.rows = rows;
     if same_list {
-        close_gaps(l, &before, last);
+        close_gaps(l, &before, last, was_id);
     } else {
         l.leaving.clear();
         l.arriving.clear();
@@ -83,12 +84,9 @@ pub(super) fn rebuild(l: &mut Lib) {
         if let Some(r) = l.rows.get(near) {
             l.sel.push(r.id);
             l.anchor = Some(r.id);
-            l.detail_a.snap(0.0);
-            l.detail_a.to(1.0);
-            // From where its row is drawn now (still where it was, about to close the gap).
-            let off = l.offs.get(&r.id).map_or(0.0, |sp| sp.value);
-            let lay = layout(l);
-            l.sel_y.snap(lay.list_top + near as f32 * lay.row_h + off);
+            // The selection stays where it was (the row below closes up into it) and turns
+            // its colour; the card cross-fades.
+            swap_detail(l);
         }
     }
     if let Some(i) = primary_index(l) {
@@ -103,7 +101,7 @@ pub(super) fn rebuild(l: &mut Lib) {
 /// stayed move from where they were drawn to their new places, closing the gaps or
 /// opening them; a row that left fades where it was, and one that came fades in. A
 /// reordering (the same rows) moves nothing here: the drag that made it already has.
-fn close_gaps(l: &mut Lib, before: &std::collections::HashMap<u64, usize>, gone: std::collections::HashMap<u64, Row>) {
+fn close_gaps(l: &mut Lib, before: &std::collections::HashMap<u64, usize>, gone: std::collections::HashMap<u64, Row>, was: Option<u64>) {
     let now: Vec<u64> = l.rows.iter().map(|r| r.id).collect();
     let (moved, came) = shifts(before, &now);
     if gone.is_empty() && came.is_empty() {
@@ -117,17 +115,17 @@ fn close_gaps(l: &mut Lib, before: &std::collections::HashMap<u64, usize>, gone:
         l.offs.insert(id, sp);
     }
     for id in came {
-        let mut sp = Spring::fade(0.0, (1.0, 0.3));
-        sp.to(1.0);
-        l.arriving.insert(id, sp);
+        let mut sp = Spring::fade(0.0, (1.0, 0.24));
+        sp.launch(1.0);
+        l.arriving.insert(id, (ARRIVE_WAIT_S, sp));
     }
     for (id, row) in gone {
         let Some(&at) = before.get(&id) else { continue };
         l.offs.remove(&id);
-        let mut fade = Spring::fade(1.0, (1.0, 0.16));
-        fade.launch(0.0);
-        l.leaving.push(Leaving { row, at, fade });
+        l.leaving.push(Leaving { row, at, fade: FadeOut::new(1.0, LEAVE_S), selected: was == Some(id) });
+        l.hold = LEAVE_S;
     }
+    l.fresh = true;
     anim::wake(Client::List);
 }
 
@@ -336,8 +334,7 @@ pub(super) fn select_row(l: &mut Lib, i: usize, ctrl: bool, shift: bool) {
         }
     }
     if before != l.sel.last().copied() || l.sel.len() > 1 {
-        l.detail_a.snap(l.detail_a.value.min(0.72));
-        l.detail_a.to(1.0);
+        swap_detail(l);
     }
     anim::wake(Client::List);
 }

@@ -3,9 +3,10 @@
 
 //! Tooltips for icon-only buttons, drawn like our menus: a small rounded card with a soft
 //! shadow, the action and (dimmer) its shortcut. It waits a moment before the first one
-//! shows; once one is up, moving to the next button slides it there, its words crossing
-//! over, without the wait. It fades in with a short settle toward the button, and fades
-//! out quickly: on a click too, in a few frames, rather than vanishing in one.
+//! shows; once one is up, moving to the next button swaps it without the wait: it fades
+//! out where it is, quickly, and the next one fades in at its button (sliding it there
+//! stepped and jumped, its words and keycaps changing on the way). It fades in with a
+//! short settle toward the button, and fades out to nothing: on a click too.
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
@@ -37,8 +38,8 @@ const GONE_MS: u32 = 120;
 /// How long it takes to fade out, to nothing (in, it fades as a menu does).
 const OUT_S: f32 = 0.12;
 const IN: (f32, f32) = (1.0, 0.12);
-/// How it slides to the next button.
-const SLIDE: (f32, f32) = (1.0, 0.16);
+/// How long the tip takes to fade out on its way to the next button.
+const SWAP_S: f32 = 0.06;
 
 struct Tip {
     hwnd: HWND,
@@ -67,9 +68,9 @@ struct Tip {
     /// button's tip.
     at: (Spring, Spring),
     width: Spring,
-    /// What it said before it slid on, crossing over to what it says now (`swap` 0 to 1).
-    was: Option<(String, String)>,
-    swap: Spring,
+    /// Fading out on its way to another button: where it comes up next (its window's
+    /// top-left) and its size there.
+    next: Option<(f32, f32, (i32, i32))>,
     /// What the card says now (label, keys).
     showing: (String, String),
     s: f32,
@@ -133,10 +134,9 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 hidden_at: None,
                 fade: Spring::fade(0.0, IN),
                 out: None,
-                at: (Spring::px(0.0, SLIDE), Spring::px(0.0, SLIDE)),
-                width: Spring::px(0.0, SLIDE),
-                was: None,
-                swap: Spring::fade(1.0, SLIDE),
+                at: (Spring::px(0.0, IN), Spring::px(0.0, IN)),
+                width: Spring::px(0.0, IN),
+                next: None,
                 showing: (String::new(), String::new()),
                 s: 1.0,
                 fonts: None,
@@ -255,6 +255,7 @@ pub fn mute_for(owner: HWND) {
 fn go_away(t: &mut Tip) {
     unsafe { KillTimer(t.hwnd, T_SHOW) };
     t.pending = false;
+    t.next = None;
     if t.shown {
         t.shown = false;
         t.hidden_at = Some(Instant::now());
@@ -309,35 +310,32 @@ fn show(t: &mut Tip, swap: bool) {
     }
     x = x.clamp(work.left, (work.right - w).max(work.left));
     y = y.clamp(work.top, (work.bottom - h).max(work.top));
-    let (old, old_size) = (std::mem::take(&mut t.showing), t.size);
-    t.size = (w, h);
     let (ox, oy) = ((x - t.margin) as f32, (y - t.margin) as f32);
-    let sliding = swap && t.fade.value >= 0.05 && t.canvas.is_some() && old_size.1 == h;
-    if sliding {
-        // From where it is, to the next button, its words crossing over.
-        t.at.0.to(ox);
-        t.at.1.to(oy);
-        t.width.to(w as f32);
-        if old != (t.label.clone(), t.keys.clone()) {
-            t.was = Some(old);
-            t.swap.snap(0.0);
-            t.swap.to(1.0);
-        }
-    } else {
-        // Fresh: fade in with a short settle toward the button.
-        t.fade.snap(0.0);
-        t.at.0.snap(ox);
-        t.at.1.snap(oy);
-        t.width.snap(w as f32);
-        t.was = None;
-        t.swap.snap(1.0);
-    }
-    t.shown = true;
-    t.showing = (t.label.clone(), t.keys.clone());
     unsafe { KillTimer(t.hwnd, T_GONE) };
-    // Back while fading out: from where the fade had got to.
-    t.out = None;
-    t.fade.retarget(1.0, IN);
+    let here = (t.at.0.target, t.at.1.target, t.size) == (ox, oy, (w, h)) && t.showing == (t.label.clone(), t.keys.clone());
+    if here && t.canvas.is_some() && t.fade.value > 0.0 {
+        // Back on the button it was fading out from: it fades back in from where it is.
+        t.shown = true;
+        t.out = None;
+        t.next = None;
+        t.fade.retarget(1.0, IN);
+        anim::wake(Client::Tip);
+        return;
+    }
+    if swap && t.canvas.is_some() && t.fade.value >= 0.05 && !(here && t.out.is_none()) {
+        // Up for another button: out where it is, then in at that one (see `frame`).
+        t.shown = true;
+        t.next = Some((ox, oy, (w, h)));
+        if t.out.is_none() {
+            t.out = Some(FadeOut::new(clamp01(t.fade.value), SWAP_S));
+        }
+        anim::wake(Client::Tip);
+        return;
+    }
+    // Fresh: fade in with a short settle toward the button.
+    come_up(t, ox, oy, (w, h));
+    t.fade.snap(0.0);
+    t.fade.launch_as(1.0, IN);
     render(t);
     // Above everything, pinned notes included.
     unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) };
@@ -374,23 +372,41 @@ fn measure(t: &Tip) -> (i32, i32) {
     (w, (H * s) as i32)
 }
 
+/// Up at (`ox`, `oy`), `size` big, saying what it's for now, fading in from where its
+/// fade is.
+fn come_up(t: &mut Tip, ox: f32, oy: f32, size: (i32, i32)) {
+    t.size = size;
+    t.at.0.snap(ox);
+    t.at.1.snap(oy);
+    t.width.snap(size.0 as f32);
+    t.showing = (t.label.clone(), t.keys.clone());
+    t.shown = true;
+    t.out = None;
+    t.next = None;
+}
+
 pub fn frame(dt: f32) -> bool {
     with(|t| {
         t.fading = t.fading.saturating_add(1);
         let mut moving = t.fade.step(dt);
-        for sp in [&mut t.at.0, &mut t.at.1, &mut t.width, &mut t.swap] {
+        for sp in [&mut t.at.0, &mut t.at.1, &mut t.width] {
             moving |= sp.step(dt);
-        }
-        if t.swap.value >= 0.999 {
-            t.was = None;
         }
         if let Some(out) = t.out.as_mut() {
             let a = out.step(dt);
             let done = out.done();
             let was = t.fade.value;
             t.fade.snap(a);
-            // Hidden once a frame of nothing has been shown, not cut from the faint last one.
+            // Hidden once a frame of nothing has been shown, not cut from the faint last one;
+            // or, on its way to another button, up there.
             if done && was <= 0.0 {
+                if let Some((ox, oy, size)) = t.next {
+                    come_up(t, ox, oy, size);
+                    t.fade.launch_as(1.0, IN);
+                    t.fade.step(dt);
+                    render(t);
+                    return true;
+                }
                 hide(t);
                 return false;
             }
@@ -413,8 +429,8 @@ fn hide(t: &mut Tip) {
     }
     t.fade.snap(0.0);
     t.out = None;
+    t.next = None;
     t.canvas = None;
-    t.was = None;
 }
 
 fn render(t: &mut Tip) {
@@ -469,11 +485,7 @@ fn render(t: &mut Tip) {
         }
         c.flush();
     };
-    let k = clamp01(t.swap.value);
-    if let Some((label, keys)) = t.was.as_ref() {
-        words(&mut c, label, keys, 1.0 - k);
-    }
-    words(&mut c, &t.label, &t.keys, if t.was.is_some() { k } else { 1.0 });
+    words(&mut c, &t.showing.0, &t.showing.1, 1.0);
     c.make_opaque_rect(rect((ox + 3.0 * s) as i32, (oy + 3.0 * s) as i32, w - (6.0 * s) as i32, h - (6.0 * s) as i32));
     if a < 0.999 {
         c.scale_alpha(a);

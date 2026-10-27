@@ -29,7 +29,7 @@ use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_LEFT, DT_RIGHT, DT_SINGLEL
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use crate::win::render::anim::{self, Client, Spring, clamp01};
+use crate::win::render::anim::{self, Client, FadeOut, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::win::theme;
@@ -168,8 +168,10 @@ struct Open {
     keys: usize,
     blink: Option<Blink>,
     result: Option<u32>,
-    /// Fading out after a dismissal; input is ignored and passes through.
+    /// Fading out after a dismissal; input is ignored and passes through. It fades to
+    /// nothing on time (`FadeOut`): a spring's tail was cut at 3%.
     closing: bool,
+    out: Option<FadeOut>,
     /// Where the pointer last was (screen coordinates).
     pointer: (i32, i32),
     /// What the pointer resting on a row will do to the submenus once `T_SUB` fires, and
@@ -353,7 +355,7 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
         parent_row: 0,
     };
     MENU.with(|m| {
-        *m.borrow_mut() = Some(Open { menus: vec![menu], keys: 0, blink: None, result: None, closing: false, pointer: (i32::MIN, i32::MIN), pending: None })
+        *m.borrow_mut() = Some(Open { menus: vec![menu], keys: 0, blink: None, result: None, closing: false, out: None, pointer: (i32::MIN, i32::MIN), pending: None })
     });
     with(|o| draw(o, 0));
     unsafe {
@@ -394,23 +396,35 @@ pub fn frame(dt: f32) -> bool {
             moving |= m.fade.step(dt);
         }
         if o.closing {
-            draw_all(o);
-            if o.menus[0].fade.value < 0.03 || !moving {
+            // Gone once a frame of nothing has shown.
+            let was = o.menus[0].fade.value;
+            let (a, done) = o.out.as_mut().map_or((0.0, true), |f| (f.step(dt), f.done()));
+            if done && was <= 0.0 {
                 o.result = Some(0);
                 return false;
             }
+            for m in &mut o.menus {
+                m.fade.snap(a);
+            }
+            draw_all(o);
             return true;
         }
         // Confirmation blink, then close.
         if let Some(b) = o.blink {
-            let ms = b.t0.elapsed().as_millis();
-            if ms > 190 {
-                o.result = Some(b.cmd);
-                return false;
+            // After the blink, it fades to nothing in 80 ms, and goes once a frame of
+            // nothing has shown (it went at 190 ms, a few percent left).
+            if b.t0.elapsed().as_millis() > 110 && o.out.is_none() {
+                o.out = Some(FadeOut::new(clamp01(o.menus[0].fade.value), 0.08));
             }
-            if ms > 110 && o.menus[0].fade.target > 0.0 {
+            if let Some(f) = o.out.as_mut() {
+                let was = o.menus[0].fade.value;
+                let a = f.step(dt);
+                if f.done() && was <= 0.0 {
+                    o.result = Some(b.cmd);
+                    return false;
+                }
                 for m in &mut o.menus {
-                    m.fade.launch_as(0.0, (1.0, 0.1));
+                    m.fade.snap(a);
                 }
             }
             draw_all(o);
@@ -569,10 +583,10 @@ fn dismiss(o: &mut Open) {
     o.closing = true;
     o.pending = None;
     let root = o.menus[0].hwnd;
+    // It starts going at once, from the frame after the click, with the row that was lit
+    // still lit as it fades (it went out in the first frame).
+    o.out = Some(FadeOut::new(clamp01(o.menus[0].fade.value), 0.12));
     for m in &mut o.menus {
-        m.hot = Target::None;
-        // It starts going at once, from the frame after the click.
-        m.fade.launch_as(0.0, (1.0, 0.12));
         unsafe {
             let ex = GetWindowLongW(m.hwnd, GWL_EXSTYLE) as u32;
             SetWindowLongW(m.hwnd, GWL_EXSTYLE, (ex | WS_EX_TRANSPARENT) as i32);

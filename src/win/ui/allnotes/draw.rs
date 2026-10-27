@@ -118,7 +118,7 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // Switching lists, the new one is drawn whole and cross-fades with the one before
     // (below); opening, it fades in from the window's colour.
     let la = if l.old_list.is_some() { 1.0 } else { clamp01(l.list_a.value) };
-    let slide = if anim::reduced() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
+    let slide = if anim::reduced() || l.old_list.is_some() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
     let clip = Some(rect(0, top as i32, lay.list_w as i32, lay.h - top as i32));
     if l.rows.is_empty() {
         let (headline, sub) = if !l.query.is_empty() {
@@ -179,15 +179,15 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     }
     if let Some(i) = primary_index(l) {
         let y = (l.sel_y.value - l.scroll.value + slide).round();
-        let came = l.arriving.get(&l.rows[i].id).map_or(1.0, |sp| clamp01(sp.value));
         if y + lay.row_h > top && y < bottom {
-            c.shape(&row_shape(y), theme::paper(l.rows[i].color, dark), la * came, 1.0, 0.0);
+            c.shape(&row_shape(y), sel_color(l, i, dark), la, 1.0, 0.0);
         }
     }
-    // Rows that just left, fading where they were as the rows below close up over them.
+    // Rows that just left, fading where they were before the rows below close up (over
+    // the selection, which stays, if it was theirs).
     for g in &l.leaving {
         let y = (lay.list_top + g.at as f32 * lay.row_h - l.scroll.value + slide).round();
-        let k = la * clamp01(g.fade.value);
+        let k = la * clamp01(g.fade.value());
         if y + lay.row_h <= top || y >= bottom || k <= 0.003 {
             continue;
         }
@@ -200,8 +200,9 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         if dcy - d / 2.0 > top {
             c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(g.row.color).accent, k, 1.0, 0.0);
         }
-        c.line_ct(&g.row.title, &f.row_title, tx, tb, right - tx, clip, mix(p.list, p.text, k), DT_LEFT);
-        c.line_ct(&t!("note_edited", g.row.time), &f.row_time, tx, mb, right - tx, clip, mix(p.list, p.sub, k), DT_LEFT);
+        let (ink, sub) = if g.selected { (theme::PAPER_TEXT, theme::paper_subtext(g.row.color, dark)) } else { (p.text, p.sub) };
+        c.line(&g.row.title, &f.row_title, tx, tb, right - tx, clip, ink, k, DT_LEFT);
+        c.line(&t!("note_edited", g.row.time), &f.row_time, tx, mb, right - tx, clip, sub, k, DT_LEFT);
     }
     let sel_idx: Vec<usize> = range.clone().filter(|i| l.sel.contains(&l.rows[*i].id)).collect();
     let lifted = l.drag.as_ref().filter(|dr| dr.active).map(|dr| dr.from);
@@ -213,7 +214,7 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             continue;
         }
         // A row that just came fades in as the rows below make room for it.
-        let la = la * l.arriving.get(&r.id).map_or(1.0, |sp| clamp01(sp.value));
+        let la = la * l.arriving.get(&r.id).map_or(1.0, |(_, sp)| clamp01(sp.value));
         if Some(i) == lifted {
             // Above everything drawn so far, text included: flush, lift, then draw it.
             c.flush();
@@ -305,6 +306,12 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
 
     if lay.wide {
         draw_detail(l, lay, c, &p, dark);
+        // Another note's card cross-fading in over the one before.
+        if let Some((r, px)) = l.old_detail.as_ref() {
+            c.flush();
+            c.mix_in(*r, px, clamp01(l.detail_a.value));
+            c.begin_batch();
+        }
     }
 
     // Caption buttons last, above everything.
@@ -347,7 +354,8 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
     if l.sel.is_empty() {
         return;
     }
-    let a = clamp01(l.detail_a.value);
+    // Cross-fading from the card before (see `draw`), this one is drawn whole.
+    let a = if l.old_detail.is_some() { 1.0 } else { clamp01(l.detail_a.value) };
     let ring_hit = ring_on(l).map(|f| hit_of(l, f));
     let lift = 0.0;
     let primary_row = primary_index(l).map(|i| &l.rows[i]);
@@ -461,9 +469,9 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
                 let right = er.right - (12.0 * s) as i32;
                 let br = rect(x0, top, right - x0, (er.bottom - top).max(0));
                 let gap = (step.round() as i32 - (f.card_body.ascent + f.card_body.descent)).max(0);
-                if r.body.is_empty() {
-                    c.text_ct(t!("card_no_text"), &f.card_body, br, Some(br), ink(theme::PAPER_TEXT, 0.55), DT_LEFT | DT_WORDBREAK | DT_EDITCONTROL | DT_END_ELLIPSIS);
-                } else {
+                // An empty body is left empty, as the editor that takes over shows it: a
+                // "No additional text" here went in a frame when the editor came.
+                if !r.body.is_empty() {
                     crate::win::ui::draw_body_paced(c, &r.body, &f.card_body, br, r.color, dark, a, s, gap);
                 }
             }

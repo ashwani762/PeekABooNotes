@@ -23,7 +23,7 @@ use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use crate::win::render::anim::{self, Client, Spring, clamp01};
+use crate::win::render::anim::{self, Client, FadeOut, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::common::store::{body_of, search_rest, title_of};
@@ -301,19 +301,42 @@ struct Lib {
     /// Rows that just left the list (archived, deleted), fading where they were as the
     /// rows below close up over them.
     leaving: Vec<Leaving>,
-    /// Rows that just came into it (an undo), fading in as the rows below make room.
-    arriving: std::collections::HashMap<u64, Spring>,
+    /// Rows that just came into it (an undo), fading in once the rows below have made
+    /// most of the room: (seconds still to wait, fade).
+    arriving: std::collections::HashMap<u64, (f32, Spring)>,
+    /// Seconds the rows wait before closing a gap, while the row that left fades: they
+    /// slid up through its words, two rows of text on top of each other for a moment.
+    hold: f32,
+    /// The selection's colour on its way from the row selected before (`sel_from`, as far
+    /// as `sel_k`), and the row and colour it was last drawn for.
+    sel_from: u32,
+    sel_k: Spring,
+    sel_last: Option<(u64, u32)>,
+    /// The detail card before another note's took its place, as it was on screen (its
+    /// rect and pixels), cross-fading into the new one; and the inline editor's picture,
+    /// taken as it closed, for that.
+    old_detail: Option<(RECT, Vec<u32>)>,
+    editor_pic: Option<(RECT, crate::win::render::gfx::Image)>,
+    /// Rows or the card just changed: the next frame steps one refresh, however long the
+    /// work that changed them (a delete, an undo) kept the frames waiting.
+    fresh: bool,
     /// The list before a switch to Notes, Archive or All, as it was on screen (its rect
     /// and pixels), cross-fading into the new one.
     old_list: Option<(RECT, Vec<u32>)>,
 }
 
-/// A row that left the list, and the place it had.
+/// A row that left the list, the place it had, and whether it was the selected one.
 struct Leaving {
     row: Row,
     at: usize,
-    fade: Spring,
+    fade: FadeOut,
+    selected: bool,
 }
+
+/// How long a row that left takes to fade, before the rows below close up; and how long
+/// a row that came waits, as the rows below make room, before it fades in.
+const LEAVE_S: f32 = 0.12;
+const ARRIVE_WAIT_S: f32 = 0.16;
 
 /// How rows close a gap or open one, and the selection with them.
 const GAP: (f32, f32) = (0.9, 0.3);
@@ -423,8 +446,7 @@ pub fn select(ids: &[u64]) {
             l.sel_y.to(lay.list_top + i as f32 * lay.row_h);
             ensure_visible(l, i);
         }
-        l.detail_a.snap(0.0);
-        l.detail_a.to(1.0);
+        swap_detail(l);
         Some(l.hwnd)
     })
     .flatten();
@@ -562,28 +584,93 @@ pub fn recolor(id: u64) {
     }
 }
 
+/// Another note (or several) takes the detail card: what it shows now cross-fades into
+/// what it will, rather than the card turning another colour, empty, in one frame and its
+/// text fading in after. The inline editor that just closed is in the picture too.
+fn swap_detail(l: &mut Lib) {
+    let lay = layout(l);
+    // The editor's picture: taken as it closed, or now while it's still there.
+    let pic = l.editor_pic.take().or_else(|| if l.editor.is_null() || l.old_detail.is_some() { None } else { editor::editor_picture(l.editor) });
+    if lay.wide
+        && let Some(c) = l.canvas.as_mut()
+    {
+        let r = rect(lay.list_w as i32 + 1, 0, c.w - lay.list_w as i32 - 1, c.h);
+        if l.old_detail.is_none() {
+            if let Some((at, img)) = pic {
+                c.over(&img, at.left, at.top);
+            }
+            l.old_detail = Some((r, c.copy_out(r)));
+        }
+    }
+    l.detail_a.snap(0.0);
+    l.detail_a.launch(1.0);
+    l.fresh = true;
+}
+
+/// The selection's colour as it shows now, for the note at row `i`.
+fn sel_color(l: &Lib, i: usize, dark: bool) -> u32 {
+    let now = theme::paper(l.rows[i].color, dark);
+    let to = match l.sel_last {
+        Some((id, c)) if id != l.rows[i].id || c != now => c,
+        _ => now,
+    };
+    mix(l.sel_from, to, clamp01(l.sel_k.value))
+}
+
 pub fn frame(dt: f32) -> bool {
     let r = with(|l| {
         if l.last_scroll.elapsed().as_secs_f32() > 0.9 {
             l.bar_a.to(0.0);
         }
+        let dt = if std::mem::take(&mut l.fresh) { dt.min(anim::period()) } else { dt };
         let mut moving = false;
-        for sp in [&mut l.seg_x, &mut l.scroll, &mut l.sel_y, &mut l.hover_y, &mut l.hover_a, &mut l.list_a, &mut l.detail_a, &mut l.bar_a] {
+        for sp in [&mut l.seg_x, &mut l.scroll, &mut l.hover_y, &mut l.hover_a, &mut l.list_a, &mut l.detail_a, &mut l.bar_a, &mut l.sel_k] {
             moving |= sp.step(dt);
         }
-        for sp in l.offs.values_mut() {
-            moving |= sp.step(dt);
+        // A row that left fades first; then the rows below, and the selection, close up.
+        if l.hold > 0.0 {
+            l.hold -= dt;
+            moving = true;
+        } else {
+            moving |= l.sel_y.step(dt);
+            for sp in l.offs.values_mut() {
+                moving |= sp.step(dt);
+            }
         }
         for g in l.leaving.iter_mut() {
-            moving |= g.fade.step(dt);
+            g.fade.step(dt);
+            moving = true;
         }
-        l.leaving.retain(|g| g.fade.value > 0.002);
-        for sp in l.arriving.values_mut() {
-            moving |= sp.step(dt);
+        // Faded to nothing (this frame shows nothing of it).
+        l.leaving.retain(|g| !g.fade.done());
+        for (wait, sp) in l.arriving.values_mut() {
+            if *wait > 0.0 {
+                *wait -= dt;
+                moving = true;
+            } else {
+                moving |= sp.step(dt);
+            }
         }
-        l.arriving.retain(|_, sp| sp.value < 0.998);
+        l.arriving.retain(|_, (_, sp)| sp.value < 0.998);
         if l.list_a.value >= 0.999 {
             l.old_list = None;
+        }
+        if l.detail_a.value >= 0.999 {
+            l.old_detail = None;
+        }
+        // The selection turns the colour of the note it's now on, from the colour it shows.
+        let now = primary_index(l).map(|i| (l.rows[i].id, theme::paper(l.rows[i].color, app::dark())));
+        if now != l.sel_last {
+            match (l.sel_last, now) {
+                (Some((_, was)), Some(_)) => {
+                    l.sel_from = mix(l.sel_from, was, clamp01(l.sel_k.value));
+                    l.sel_k.snap(0.0);
+                    l.sel_k.launch(1.0);
+                    moving = true;
+                }
+                _ => l.sel_k.snap(1.0),
+            }
+            l.sel_last = now;
         }
         (moving || l.bar_a.value > 0.01, l.hwnd)
     });
@@ -646,6 +733,8 @@ fn perform(hwnd: HWND, a: Action) {
         close_editor();
     }
     perform_inner(hwnd, a);
+    // A picture of the editor that closed for it, which no other note took the card from.
+    with(|l| l.editor_pic = None);
     sync_editor();
 }
 
@@ -802,8 +891,7 @@ pub fn pre_translate(msg: &MSG) -> bool {
                 if let Some(id) = first {
                     l.sel.push(id);
                 }
-                l.detail_a.snap(0.0);
-                l.detail_a.to(1.0);
+                swap_detail(l);
                 anim::wake(Client::List);
                 Some(Action::None)
             }
@@ -871,7 +959,7 @@ fn on_create(hwnd: HWND) {
         hover_y: Spring::px(0.0, (1.0, 0.16)),
         hover_a: Spring::unit(0.0, motion::SNAPPY),
         list_a: Spring::fade(0.0, motion::DEFAULT),
-        detail_a: Spring::unit(0.0, motion::DEFAULT),
+        detail_a: Spring::fade(0.0, motion::DEFAULT),
         bar_a: Spring::unit(0.0, motion::DEFAULT),
         last_scroll: now,
         edit_brush: null_mut(),
@@ -883,6 +971,13 @@ fn on_create(hwnd: HWND) {
         listed: (usize::MAX, String::new()),
         leaving: Vec::new(),
         arriving: std::collections::HashMap::new(),
+        hold: 0.0,
+        sel_from: 0,
+        sel_k: Spring::fade(1.0, motion::DEFAULT),
+        sel_last: None,
+        old_detail: None,
+        editor_pic: None,
+        fresh: false,
         old_list: None,
     };
     lib.list_a.to(1.0);

@@ -120,6 +120,18 @@ pub(super) fn sync_editor() {
     SYNCING.with(|s| s.set(false));
 }
 
+/// Inline editor `h` as it is on screen, and where in the window.
+pub(super) fn editor_picture(h: HWND) -> Option<(RECT, crate::win::render::gfx::Image)> {
+    crate::win::render::gfx::capture_now(h).map(|img| {
+        let mut r: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetWindowRect(h, &mut r);
+            windows_sys::Win32::Graphics::Gdi::MapWindowPoints(null_mut(), GetParent(h), &mut r as *mut RECT as *mut _, 2);
+        }
+        (r, img)
+    })
+}
+
 /// Save and remove the inline editor (before actions that change or move the note).
 pub(super) fn close_editor() {
     if let Some(h) = with(|l| {
@@ -129,6 +141,10 @@ pub(super) fn close_editor() {
         h
     })
         && !h.is_null() {
+            // Its picture, as it was on screen, for the card's cross-fade to whatever comes
+            // next (see `swap_detail`).
+            let pic = editor_picture(h);
+            with(|l| l.editor_pic = pic);
             SYNCING.with(|s| s.set(true));
             unsafe { DestroyWindow(h) };
             SYNCING.with(|s| s.set(false));

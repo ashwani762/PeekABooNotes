@@ -46,10 +46,11 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     let (cw, ch) = (c.w, c.h);
     c.clear(0xFF00_0000 | p.bg);
 
-    // Content first, so the page fade can blend it (text included) with the page before.
-    // It settles in whole pixels, so its text (on whole pixels) and its boxes move together.
+    // Content first, so the page fade can blend it (text included) with the page before:
+    // a cross-fade, in place (a settle of a few whole pixels went in uneven steps, the last
+    // after several still frames).
     let a = clamp01(w.page_a.value);
-    let rise = if anim::reduced() { 0.0 } else { ((1.0 - a) * 8.0 * s).round() };
+    let rise = 0.0;
     c.begin_batch();
     let (x0, _) = content_x(w);
     let groups = groups(w);
@@ -151,6 +152,10 @@ pub(super) fn draw(w: &Win, c: &mut Canvas) {
     }
     c.text_ct("\u{E8BB}", &f.chrome, r, None, if hot { 0xFFFFFF } else { mix(bg, p.text, 0.9) }, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     c.flush();
+    // The appearance just changed: the window as it was cross-fades into it.
+    if let Some(px) = w.old_theme.as_ref() {
+        c.mix_in(rect(0, 0, cw, ch), px, clamp01(w.theme_a.value));
+    }
 }
 
 pub(super) fn draw_row(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, rise: f32) {
