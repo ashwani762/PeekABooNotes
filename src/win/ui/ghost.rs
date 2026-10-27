@@ -78,14 +78,18 @@ struct Ghost {
     on_arrive: Option<Box<dyn FnOnce()>>,
     arrived: bool,
     /// Its first frame, the pose it sets off from, is up but not yet on screen: the next
-    /// frame leaves it there to be seen, and the flight moves from the one after.
+    /// frame leaves it there to be seen, and the flight moves from the one after. Taking
+    /// over from a window (closing), whose place it takes in that frame; opening, it's what
+    /// it leaves (the deck card, the plus button, the capsule) already on screen, and it
+    /// moves from the next frame.
     fresh: bool,
     /// Frames the card stays whole over the window it has just revealed, which may take a
     /// frame to come up, before it fades.
     hold: u8,
-    /// Whether it has moved yet: its first step is one refresh, however long the frames
-    /// before took (the window it opens into is made while its first frame shows).
-    moved: bool,
+    /// How many frames it has moved: its first `START` steps are a refresh each, however
+    /// long the frames before them took (the window it opens into made just before it set
+    /// off, and painted while its first frames show), so it never sets off with a leap.
+    moves: u8,
     /// The window it opens into, while its picture is still to be had, and the frames tried.
     /// The card sets off before the window is made, and the compositor has a window just
     /// made a frame or so later; meanwhile it's paper.
@@ -96,6 +100,18 @@ struct Ghost {
 
 /// Frames a card tries for the picture of the window it opens into, before it does without.
 const PICTURE_TRIES: u8 = 30;
+
+/// The frames a card's flight starts with that step a refresh each, whenever they come.
+const START: u8 = 3;
+
+/// How much longer a flight takes for its distance (`d` px between the centres where it
+/// starts and ends, at scale `s`): as long as from a deck card to the window beside it
+/// (about 350 to 650 px) up to 700 px, longer beyond, but less than in proportion, so a
+/// card crossing a wide display goes faster but never streaks (2,500 px opening went up to
+/// 290 px a frame at 60 Hz; now under 120, and closing under 140).
+fn far(d: f32, s: f32) -> f32 {
+    (d / (700.0 * s)).max(1.0).powf(0.7).min(2.6)
+}
 
 /// How near its end a card has to be to have arrived, in px. A card that opens into a
 /// window arrives once its picture sits on the window's own pixels (it's drawn on whole
@@ -166,6 +182,14 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
         )
     };
     crate::win::util::no_transitions(hwnd);
+    // Under a card flying open (a note closing as another opens passes behind the one
+    // coming out, rather than jumping in front of it), and under a tooltip fading out (the
+    // plus button's, as a new note grows out of it).
+    let under = GHOSTS.with(|gs| gs.borrow().iter().rev().find(|g| kind != Kind::Open && g.kind == Kind::Open && !done(g)).map(|g| g.hwnd));
+    let under = under.unwrap_or_else(crate::win::ui::tooltip::window);
+    if !under.is_null() && unsafe { IsWindowVisible(under) } != 0 {
+        unsafe { SetWindowPos(hwnd, under, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    }
     let mut g = card(hwnd, kind, from, to, color, content, s);
     g.on_arrive = on_arrive;
     render(&mut g);
@@ -185,7 +209,8 @@ pub fn adopt(ghost: Option<HWND>, window: HWND, on_arrive: Option<Box<dyn FnOnce
         let mut gs = gs.borrow_mut();
         match gs.iter_mut().find(|g| Some(g.hwnd) == ghost && !g.arrived) {
             Some(g) => {
-                g.awaiting = (!window.is_null()).then_some((window, 0));
+                // With the window's picture already (drawn as it was made), nothing to wait for.
+                g.awaiting = (!window.is_null() && g.image.is_none()).then_some((window, 0));
                 g.on_arrive = on_arrive;
                 None
             }
@@ -228,9 +253,12 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
     let pad = (48.0 * s) as i32;
     let b = union(&from.0, &to.0, pad);
     let (ww, wh) = window_size(&from.0, &to.0, pad);
+    let centre = |r: &RECT| ((r.left + r.right) as f32 / 2.0, (r.top + r.bottom) as f32 / 2.0);
+    let ((ax, ay), (bx, by)) = (centre(&from.0), centre(&to.0));
+    let far = far((bx - ax).hypot(by - ay), s);
     let params = match kind {
-        Kind::Open => (0.86, 0.38),
-        Kind::Close => (1.0, 0.3),
+        Kind::Open => (0.86, 0.38 * far),
+        Kind::Close => (1.0, 0.3 * far),
         Kind::Dissolve => (1.0, 0.26),
     };
     let lx = |r: &RECT| (r.left - b.left) as f32;
@@ -262,9 +290,9 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
         body_font: crate::win::editor::rich::preview_fonts(s).1,
         on_arrive: None,
         arrived: false,
-        fresh: true,
+        fresh: kind != Kind::Open,
         hold: 0,
-        moved: false,
+        moves: 0,
         awaiting: None,
         picture_in: Spring::unit(1.0, theme::motion::DEFAULT),
     };
@@ -419,11 +447,10 @@ fn advance(g: &mut Ghost, dt: f32, period: f32) -> Step {
         }
         g.fade.to(0.0);
     }
-    // Setting off, from rest: one refresh, whatever the frames before it took (the window
-    // it opens into made and painted while its first frame showed), so it never sets off
-    // with a leap.
-    let dt = if g.moved { dt } else { dt.min(period) };
-    g.moved = true;
+    // Setting off, from rest: a refresh a frame, whatever the frames before took (the window
+    // it opens into made and painted as it set off), so it never sets off with a leap.
+    let dt = if g.moves >= START { dt } else { dt.min(period) };
+    g.moves = g.moves.saturating_add(1);
     let mut moving = false;
     for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade, &mut g.picture_in] {
         moving |= sp.step(dt);
@@ -577,21 +604,20 @@ mod tests {
         held: u32,
     }
 
-    /// Opening, as the app does it: the window is made while the first frame shows (taking
-    /// `OPEN_WORK` refreshes), and its picture comes `PICTURE_LATE` frames after that.
+    /// Opening, as the app does it: the window is made, and its picture drawn, before the
+    /// card sets off. `late`: how many refreshes late each of the first ticks comes (the
+    /// window just made painting before them), every tick after them on time.
     fn fly_off_screen(kind: Kind, from: (RECT, f32), to: (RECT, f32), image: (Image, Vec<u32>), from_image: Option<(Image, Vec<u32>)>, hz: f64) -> Flight {
-        const OPEN_WORK: f64 = 3.0;
-        const PICTURE_LATE: u32 = 2;
+        fly_late(kind, from, to, image, from_image, hz, &[])
+    }
+
+    fn fly_late(kind: Kind, from: (RECT, f32), to: (RECT, f32), image: (Image, Vec<u32>), from_image: Option<(Image, Vec<u32>)>, hz: f64, late: &[f64]) -> Flight {
         let p = 1.0 / hz;
         let (image, image_px) = image;
         let (from_image, from_px) = from_image.map_or((None, None), |(i, px)| (Some(i), Some(px)));
         let opening = kind == Kind::Open;
-        let (now, mut later) = if opening { (None, Some(image)) } else { (Some(image), None) };
-        let content = Content { title: "Q4 goals, draft".into(), body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(), body_top: None, image: now, from_image };
+        let content = Content { title: "Q4 goals, draft".into(), body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(), body_top: None, image: Some(image), from_image };
         let mut g = card(null_mut(), kind, from, to, 3, content, 1.0);
-        if opening {
-            g.awaiting = Some((null_mut(), 0));
-        }
         let mut pacer = Pacer::new();
         // `fly` draws the first frame and puts it up at once.
         let (win, _) = at_alpha(paint(&mut g, false));
@@ -601,17 +627,15 @@ mod tests {
         let first_misses = first.map(|(at, px, r, b)| misses(&mut g, win, at, px, r, b));
         let mut frames = vec![seen(&g, 1, 0.0)];
         let (mut last_misses, mut held, mut fade_misses) = (None, 0, 0);
+        let mut behind = 0.0;
         for tick in 0..400u32 {
             // The first tick comes right after `fly`, in the same refresh; the rest just after
-            // a refresh, as DwmFlush returns.
-            let work = if opening && tick > 0 { OPEN_WORK } else { 0.0 };
-            let t = if tick == 0 { 0.92 * p } else { (tick as f64 + work + 0.1) * p };
-            if tick == PICTURE_LATE && opening {
-                received(&mut g, later.take());
-            }
+            // a refresh, as the wait returns, unless they come late.
+            behind += late.get(tick as usize).copied().unwrap_or(0.0);
+            let t = if tick == 0 { 0.92 * p } else { (tick as f64 + behind + 0.1) * p };
             let dt = pacer.step(t, Some(Timing { period: p, vblank: Some((t / p).floor() * p), display: 1 }));
             let refresh = (t / p).floor() as u32 + 1;
-            let dt = if g.moved || g.fresh { dt } else { dt.min(p as f32) };
+            let dt = if g.moves >= START || g.fresh { dt } else { dt.min(p as f32) };
             match advance(&mut g, dt, p as f32) {
                 Step::Still => held += 1,
                 Step::Moved => {
@@ -708,6 +732,48 @@ mod tests {
             assert_eq!(s.edges, f.frames[at].edges);
             assert!(s.look.card < 1.0);
         }
+    }
+
+    #[test]
+    fn a_card_opening_moves_in_the_frame_after_the_click_a_refresh_a_frame_from_its_start() {
+        for hz in [60.0, 99.0, 144.0] {
+            let p = 1.0 / hz;
+            // The second and third frames come late (the window just made painting first).
+            let f = fly_late(Kind::Open, (TAB, 14.0), (NOTE, 8.0), pattern(320, 360, 2), Some(pattern(304, 160, 3)), hz, &[0.0, 1.6, 1.6]);
+            assert_eq!(f.first_misses, Some(0), "it sets off as the deck card");
+            // What it leaves is on screen already: it moves at the first frame, in the
+            // refresh the click came in, rather than standing a refresh as that card.
+            assert_eq!(f.frames[1].refresh, f.frames[0].refresh);
+            for s in &f.frames[1..=START as usize] {
+                assert!((s.dt as f64 - p).abs() < 1e-6, "{hz} Hz: a refresh a frame at the start, late or not");
+            }
+            let (moves, _) = steps(&f, |s| s.edges.to_vec());
+            assert!(moves[0] > 0.0 && moves[0] <= moves[1] + 1e-3);
+        }
+    }
+
+    #[test]
+    fn a_long_flight_takes_longer_and_never_streaks() {
+        // From the capsule at the right edge of a 2,560 px display to a note remembered at
+        // its far left.
+        let far_note = RECT { left: 80, top: 300, right: 400, bottom: 660 };
+        let near = fly_off_screen(Kind::Open, (TAB, 14.0), (NOTE, 8.0), pattern(320, 360, 2), None, 60.0);
+        let long = fly_off_screen(Kind::Open, (CAPSULE, 4.0), (far_note, 8.0), pattern(320, 360, 2), None, 60.0);
+        let (near_moves, _) = steps(&near, |s| s.edges.to_vec());
+        let (long_moves, spike) = steps(&long, |s| s.edges.to_vec());
+        let biggest = |v: &[f32]| v.iter().fold(0.0f32, |a, b| a.max(*b));
+        // A flight from a deck card to the window beside it is as it was.
+        assert!(biggest(&near_moves) < 41.0, "{}", biggest(&near_moves));
+        assert!(biggest(&long_moves) < 130.0, "{}", biggest(&long_moves));
+        assert!(long.frames.len() > near.frames.len() * 3 / 2);
+        // Speeding up and slowing down smoothly, without a leap (the steps under a pixel at
+        // the end aside, where it settles).
+        let big: Vec<f32> = long_moves.iter().copied().filter(|m| *m > 2.0).collect();
+        assert!(big.windows(3).all(|w| w[1] <= 1.6 * w[0].max(w[2])), "{spike} {long_moves:?}");
+        // Back home the same way.
+        let back = fly_off_screen(Kind::Close, (far_note, 8.0), (CAPSULE, 4.0), pattern(320, 360, 2), None, 60.0);
+        let (back_moves, _) = steps(&back, |s| s.edges.to_vec());
+        assert!(biggest(&back_moves) < 140.0, "{}", biggest(&back_moves));
     }
 
     /// Probe (run with --ignored --nocapture): every flight frame by frame at 60, 99, 120

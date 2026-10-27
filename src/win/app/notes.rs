@@ -193,26 +193,41 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
                 n.rect = Some([r.left, r.top, r.right, r.bottom]);
             }
         });
-        save();
+        // A new note, empty, goes with the first save of what's typed in it (or with the
+        // window, unkept, if nothing is): writing every note now held its card up by the
+        // time the file took.
+        if !text.trim().is_empty() {
+            save();
+        }
     }
     match from {
         Some(from) if !crate::win::render::anim::reduced() => {
             // Its picture before the deck tucks it away, when it flies from that card: a new
             // note grows from the plus button (its card already dealt into the deck), a note
             // from the pill from its capsule, and neither looks like the card.
-            let from_card = deck::card_rect(id).is_some_and(|(r, _)| (r.left, r.top, r.right, r.bottom) == (from.0.left, from.0.top, from.0.right, from.0.bottom));
-            let from_image = if from_card { deck::card_image(id) } else { None };
+            let same = |a: &RECT| (a.left, a.top, a.right, a.bottom) == (from.0.left, from.0.top, from.0.right, from.0.bottom);
+            let from_card = deck::card_rect(id).is_some_and(|(r, _)| same(&r));
+            let from_plus = deck::plus_rect().is_some_and(|(r, _)| same(&r));
+            let from_image = if from_card {
+                deck::card_image(id)
+            } else if from_plus {
+                deck::plus_image()
+            } else {
+                None
+            };
+            // The window first, unseen, and its picture drawn as it's made (a few ms): the card
+            // sets off with it, moving in the next frame. Made while the card's first frames
+            // showed, it held the card still 100 ms and more, and its picture, from the
+            // compositor, came frames later, each try a late frame. Without a picture it's
+            // paper until the compositor has one; the words are there only should none come.
+            let h = note::create(id, r, note::Show::Later);
+            let picture = note::picture(h);
             deck::hand_off(id);
-            // The card sets off at once, as what it flies from, and the window is made while
-            // its first frame shows (making it, and its picture, took 100 ms and more before
-            // anything moved). Until the card has the window's picture, it's paper; the words
-            // are there only should the picture never come.
             let title = if text.trim().is_empty() { String::new() } else { crate::common::store::title_of(&text) };
-            let content = crate::win::ui::ghost::Content { title, body: crate::common::store::body_of(&text), body_top: None, image: None, from_image };
+            let content = crate::win::ui::ghost::Content { title, body: crate::common::store::body_of(&text), body_top: None, image: picture, from_image };
             // The window's corners, at the scale of the monitor it opens on (not the deck's).
             let s = crate::win::ui::screen::of_rect(&r).1;
             let ghost = crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, None);
-            let h = note::create(id, r, note::Show::Later);
             crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
         }
         _ => {
@@ -234,8 +249,12 @@ pub fn toggle_note(id: u64) {
 pub fn new_note() {
     let id = store_mut(|s| s.create("", ""));
     let from = deck::plus_rect().unwrap_or_else(|| deck::home_rect(id));
-    refresh();
+    // The deck is drawn again once the note is open (as an open note, with no card in the
+    // stack): drawn before, it showed one more note past its end for a frame ("+103", then
+    // "+102").
     open_note_from(id, Some(from));
+    allnotes::refresh();
+    settings::notes_changed();
 }
 
 /// Open the next/previous deck note in place of `id`. Returns true if the caller should close.

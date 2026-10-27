@@ -551,6 +551,19 @@ pub fn card_image(id: u64) -> Option<crate::win::render::gfx::Image> {
     .flatten()
 }
 
+/// The plus button as it is on screen right now, for the card a new note grows from to
+/// start as exactly it (it started as a paper disc, a pop of colour where the button was).
+pub fn plus_image() -> Option<crate::win::render::gfx::Image> {
+    let (r, _) = plus_rect()?;
+    with(|d| {
+        let mut w: RECT = unsafe { std::mem::zeroed() };
+        unsafe { GetWindowRect(d.hwnd, &mut w) };
+        let local = RECT { left: r.left - w.left, top: r.top - w.top, right: r.right - w.left, bottom: r.bottom - w.top };
+        d.canvas.as_mut()?.snapshot(local)
+    })
+    .flatten()
+}
+
 /// The plus button's screen rect, if the deck is fanned out (new notes grow from it).
 pub fn plus_rect() -> Option<(RECT, f32)> {
     with(|d| {

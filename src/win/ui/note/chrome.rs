@@ -69,12 +69,6 @@ pub(super) fn layout(h: HWND) {
 
 pub(super) fn paint(h: HWND) {
     let Some(st) = state(h) else { return };
-    let dark = app::dark();
-    let (color, pinned, updated, blank) = app::store(|s| s.note(st.id).map(|n| (n.color, n.pinned, n.updated, n.text.trim().is_empty()))).unwrap_or((0, false, 0, true));
-    let paper = theme::paper(color, dark);
-    let ink = theme::paper_ink(color, dark);
-    let a = crate::win::render::anim::clamp01(st.ctl.value);
-    let s = st.s;
     unsafe {
         let mut ps: PAINTSTRUCT = std::mem::zeroed();
         let hdc = BeginPaint(h, &mut ps);
@@ -87,69 +81,82 @@ pub(super) fn paint(h: HWND) {
             st.canvas = Some(Canvas::new(cw, ch));
         }
         let mut c = st.canvas.take().unwrap();
-        c.clear(0xFF00_0000 | paper);
-        c.begin_batch();
-        if let (false, true, Some(icons), Some(meta_f)) = (st.embedded, a > 0.01 || pinned, st.icons.as_ref(), st.meta.as_ref()) {
-            for (b, r) in buttons(rc.right, s) {
-                let a = if b == Btn::Pin && pinned { a.max(0.55) } else { a };
-                if a <= 0.01 {
-                    continue;
-                }
-                let (bx, by, bw, bh) = (r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32);
-                // Delete warns in red when aimed at.
-                let danger = if dark { 0xFF453A } else { 0xD70015 };
-                let hot = if st.hot == b { st.hot_a.value } else { 0.0 };
-                if hot > 0.0 {
-                    let tint = if b == Btn::Delete { danger } else { ink };
-                    c.shape(&Shape::new(bx, by, bw, bh, 7.0 * s), tint, 0.13 * hot * a, 1.0, 0.0);
-                }
-                match b {
-                    Btn::Color => {
-                        let d = 11.0 * s;
-                        let dot = Shape::new(bx + (bw - d) / 2.0, by + (bh - d) / 2.0, d, d, d / 2.0);
-                        c.shape(&dot, theme::color(color).accent, a, 1.0, 0.0);
-                        c.shape(&dot, 0x000000, 0.18 * a, 1.0, 1.0);
-                    }
-                    _ => {
-                        let glyph = match b {
-                            Btn::Done => "\u{E73E}",
-                            Btn::Delete => "\u{E74D}",
-                            Btn::Pin => if pinned { "\u{E841}" } else { "\u{E718}" },
-                            Btn::More => "\u{E712}",
-                            _ => "\u{E8BB}",
-                        };
-                        let rgb = if b == Btn::Delete { mix(ink, danger, hot) } else { ink };
-                        c.text(glyph, icons, r, rgb, a * 0.9, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                        if b == Btn::Pin && pinned {
-                            // The font's solid pin has no needle: draw the outline pin over
-                            // it, so the filled head keeps its point.
-                            c.text("\u{E718}", icons, r, ink, a * 0.9, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                        }
-                    }
-                }
-            }
-            // A blank note hasn't been edited yet. A save that failed is said in place
-            // of the edited time, for as long as it goes on failing.
-            let unsaved = app::save_failed();
-            if !blank || st.full_at.is_some() || unsaved {
-                let fr = rect((25.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (43.0 * s) as i32, (18.0 * s) as i32);
-                let meta = if unsaved {
-                    t!("note_save_failed").to_string()
-                } else if st.full_at.is_some() {
-                    t!("note_full").to_string()
-                } else {
-                    t!("note_edited", crate::common::i18n::time::edited_time(updated))
-                };
-                // At full strength once shown: the colour is the one tuned to read at 4.5:1.
-                c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            }
-        }
-        c.flush();
-        super::scrollbar::paint(h, st, &mut c, ink);
+        draw(h, st, &mut c, rc);
         c.blit(hdc, 0, 0);
         st.canvas = Some(c);
         EndPaint(h, &ps);
     }
+}
+
+/// The window's own part of it (all but the text: its header, footer and scroll bar) as it
+/// is now, on `c`, the size of its client area `rc`: what it paints, and what its picture
+/// for a flying card is made of.
+pub(super) fn draw(h: HWND, st: &NoteWin, c: &mut Canvas, rc: RECT) {
+    let dark = app::dark();
+    let (color, pinned, updated, blank) = app::store(|s| s.note(st.id).map(|n| (n.color, n.pinned, n.updated, n.text.trim().is_empty()))).unwrap_or((0, false, 0, true));
+    let paper = theme::paper(color, dark);
+    let ink = theme::paper_ink(color, dark);
+    let a = crate::win::render::anim::clamp01(st.ctl.value);
+    let s = st.s;
+    c.clear(0xFF00_0000 | paper);
+    c.begin_batch();
+    if let (false, true, Some(icons), Some(meta_f)) = (st.embedded, a > 0.01 || pinned, st.icons.as_ref(), st.meta.as_ref()) {
+        for (b, r) in buttons(rc.right, s) {
+            let a = if b == Btn::Pin && pinned { a.max(0.55) } else { a };
+            if a <= 0.01 {
+                continue;
+            }
+            let (bx, by, bw, bh) = (r.left as f32, r.top as f32, (r.right - r.left) as f32, (r.bottom - r.top) as f32);
+            // Delete warns in red when aimed at.
+            let danger = if dark { 0xFF453A } else { 0xD70015 };
+            let hot = if st.hot == b { st.hot_a.value } else { 0.0 };
+            if hot > 0.0 {
+                let tint = if b == Btn::Delete { danger } else { ink };
+                c.shape(&Shape::new(bx, by, bw, bh, 7.0 * s), tint, 0.13 * hot * a, 1.0, 0.0);
+            }
+            match b {
+                Btn::Color => {
+                    let d = 11.0 * s;
+                    let dot = Shape::new(bx + (bw - d) / 2.0, by + (bh - d) / 2.0, d, d, d / 2.0);
+                    c.shape(&dot, theme::color(color).accent, a, 1.0, 0.0);
+                    c.shape(&dot, 0x000000, 0.18 * a, 1.0, 1.0);
+                }
+                _ => {
+                    let glyph = match b {
+                        Btn::Done => "\u{E73E}",
+                        Btn::Delete => "\u{E74D}",
+                        Btn::Pin => if pinned { "\u{E841}" } else { "\u{E718}" },
+                        Btn::More => "\u{E712}",
+                        _ => "\u{E8BB}",
+                    };
+                    let rgb = if b == Btn::Delete { mix(ink, danger, hot) } else { ink };
+                    c.text(glyph, icons, r, rgb, a * 0.9, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    if b == Btn::Pin && pinned {
+                        // The font's solid pin has no needle: draw the outline pin over
+                        // it, so the filled head keeps its point.
+                        c.text("\u{E718}", icons, r, ink, a * 0.9, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    }
+                }
+            }
+        }
+        // A blank note hasn't been edited yet. A save that failed is said in place
+        // of the edited time, for as long as it goes on failing.
+        let unsaved = app::save_failed();
+        if !blank || st.full_at.is_some() || unsaved {
+            let fr = rect((25.0 * s) as i32, rc.bottom - (26.0 * s) as i32, rc.right - (43.0 * s) as i32, (18.0 * s) as i32);
+            let meta = if unsaved {
+                t!("note_save_failed").to_string()
+            } else if st.full_at.is_some() {
+                t!("note_full").to_string()
+            } else {
+                t!("note_edited", crate::common::i18n::time::edited_time(updated))
+            };
+            // At full strength once shown: the colour is the one tuned to read at 4.5:1.
+            c.text(&meta, meta_f, fr, theme::paper_subtext(color, dark), a, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
+    }
+    c.flush();
+    super::scrollbar::paint(h, st, c, ink);
 }
 
 pub(super) fn hit_test(h: HWND, lp: LPARAM) -> LRESULT {
@@ -207,7 +214,9 @@ pub(super) fn hide_later(h: HWND, to: HWND) {
     if !pointer_on(h) && !ours(to) {
         raise(h);
     }
-    unsafe { SetTimer(h, T_HIDE, 40, None) };
+    // Looked at about every refresh: a click away flies the note home as soon as the button
+    // is up (every 40 ms, it waited 20 ms on average, up to 40, before setting off).
+    unsafe { SetTimer(h, T_HIDE, 16, None) };
 }
 
 /// Whether window `w` is this app's.

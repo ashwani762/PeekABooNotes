@@ -32,6 +32,8 @@ mod lists;
 mod input;
 mod keymap;
 mod scrollbar;
+#[cfg(test)]
+mod probe_open;
 pub use keymap::pre_translate;
 use chrome::*;
 use commands::*;
@@ -448,7 +450,7 @@ fn snapshot(h: HWND) -> Option<(RECT, u8, crate::win::ui::ghost::Content)> {
 /// or, when the text is scrolled, the lines from the first one wholly in view, placed where
 /// the window has them, so the card and the window hand over without a jump.
 pub fn flight_content(h: HWND, text: &str) -> crate::win::ui::ghost::Content {
-    let image = if state(h).is_some_and(|st| !st.embedded) { crate::win::render::gfx::capture(h) } else { None };
+    let image = if state(h).is_some_and(|st| !st.embedded) { picture(h).or_else(|| crate::win::render::gfx::capture(h)) } else { None };
     let whole = crate::win::ui::ghost::Content { title: title_of(text), body: crate::common::store::body_of(text), body_top: None, image, from_image: None };
     if whole.image.is_some() {
         return whole;
@@ -482,6 +484,45 @@ pub fn flight_content(h: HWND, text: &str) -> crate::win::ui::ghost::Content {
     let y = rich::pos_from_char(st.edit, cp as i32).y as f32;
     let body_top = header_h(st.s) as f32 + 2.0 * st.s + y;
     crate::win::ui::ghost::Content { title: String::new(), body: crate::common::store::body_from(text, para), body_top: Some(body_top), image: None, from_image: None }
+}
+
+/// Note window `h` as it looks now, pixel for pixel (but for the border Windows draws over
+/// its edge), drawn here as its paints draw it: its own part, and its text where the editor
+/// sits. A window just made has it at once, hidden or not, in a millisecond or two, where
+/// Windows' picture of it (`gfx::capture`) waits on the compositor: tens of ms before a
+/// closing card could set off, and none at all for a window just made until the compositor
+/// has had it, a frame or more on, each try costing a late frame. None when the editor
+/// can't be drawn so (RichEdit then paints itself).
+pub fn picture(h: HWND) -> Option<crate::win::render::gfx::Image> {
+    let st = state(h)?;
+    if st.embedded {
+        return None;
+    }
+    let edit = st.edit;
+    let mut rc: RECT = unsafe { std::mem::zeroed() };
+    let mut er: RECT = unsafe { std::mem::zeroed() };
+    unsafe {
+        GetClientRect(h, &mut rc);
+        GetWindowRect(edit, &mut er);
+        MapWindowPoints(null_mut(), h, &mut er as *mut RECT as *mut POINT, 2);
+    }
+    if rc.right <= 0 || rc.bottom <= 0 {
+        return None;
+    }
+    let mut c = Canvas::new(rc.right, rc.bottom);
+    chrome::draw(h, st, &mut c, rc);
+    let er = RECT { left: er.left.max(0), top: er.top.max(0), right: er.right.min(rc.right), bottom: er.bottom.min(rc.bottom) };
+    let (ew, eh) = (er.right - er.left, er.bottom - er.top);
+    if ew > 0 && eh > 0 && unsafe { GetWindowLongW(edit, GWL_STYLE) } as u32 & WS_VISIBLE != 0 {
+        let mut e = Canvas::new(ew, eh);
+        if !crate::win::editor::view::compose(edit, &mut e, 0, ew, eh, crate::win::editor::view::Parts::All) {
+            return None;
+        }
+        let px = e.copy_out(RECT { left: 0, top: 0, right: ew, bottom: eh });
+        c.copy_in(er, &px);
+    }
+    let px = c.copy_out(rc).into_iter().map(|p| p | 0xFF00_0000).collect();
+    Some(crate::win::render::gfx::Image::from_pixels(rc.right, rc.bottom, px))
 }
 
 /// Ghost the note back to its tab (or the pill) as the window disappears. With no card

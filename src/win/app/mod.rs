@@ -196,6 +196,32 @@ pub fn ui<R>(f: impl FnOnce(&mut Ui) -> R) -> R {
     UI.with(|u| f(u.borrow_mut().as_mut().expect("ui not initialised")))
 }
 
+/// For probes that make the app's windows (hidden, never shown): the notes (in the tests'
+/// own folder) and the app's state on this thread, as `run` sets them up.
+#[cfg(test)]
+pub fn init_for_probe() {
+    unsafe {
+        let _ = windows::Win32::System::Ole::OleInitialize(None);
+        LoadLibraryW(wide("Msftedit.dll").as_ptr());
+        STORE.with(|s| *s.borrow_mut() = Some(Store::load(data_dir())));
+        crate::common::i18n::init("en");
+        let hinst = GetModuleHandleW(std::ptr::null());
+        UI.with(|u| {
+            *u.borrow_mut() = Some(Ui {
+                hinst,
+                main: null_mut(),
+                worker: null_mut(),
+                notes: HashMap::new(),
+                undo: Default::default(),
+                dark: false,
+                icon: null_mut(),
+                icon_sm: null_mut(),
+                taskbar_created: 0,
+            })
+        });
+    }
+}
+
 pub fn hinst() -> HINSTANCE {
     ui(|u| u.hinst)
 }
