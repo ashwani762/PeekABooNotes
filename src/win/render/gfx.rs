@@ -824,7 +824,11 @@ pub fn capture(hwnd: HWND) -> Option<Image> {
         if w <= 0 || h <= 0 {
             return None;
         }
-        RedrawWindow(hwnd, std::ptr::null(), null_mut(), RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        // Only what's left to paint: a window on screen is up to date already, and painting
+        // it all again (its text, then the overlays over it) cost a closing note tens of ms
+        // before its card could set off, and could show a frame of unstyled text first. A
+        // window just made has all of it left to paint.
+        RedrawWindow(hwnd, std::ptr::null(), null_mut(), RDW_UPDATENOW | RDW_ALLCHILDREN);
         let dib = Dib::new(w, h);
         // A window just made can come back black, the compositor not having had it yet (a
         // new note's card went yellow, brown, black on its way open): give it a frame, and
