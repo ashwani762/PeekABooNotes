@@ -146,7 +146,7 @@ fn selected_pictures(e: HWND, c: &mut Canvas, top: i32, rows: i32, t: &rich::Spa
         }
         c.invert_rect(r);
         let hl = unsafe { windows_sys::Win32::Graphics::Gdi::GetSysColor(windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHT) };
-        c.fade_rect(r, ((hl & 0xFF) << 16) | (hl & 0xFF00) | ((hl >> 16) & 0xFF), 0.65);
+        c.fade_rect(r, ((hl & 0xFF) << 16) | (hl & 0xFF00) | ((hl >> 16) & 0xFF), 0.8);
     }
 }
 
@@ -954,7 +954,7 @@ mod tests {
                 for y in p0.y.max(top)..(p0.y + ph).min(top + rows) {
                     for x in p0.x..p0.x + pw {
                         let (s, p) = (sel[((y - top) * w + x) as usize], plain[(y * w + x) as usize]);
-                        let k = |sh: u32| ((((p >> sh) & 0xFF) as f32 * 0.65 + ((hl >> sh) & 0xFF) as f32 * 0.35).round() as u32) << sh;
+                        let k = |sh: u32| ((((p >> sh) & 0xFF) as f32 * 0.8 + ((hl >> sh) & 0xFF) as f32 * 0.2).round() as u32) << sh;
                         assert!(near(s, k(16) | k(8) | k(0)), "focused {focused}, at {x},{y}: {s:06x} for {p:06x}");
                         checked += 1;
                     }
