@@ -23,7 +23,7 @@ use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VC
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::common::undo::SECONDS;
-use crate::win::render::anim::{self, Client, Spring, clamp01};
+use crate::win::render::anim::{self, Client, Ease, Spring, clamp01};
 use crate::win::app;
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::win::theme;
@@ -50,14 +50,21 @@ struct Toast {
     said: (String, bool),
     /// When the clock last ran; None while the pointer holds it.
     clock_at: Option<Instant>,
-    rise: Spring,
+    rise: Ease,
     /// How much of it shows: as it rises and sinks, and with Reduce Motion, where it fades
     /// in and out without rising.
-    shown: Spring,
-    /// It has just set off rising or sinking: its first step is one refresh, however
-    /// long the work that raised it (a delete, an undo) kept the frames waiting. Stepped by
-    /// that wait, its first frame came already half shown, or a fifth of the way down.
+    shown: Ease,
+    /// Frames to hold still as it's put up, before it fades in: the first a window is
+    /// shown at comes and goes before the screen has it, and the fade, already under way
+    /// there, first showed at 18 to 32%.
+    hold: u8,
+    /// Its first step after it set off rising or sinking is one refresh at most, however
+    /// long the work that raised it (a delete, an undo) kept the frames waiting.
     fresh: bool,
+    /// What it said before it said something else, as it was drawn (its pixels and
+    /// width), cross-fading into the new (`swap`, 0 to 1), rather than cut in a frame.
+    old: Option<(Vec<u32>, i32)>,
+    swap: Ease,
     /// The Undo button lights up while the pointer is on the toast (all of it undoes).
     hot: Spring,
     /// Mouse button held down on the toast: the button sinks a little.
@@ -150,9 +157,12 @@ fn with_toast(f: impl FnOnce(&mut Toast)) {
                 notice_left: 0.0,
                 said: (String::new(), false),
                 clock_at: None,
-                rise: Spring::unit(0.0, theme::motion::MOMENTUM),
-                shown: Spring::fade(0.0, (1.0, 0.24)),
+                rise: Ease::at(0.0),
+                shown: Ease::at(0.0),
+                hold: 0,
                 fresh: false,
+                old: None,
+                swap: Ease::at(1.0),
                 hot: Spring::unit(0.0, (1.0, 0.12)),
                 pressed: false,
                 alive: true,
@@ -192,12 +202,26 @@ fn settle(t: &mut Toast) {
     t.drawn = None;
     match message(t) {
         Some(msg) => {
-            t.fresh |= !t.alive || t.shown.target < 1.0;
+            let up = t.alive && t.shown.target() >= 1.0;
+            if up && msg != t.said.0 && t.shown.value() > 0.5 {
+                // Saying something else: what it said cross-fades into it.
+                if let Some(c) = t.canvas.as_mut() {
+                    t.old = Some((c.copy_out(rect(0, 0, c.w, c.h)), c.w));
+                    t.swap = Ease::at(0.0);
+                    t.swap.go(1.0, 0.18);
+                }
+            }
+            if !up {
+                t.fresh = true;
+                if t.shown.value() <= 0.0 {
+                    t.hold = 1;
+                }
+            }
             t.alive = true;
             t.size = measure(t);
-            // It rises at once, from the first frame, rather than easing off.
-            t.rise.launch_as(1.0, theme::motion::MOMENTUM);
-            t.shown.launch_as(1.0, (1.0, 0.24));
+            // Up evenly from its first frame, landing on time without a tail.
+            t.rise.go(1.0, 0.26);
+            t.shown.go(1.0, 0.22);
             unsafe {
                 SetWindowTextW(t.hwnd, wide(&msg).as_ptr());
                 // Over notes in use, which are kept on top of other windows too.
@@ -209,8 +233,8 @@ fn settle(t: &mut Toast) {
             // It sinks away at once, quicker than it rose.
             t.fresh |= t.alive;
             t.alive = false;
-            t.rise.launch_as(0.0, (1.0, 0.22));
-            t.shown.launch_as(0.0, (1.0, 0.18));
+            t.rise.go(0.0, 0.2);
+            t.shown.go(0.0, 0.18);
         }
     }
 }
@@ -266,12 +290,24 @@ fn step(dt: f32) -> bool {
                 settle(t);
             }
         }
-        let dt = if std::mem::take(&mut t.fresh) { dt.min(anim::period()) } else { dt };
-        let moving = t.rise.step(dt) | t.shown.step(dt);
+        let dt = if t.hold > 0 {
+            t.hold -= 1;
+            0.0
+        } else if std::mem::take(&mut t.fresh) {
+            dt.min(anim::period())
+        } else {
+            dt
+        };
+        let was = t.shown.value();
+        let moving = t.rise.step(dt) | t.shown.step(dt) | t.swap.step(dt) | (dt == 0.0 && !t.shown.done());
+        if t.swap.done() {
+            t.old = None;
+        }
         t.pressed &= over;
         t.hot.to(if over && t.alive && t.notice.is_none() { 1.0 } else { 0.0 });
         let lighting = t.hot.step(dt);
-        if !t.alive && (t.shown.value <= 0.01 || !moving) {
+        // Gone once a frame of nothing has shown.
+        if !t.alive && t.shown.done() && was <= 0.0 {
             unsafe { DestroyWindow(t.hwnd) };
             *slot = None;
             // What it offered to undo (an archived note kept ready to come back) is gone
@@ -367,9 +403,17 @@ fn render(t: &mut Toast) {
     let c = t.canvas.as_mut().unwrap();
     c.clear(0);
     t.ring = None;
-    let a = clamp01(t.shown.value);
-    let lift = ((1.0 - t.rise.value) * 28.0 * s).round();
-    let (x, y) = (m as f32, m as f32 * 0.6 + lift);
+    let a = clamp01(t.shown.value());
+    let lift = if anim::reduced() { 0.0 } else { ((1.0 - t.rise.value()) * 28.0 * s).round() };
+    // Cross-fading from what it said, on a canvas wide enough for both, centred alike.
+    let wide = t.old.as_ref().map_or(cw, |o| o.1.max(cw));
+    if wide != cw {
+        t.canvas = Some(Canvas::new(wide, ch));
+    }
+    let c = t.canvas.as_mut().unwrap();
+    c.clear(0);
+    let (x, y) = (m as f32 + ((wide - cw) / 2) as f32, m as f32 * 0.6 + lift);
+    let cw = wide;
     let card = Shape::new(x, y, w as f32, h as f32, h as f32 / 2.0);
     t.capsule = rect(x as i32, y as i32, w, h);
     c.soft_shadow(&card, s, 1.4 * a);
@@ -405,7 +449,7 @@ fn render(t: &mut Toast) {
     let under = c.copy_out(square);
     let arc = std::f32::consts::TAU * rr * left / SECONDS;
     draw_arc(c, rcx, rcy, rr, s, left / SECONDS, a);
-    t.ring = (a >= 0.999).then_some(Ring { cx: rcx, cy: rcy, r: rr, square, under, arc });
+    t.ring = (a >= 0.999 && t.old.is_none()).then_some(Ring { cx: rcx, cy: rcy, r: rr, square, under, arc });
     present(t, cw, ch);
 }
 
@@ -440,6 +484,18 @@ fn present(t: &mut Toast, cw: i32, ch: i32) {
     let (px, py) = crate::win::ui::screen::bottom_centre(t.work, cw, ch, (12.0 * t.s) as i32);
     t.placed = (px, py);
     if let Some(c) = t.canvas.as_mut() {
+        if let Some((old, ow)) = t.old.as_ref() {
+            // What it said before, centred on the canvas, fading out as the new fades in.
+            let mut was = vec![0u32; (cw * ch) as usize];
+            let (dx, rows) = ((cw - ow) / 2, (old.len() as i32 / ow.max(&1)).min(ch));
+            for y in 0..rows {
+                let (src, dst) = ((y * ow) as usize, (y * cw + dx.max(0)) as usize);
+                let n = (*ow).min(cw) as usize;
+                let from = src + (-dx).max(0) as usize;
+                was[dst..dst + n].copy_from_slice(&old[from..from + n]);
+            }
+            c.mix_in(rect(0, 0, cw, ch), &was, clamp01(t.swap.value()));
+        }
         c.present(t.hwnd, px, py);
     }
     unsafe {
@@ -548,6 +604,28 @@ mod tests {
         let mut fresh = capsule();
         draw_arc(&mut fresh, 30.0, 30.0, 10.0, 1.0, frac, 1.0);
         assert!(c.copy_out(rect(0, 0, 80, 60)) == fresh.copy_out(rect(0, 0, 80, 60)));
+    }
+
+    #[test]
+    fn the_rings_end_moves_a_little_every_frame_rather_than_a_pixel_at_a_time() {
+        // A frame at 100 Hz: the end moves 0.06 px along the ring.
+        let step = 0.06 / (std::f32::consts::TAU * 10.0);
+        let draw = |frac: f32| {
+            let mut c = capsule();
+            draw_arc(&mut c, 30.0, 30.0, 10.0, 1.0, frac, 1.0);
+            c.copy_out(rect(0, 0, 80, 60))
+        };
+        let mut changed = 0;
+        let mut frac = 0.6;
+        for _ in 0..20 {
+            let (a, b) = (draw(frac), draw(frac - step));
+            let most = a.iter().zip(&b).map(|(p, q)| (0..4).map(|k| ((p >> (8 * k)) & 0xFF).abs_diff((q >> (8 * k)) & 0xFF)).max().unwrap()).max().unwrap();
+            // Never a pixel turning over whole in one frame.
+            assert!(most < 40, "{most}");
+            changed += (most > 0) as i32;
+            frac -= step;
+        }
+        assert!(changed >= 18, "{changed} of 20 frames moved it");
     }
 
     #[test]

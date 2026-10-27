@@ -424,7 +424,15 @@ impl Canvas {
                 if ang < 0.0 {
                     ang += std::f32::consts::TAU;
                 }
-                if frac < 1.0 && ang > limit {
+                // Its ends soft over a pixel along the ring, so the arc's end moves smoothly
+                // rather than a pixel at a time, whole.
+                let cov = if frac < 1.0 {
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    cov * ((limit - ang) * dist + 0.5).clamp(0.0, 1.0) * (ang * dist + 0.5).clamp(0.0, 1.0)
+                } else {
+                    cov
+                };
+                if cov <= 0.0 {
                     continue;
                 }
                 Self::blend(&mut px[(y * cw + x) as usize], rgb, alpha * cov);
