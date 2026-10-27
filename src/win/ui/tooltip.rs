@@ -83,6 +83,12 @@ thread_local! {
     static TIP: RefCell<Option<Tip>> = const { RefCell::new(None) };
 }
 
+/// The tooltip's window (null before there's been one), whose display its frames keep to,
+/// and which flying cards go under.
+pub fn window() -> HWND {
+    TIP.with(|t| t.try_borrow().ok().and_then(|t| t.as_ref().map(|t| t.hwnd))).unwrap_or(null_mut())
+}
+
 fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
     TIP.with(|t| {
         let mut t = t.try_borrow_mut().ok()?;

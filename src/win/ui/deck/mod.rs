@@ -290,6 +290,11 @@ fn with<R>(f: impl FnOnce(&mut Deck) -> R) -> Option<R> {
     DECK.with(|d| d.try_borrow_mut().ok().and_then(|mut d| d.as_mut().map(f)))
 }
 
+/// The deck's window (null before it's made), whose display its frames keep to.
+pub fn window() -> HWND {
+    DECK.with(|d| d.try_borrow().ok().and_then(|d| d.as_ref().map(|d| d.hwnd))).unwrap_or(null_mut())
+}
+
 /// The deck's display: (work area, DPI scale). The one chosen in Settings, or the main
 /// display while that one isn't connected; worked out once per display change.
 pub fn monitor_geo() -> (RECT, f32) {

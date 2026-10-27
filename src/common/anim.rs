@@ -208,6 +208,14 @@ pub fn plan_wait(began: f64, now: f64, period: f64, vblank: Option<f64>) -> Wait
     if now < next { Wait::For(next - now) } else { Wait::No }
 }
 
+/// Which moving parts (bits of `active`) to ask, in turn, for the window their motion is
+/// on, to pace the frames by its display: the one that last asked for frames first (what
+/// was just set moving is what's being watched), then the others, lowest bit first.
+pub fn pace_order(last: u32, active: u32) -> impl Iterator<Item = u32> {
+    let first = (last & active != 0).then_some(last);
+    first.into_iter().chain((0..32).map(|i| 1u32 << i).filter(move |&b| active & b != 0 && b != last))
+}
+
 thread_local! {
     static REDUCED: Cell<bool> = const { Cell::new(false) };
 }
@@ -232,7 +240,16 @@ pub fn clamp01(t: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pacer, Timing, Wait, plan_wait};
+    use super::{Pacer, Timing, Wait, pace_order, plan_wait};
+
+    #[test]
+    fn frames_follow_the_part_set_moving_last_then_the_others() {
+        // The deck (1) and a toast (4) moving, the toast set off last: the toast's display.
+        assert_eq!(pace_order(4, 1 | 4).collect::<Vec<_>>(), vec![4, 1]);
+        // The part set off last has come to rest: the others, in order.
+        assert_eq!(pace_order(32, 1 | 8 | 128).collect::<Vec<_>>(), vec![1, 8, 128]);
+        assert_eq!(pace_order(0, 0).count(), 0);
+    }
 
     /// The refresh rates the clock is tried at: the LG's 99.99 Hz is 100,000/1,000,1 as the
     /// display configuration gives it.

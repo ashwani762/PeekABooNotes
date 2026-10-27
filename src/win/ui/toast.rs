@@ -85,6 +85,11 @@ thread_local! {
     static TOAST: RefCell<Option<Toast>> = const { RefCell::new(None) };
 }
 
+/// The toast's window (null when there's none), whose display its frames keep to.
+pub fn window() -> HWND {
+    TOAST.with(|t| t.try_borrow().ok().and_then(|t| t.as_ref().map(|t| t.hwnd))).unwrap_or(null_mut())
+}
+
 /// What Undo would take back now changed (an action was done, undone or made final):
 /// the toast shows `msg`, rising if it wasn't up, or goes when there's nothing left and
 /// no notice.

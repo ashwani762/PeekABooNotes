@@ -189,6 +189,11 @@ fn with<R>(f: impl FnOnce(&mut Open) -> R) -> Option<R> {
     MENU.with(|m| m.try_borrow_mut().ok().and_then(|mut m| m.as_mut().map(f)))
 }
 
+/// The newest menu's window (null with none up), whose display its frames keep to.
+pub fn window() -> HWND {
+    MENU.with(|m| m.try_borrow().ok().and_then(|m| m.as_ref().and_then(|o| o.menus.last().map(|m| m.hwnd)))).unwrap_or(null_mut())
+}
+
 pub fn is_menu(h: HWND) -> bool {
     !h.is_null() && with(|o| o.menus.iter().any(|m| m.hwnd == h)).unwrap_or(false)
 }

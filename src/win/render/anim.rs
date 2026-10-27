@@ -10,10 +10,10 @@
 use std::cell::Cell;
 use std::time::Instant;
 
-use windows_sys::Win32::Foundation::{HANDLE, POINT, RECT};
+use windows_sys::Win32::Foundation::{HANDLE, HWND, POINT, RECT};
 use windows_sys::Win32::Graphics::Dwm::{DWM_TIMING_INFO, DwmGetCompositionTimingInfo};
-use windows_sys::Win32::Graphics::Gdi::{HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromPoint, MonitorFromRect};
-use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows_sys::Win32::Graphics::Gdi::{HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromPoint, MonitorFromRect, MonitorFromWindow};
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsWindowVisible};
 
 pub use crate::common::anim::*;
 use crate::win::render::vblank;
@@ -77,10 +77,13 @@ thread_local! {
     static PACER: Cell<Pacer> = const { Cell::new(Pacer::new()) };
     /// The display a part said this run's motion is on (a card in flight: its window's).
     static PACE: Cell<Option<HMONITOR>> = const { Cell::new(None) };
+    /// The part that last asked for frames.
+    static LAST: Cell<u32> = const { Cell::new(0) };
 }
 
 /// Ask for frames for `c` until its frame function reports it has settled.
 pub fn wake(c: Client) {
+    LAST.with(|l| l.set(c as u32));
     ACTIVE.with(|a| {
         if a.get() == 0 {
             PACER.with(|p| {
@@ -107,17 +110,46 @@ pub fn pace_on(r: &RECT) {
     }
 }
 
-/// The display the frames are paced by: the one a part named for this run, else the one
-/// under the pointer, where what moves is as a rule (the deck, a menu, a tooltip, the
-/// window being clicked or typed in).
+/// The window part `c`'s motion is in (null when it has none showing: a flying card names
+/// its display itself, with `pace_on`).
+fn window_of(c: u32) -> HWND {
+    use crate::win::ui;
+    let h = match c {
+        x if x == Client::Deck as u32 => ui::deck::window(),
+        x if x == Client::Toast as u32 => ui::toast::window(),
+        x if x == Client::List as u32 => ui::allnotes::hwnd(),
+        x if x == Client::Menu as u32 => ui::menu::window(),
+        x if x == Client::Settings as u32 => ui::settings::hwnd(),
+        x if x == Client::Tip as u32 => ui::tooltip::window(),
+        // A note's controls, scroll bar or ticks: the note (or All Notes) being used.
+        x if x == Client::Notes as u32 => unsafe {
+            let fg = GetForegroundWindow();
+            let ours = !fg.is_null() && GetWindowThreadProcessId(fg, std::ptr::null_mut()) == windows_sys::Win32::System::Threading::GetCurrentThreadId();
+            if ours { fg } else { std::ptr::null_mut() }
+        },
+        _ => std::ptr::null_mut(),
+    };
+    if !h.is_null() && unsafe { IsWindowVisible(h) } != 0 { h } else { std::ptr::null_mut() }
+}
+
+/// The display the frames are paced by: the one a part named for this run (a card in
+/// flight), else the one the window of what's moving is on (what was set moving last
+/// first), else the one under the pointer. Paced by the pointer's alone, motion on a
+/// 99.99 Hz display ran on a 60 Hz one's refreshes whenever the pointer was there (a
+/// toast, a note's tick or scroll seen from the other screen).
 fn pace_display() -> HMONITOR {
-    PACE.with(|p| p.get()).unwrap_or_else(|| {
-        let mut pt = POINT { x: 0, y: 0 };
-        unsafe {
-            GetCursorPos(&mut pt);
-            MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
-        }
-    })
+    if let Some(m) = PACE.with(|p| p.get()) {
+        return m;
+    }
+    let (last, active) = (LAST.with(|l| l.get()), ACTIVE.with(|a| a.get()));
+    if let Some(h) = pace_order(last, active).map(window_of).find(|h| !h.is_null()) {
+        return unsafe { MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST) };
+    }
+    let mut pt = POINT { x: 0, y: 0 };
+    unsafe {
+        GetCursorPos(&mut pt);
+        MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+    }
 }
 
 /// The display's refresh period, in seconds, as the clock last saw it.
@@ -166,6 +198,10 @@ pub fn tick() {
     }
     // Clients woken during this tick stay active.
     ACTIVE.with(|a| a.set((a.get() & !mask) | keep));
+    if !ACTIVE.with(|a| a.get()) & Client::Ghost as u32 != 0 {
+        // The cards have landed: what moves on goes by its own window.
+        PACE.with(|p| p.set(None));
+    }
     paint_pending();
     if !active() {
         // At rest: the thread noting the display's refreshes rests too.
