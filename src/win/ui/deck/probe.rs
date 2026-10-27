@@ -47,8 +47,10 @@ pub(super) fn deck() -> Deck {
         synced: true,
         known: std::collections::HashSet::new(),
         pulse: None,
-        fresh: false,
-        extras: Spring::unit(0.0, motion::SHINGLE),
+        fresh: 0,
+        extras: Spring::unit(0.0, PEEK),
+        plus_back: Spring::fade(1.0, motion::DEFAULT),
+        plus_wait: 0.0,
         extras_delay: 0.0,
         extras_goal: 0.0,
         plus_hot: Spring::unit(0.0, motion::SNAPPY),
@@ -517,4 +519,34 @@ fn the_pill_swells_smoothly_when_a_note_comes_back_unseen() {
 /// One frame at 60 Hz; whether anything still moves.
 fn step_deck(d: &mut Deck) -> bool {
     step(d, 1.0 / 60.0)
+}
+
+/// The pointer leaves a card it pulled out, and the deck folds: the card goes back from its
+/// first frame and slows, each step no more than 1.6 times the one before (its second step
+/// was 2.4 times its first, +34 then +82 px, as it set off from rest).
+#[test]
+fn a_pulled_out_card_goes_back_evenly_as_the_deck_folds() {
+    for hz in [60.0f32, 100.0] {
+        let mut d = deck();
+        set_open(&mut d, true, true);
+        d.hover = Hit::Tab(5);
+        d.tabs[5].body_h = Some(200.0);
+        begin_preview(&mut d, 5);
+        while step(&mut d, 1.0 / hz) {}
+        d.hover = Hit::None;
+        set_open(&mut d, false, false);
+        let edge = |d: &Deck| pose(d, 5, d.geo.ew, d.geo.ey as f32).shape.x;
+        let mut last = edge(&d);
+        let mut steps = Vec::new();
+        for _ in 0..12 {
+            step(&mut d, 1.0 / hz);
+            let x = edge(&d);
+            steps.push(x - last);
+            last = x;
+        }
+        assert!(steps[0] > 1.0, "{hz} Hz: {steps:?}");
+        for w in steps.windows(2).filter(|w| w[1].abs() >= 2.0) {
+            assert!(w[1] / w[0] < 1.6, "{hz} Hz: {steps:?}");
+        }
+    }
 }

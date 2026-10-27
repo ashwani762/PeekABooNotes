@@ -221,6 +221,8 @@ fn draw_extras(d: &mut Deck, c: &mut Canvas, ww: i32, ring: Option<Hit>, dark: b
             c.text(&t!("deck_more", g.more), &f, r, mat.text, ea, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
         let hot = d.plus_hot.value;
+        // Gone with a new note's card for a moment, then back.
+        let ea = ea * clamp01(d.plus_back.value);
         let pressed = if d.pressed == Hit::Plus { 0.92 } else { 1.0 };
         let r = 17.0 * s * (1.0 + 0.08 * hot) * pressed;
         let cy = g.plus_cy() + drop;

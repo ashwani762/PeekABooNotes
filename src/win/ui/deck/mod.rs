@@ -70,10 +70,11 @@ const PREVIEW_MAX: f32 = 300.0; // tallest a pulled-out card grows for its previ
 const BULGE: f32 = 14.0;
 const LEAN: f32 = -0.022; // radians; cards lean very slightly, like a deck of index cards
 const PULL_GAP: f32 = 18.0; // gap between the screen edge and a pulled-out card
-/// How a card comes out of the deck and goes back: a touch under critical damping, it
-/// lands within a pixel in about 0.3 s where a critically damped spring crept the last
-/// few pixels a pixel at a time for a quarter of a second more (its overshoot, 0.15%, is
-/// under half a pixel).
+/// How a card comes out of the deck and goes back, and how the cards fan out of the pill:
+/// a touch under critical damping, it lands within a pixel in about 0.3 s where a
+/// critically damped spring crept the last few pixels a pixel at a time for a quarter of a
+/// second more (its overshoot, 0.15%, is under half a pixel); the fan-out's springier one
+/// overshot 3 px and crept back over 20 frames.
 const PEEK: (f32, f32) = (0.9, 0.28);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -127,14 +128,15 @@ impl Tab {
             color: 0,
             open: false,
             pinned: false,
-            reveal: Spring::unit(0.0, motion::SHINGLE),
+            // Fine: a card spans 300 px and more between its capsule and its place.
+            reveal: Spring::unit(0.0, PEEK).fine(0.0003),
             delay: 0.0,
             reveal_goal: 0.0,
             bulge: Spring::px(0.0, motion::SNAPPY),
             lean: Spring::unit(LEAN, PEEK),
             y: Spring::px(y, motion::DEFAULT),
             press: Spring::unit(1.0, motion::SNAPPY),
-            pull: Spring::unit(0.0, PEEK),
+            pull: Spring::unit(0.0, PEEK).fine(0.0003),
             cap: Spring::px(0.0, motion::DEFAULT),
             born: Spring::fade(1.0, (0.75, 0.34)),
             fitted: None,
@@ -235,9 +237,15 @@ struct Deck {
     /// deck full): the pill, or the "+N" tile, swells and brightens for a moment, seconds
     /// in; the card itself would have grown into its place.
     pulse: Option<f32>,
-    /// Notes just came or went: the next frame steps one refresh, however long the work
-    /// that changed them (an Undo, a delete) kept the frames waiting.
-    fresh: bool,
+    /// A motion just set off (fanning out, folding, a card coming out or going back, notes
+    /// coming or going): its first two frames step one refresh at most, however long the
+    /// work before them took, or how late the first was put up (the fold's second step was
+    /// 2.4 times its first, the first frame having shown a refresh late).
+    fresh: u8,
+    /// The plus button just handed its picture to a new note's card: it's out of sight
+    /// until that has set off (`plus_wait` seconds), then fades back.
+    plus_back: Spring,
+    plus_wait: f32,
     extras: Spring, // plus button and "+N" tile
     extras_delay: f32,
     extras_goal: f32,
@@ -369,8 +377,10 @@ pub fn create() {
             synced: false,
             known: std::collections::HashSet::new(),
             pulse: None,
-            fresh: false,
-            extras: Spring::unit(0.0, motion::SHINGLE),
+            fresh: 0,
+            extras: Spring::unit(0.0, PEEK),
+            plus_back: Spring::fade(1.0, motion::DEFAULT),
+            plus_wait: 0.0,
             extras_delay: 0.0,
             extras_goal: 0.0,
             plus_hot: Spring::unit(0.0, motion::SNAPPY),
@@ -512,6 +522,14 @@ fn fan_out(d: &mut Deck) {
     if cold {
         warm(d);
     }
+    on_top(d);
+}
+
+/// Above every other always-on-top window, open notes among them (a note in use is kept
+/// on top of other apps' windows, and was put there after the deck, so its peeks came out
+/// behind it).
+fn on_top(d: &Deck) {
+    unsafe { SetWindowPos(d.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
 }
 
 fn update_visibility(d: &mut Deck) {
@@ -576,15 +594,26 @@ pub fn card_image(id: u64) -> Option<crate::win::render::gfx::Image> {
     .flatten()
 }
 
-/// The plus button as it is on screen right now, for the card a new note grows from to
+/// The plus button as it is on screen right now, for the card new note `id` grows from to
 /// start as exactly it (it started as a paper disc, a pop of colour where the button was).
-pub fn plus_image() -> Option<crate::win::render::gfx::Image> {
+/// Laid on the note's paper, so that as the card grows past the disc the corners of its
+/// square are the card's own colour (they showed lighter for two frames); and the button
+/// itself goes for a moment, the card carrying it off, rather than showing twice.
+pub fn plus_image(id: u64) -> Option<crate::win::render::gfx::Image> {
     let (r, _) = plus_rect()?;
+    let paper = theme::paper(app::store(|s| s.note(id).map_or(0, |n| n.color)), app::dark());
     with(|d| {
         let mut w: RECT = unsafe { std::mem::zeroed() };
         unsafe { GetWindowRect(d.hwnd, &mut w) };
         let local = RECT { left: r.left - w.left, top: r.top - w.top, right: r.right - w.left, bottom: r.bottom - w.top };
-        d.canvas.as_mut()?.snapshot(local)
+        let img = d.canvas.as_mut()?.snapshot(local)?;
+        let mut c = Canvas::new(img.w, img.h);
+        c.clear(0xFF00_0000 | paper);
+        c.over(&img, 0, 0);
+        d.plus_back.snap(0.0);
+        d.plus_wait = 0.3;
+        anim::wake(Client::Deck);
+        c.snapshot(rect(0, 0, img.w, img.h))
     })
     .flatten()
 }
@@ -912,6 +941,8 @@ fn menu_for(d: &mut Deck, hit: Hit, by_key: bool) -> Action {
 
 fn begin_preview(d: &mut Deck, i: usize) {
     measure_body(d, i);
+    d.fresh = 2;
+    on_top(d);
     // The title's font too, before the frames: made in the first frame the text shows,
     // it cost that frame a refresh, and the card caught up 6 px the next.
     font(d, 1, 15.0, FW_SEMIBOLD as i32);
@@ -923,9 +954,11 @@ fn begin_preview(d: &mut Deck, i: usize) {
 }
 
 fn end_preview(d: &mut Deck) {
+    // Going back from its first frame.
     for t in d.tabs.iter_mut() {
-        t.pull.to(0.0);
+        t.pull.launch(0.0);
     }
+    d.fresh = 2;
     d.previewing = false;
     anim::wake(Client::Deck);
 }

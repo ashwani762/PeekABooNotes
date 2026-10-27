@@ -124,7 +124,9 @@ pub(super) fn sync(d: &mut Deck) {
     if d.synced && all.iter().any(|id| !d.known.contains(id) && !d.tabs.iter().any(|t| t.id == *id)) {
         d.pulse = Some(0.0);
     }
-    d.fresh |= d.synced && known != d.known;
+    if d.synced && known != d.known {
+        d.fresh = 2;
+    }
     d.known = known;
     // The pill grows or shrinks to its capsules, and they slide to their places in it.
     if d.synced {
@@ -205,7 +207,7 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
         t.reveal_goal = if open && !t.open { 1.0 } else { 0.0 };
         t.delay = if together { 0.0 } else { i as f32 * motion::STAGGER_S };
         if !open {
-            t.pull.to(0.0);
+            t.pull.launch(0.0);
             t.bulge.to(0.0);
             t.lean.to(LEAN);
         }
@@ -217,7 +219,12 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
     // The plus button comes out from under the last card once that card is most of the
     // way to its place.
     d.extras_delay = if open && !together { n as f32 * motion::STAGGER_S + 0.12 } else { 0.0 };
-    d.pill.to(if open { 0.0 } else { 1.0 });
+    if open {
+        d.pill.retarget(0.0, motion::DEFAULT);
+    } else {
+        // Back as the cards come in, at their pace, from the first frame.
+        d.pill.launch_as(1.0, PEEK);
+    }
     if instant {
         d.extras.snap(d.extras_goal);
         d.pill.snap(if open { 0.0 } else { 1.0 });
@@ -225,11 +232,17 @@ pub(super) fn set_open(d: &mut Deck, open: bool, instant: bool) {
             d.wide = false;
         }
     }
+    d.fresh = 2;
     anim::wake(Client::Deck);
 }
 
 pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
-    let dt = if std::mem::take(&mut d.fresh) { dt.min(anim::period()) } else { dt };
+    let dt = if d.fresh > 0 {
+        d.fresh -= 1;
+        dt.min(anim::period())
+    } else {
+        dt
+    };
     let mut moving = false;
     let s = d.geo.s;
     let hover = d.hover;
@@ -264,6 +277,13 @@ pub(super) fn step(d: &mut Deck, dt: f32) -> bool {
     d.more_hot.to(if d.hover == Hit::More { 1.0 } else { 0.0 });
     for sp in [&mut d.pill, &mut d.caps, &mut d.extras, &mut d.plus_hot, &mut d.more_hot] {
         moving |= sp.step(dt);
+    }
+    if d.plus_wait > 0.0 {
+        d.plus_wait -= dt;
+        moving = true;
+    } else {
+        d.plus_back.to(1.0);
+        moving |= d.plus_back.step(dt);
     }
     if let Some(t) = d.pulse {
         // Its first step one refresh, whatever the work before it (an Undo) took.
