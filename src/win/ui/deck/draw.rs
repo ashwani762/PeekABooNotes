@@ -381,8 +381,12 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
     let lifted = d.drag.as_ref().is_some_and(|dr| dr.active && dr.idx == i);
     let shadow = p * if lifted { 1.8 } else { 1.0 + cp.pull * 0.8 };
     c.card(&cp.shape, fill, 1.0, 0x000000, 0.06 * p, shadow, s);
-    if d.hover == Hit::Tab(i) && cp.pull < 0.5 {
-        c.shape(&cp.shape, 0xFFFFFF, 0.16 * p, 1.0, 0.0);
+    // The pointed-at tab is lit, coming and going with its lift, and the light fades as
+    // the card comes out (it went out in one frame halfway, the paper darkening at once).
+    let lit = if d.hover == Hit::Tab(i) { clamp01(d.tabs[i].bulge.value / (BULGE * s)) } else { 0.0 };
+    let tint = 0.16 * p * lit * clamp01(1.0 - cp.pull / 0.5);
+    if tint > 0.002 {
+        c.shape(&cp.shape, 0xFFFFFF, tint, 1.0, 0.0);
     }
     let label_a = clamp01((p - 0.55) / 0.45);
     if label_a <= 0.0 {
@@ -482,9 +486,32 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
         let tr = rect(cx0 as i32, (sh.y + 12.0 * s) as i32, (cx1 - cx0) as i32, (22.0 * s) as i32);
         c.text(&t.title, &tf, tr, theme::PAPER_TEXT, ca, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         if !t.body.is_empty() {
+            // Laid out for the card as it ends up, and cut where the card is now: as the
+            // card grows its text is uncovered, rather than laid out again a little
+            // longer each frame, its faded last line ending in a frame once it all fitted.
             let top = sh.y + 40.0 * s;
-            let br = rect(cx0 as i32, top as i32, (cx1 - cx0) as i32, (sh.y + sh.h - 12.0 * s - top) as i32);
-            crate::win::ui::draw_body(c, &t.body, &bf, br, color, dark, ca, s);
+            let cut = sh.y + sh.h - 12.0 * s;
+            let bottom = (sh.y + preview_height(d, i) - 12.0 * s).max(cut);
+            let br = rect(cx0 as i32, top as i32, (cx1 - cx0) as i32, (bottom - top) as i32);
+            if cut < bottom - 0.5 {
+                let below = rect(cx0 as i32 - 4, cut.ceil() as i32, (cx1 - cx0) as i32 + 8, (bottom - cut.ceil()) as i32 + 6);
+                c.flush();
+                let under = c.copy_out(below);
+                c.begin_batch();
+                crate::win::ui::draw_body(c, &t.body, &bf, br, color, dark, ca, s);
+                c.flush();
+                c.copy_in(below, &under);
+                // A soft edge where the text is cut, into the card's own colour.
+                let paper = crate::win::util::mix(fill, 0xFFFFFF, tint);
+                let fade = (12.0 * s) as i32;
+                for k in 0..fade {
+                    let row = rect(cx0 as i32 - 2, cut.ceil() as i32 - fade + k, (cx1 - cx0) as i32 + 4, 1);
+                    c.fade_rect(row, paper, 1.0 - (k + 1) as f32 / fade as f32);
+                }
+                c.begin_batch();
+            } else {
+                crate::win::ui::draw_body(c, &t.body, &bf, br, color, dark, ca, s);
+            }
         }
     }
 }
