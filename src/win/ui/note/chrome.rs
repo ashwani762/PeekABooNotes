@@ -201,10 +201,19 @@ pub(super) fn hide_later(h: HWND, to: HWND) {
     if !hides(h) || (!to.is_null() && unsafe { GetWindow(to, GW_OWNER) } == h) {
         return;
     }
-    if !pointer_on(h) {
+    // Not when the foreground went to one of ours (another note opening, the deck, a menu):
+    // lifted then, it came up over the deck card flying open, and for a few frames the peek
+    // seemed to blink off.
+    if !pointer_on(h) && !ours(to) {
         raise(h);
     }
     unsafe { SetTimer(h, T_HIDE, 40, None) };
+}
+
+/// Whether window `w` is this app's.
+fn ours(w: HWND) -> bool {
+    let mut pid = 0;
+    !w.is_null() && unsafe { GetWindowThreadProcessId(w, &mut pid) } != 0 && pid == unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() }
 }
 
 /// Whether the pointer is over the note's window.
