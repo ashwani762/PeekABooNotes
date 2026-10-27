@@ -197,8 +197,11 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
     }
     match from {
         Some(from) if !crate::win::render::anim::reduced() => {
-            // Its picture before the deck tucks it away.
-            let from_image = deck::card_image(id);
+            // Its picture before the deck tucks it away, when it flies from that card: a new
+            // note grows from the plus button (its card already dealt into the deck), a note
+            // from the pill from its capsule, and neither looks like the card.
+            let from_card = deck::card_rect(id).is_some_and(|(r, _)| (r.left, r.top, r.right, r.bottom) == (from.0.left, from.0.top, from.0.right, from.0.bottom));
+            let from_image = if from_card { deck::card_image(id) } else { None };
             let h = note::create(id, r, note::Show::Later);
             deck::hand_off(id);
             // Shows what the window will (it's already laid out, scrolled to the end).
