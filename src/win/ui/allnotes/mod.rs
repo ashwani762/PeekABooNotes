@@ -303,6 +303,9 @@ struct Lib {
     leaving: Vec<Leaving>,
     /// Rows that just came into it (an undo), fading in as the rows below make room.
     arriving: std::collections::HashMap<u64, Spring>,
+    /// The list before a switch to Notes, Archive or All, as it was on screen (its rect
+    /// and pixels), cross-fading into the new one.
+    old_list: Option<(RECT, Vec<u32>)>,
 }
 
 /// A row that left the list, and the place it had.
@@ -576,6 +579,9 @@ pub fn frame(dt: f32) -> bool {
             moving |= sp.step(dt);
         }
         l.arriving.retain(|_, sp| sp.value < 0.998);
+        if l.list_a.value >= 0.999 {
+            l.old_list = None;
+        }
         (moving || l.bar_a.value > 0.01, l.hwnd)
     });
     match r {
@@ -861,7 +867,7 @@ fn on_create(hwnd: HWND) {
         sel_y: Spring::px(0.0, (0.9, 0.3)),
         hover_y: Spring::px(0.0, (1.0, 0.16)),
         hover_a: Spring::unit(0.0, motion::SNAPPY),
-        list_a: Spring::unit(0.0, motion::DEFAULT),
+        list_a: Spring::fade(0.0, motion::DEFAULT),
         detail_a: Spring::unit(0.0, motion::DEFAULT),
         bar_a: Spring::unit(0.0, motion::DEFAULT),
         last_scroll: now,
@@ -874,6 +880,7 @@ fn on_create(hwnd: HWND) {
         listed: (usize::MAX, String::new()),
         leaving: Vec::new(),
         arriving: std::collections::HashMap::new(),
+        old_list: None,
     };
     lib.list_a.to(1.0);
     LIB.with(|l| *l.borrow_mut() = Some(lib));

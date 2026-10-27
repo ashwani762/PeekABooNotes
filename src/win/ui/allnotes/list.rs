@@ -13,8 +13,14 @@ pub(super) fn set_mode(l: &mut Lib, mode: usize) {
         }
         l.mode = mode;
         l.seg_x.to(mode as f32);
+        // The list as it shows now cross-fades into the new one, which settles into place.
+        let lay = layout(l);
+        l.old_list = l.canvas.as_mut().map(|c| {
+            let r = rect(0, lay.list_top as i32, (lay.list_w as i32).min(c.w), c.h - lay.list_top as i32);
+            (r, c.copy_out(r))
+        });
         l.list_a.snap(0.0);
-        l.list_a.to(1.0);
+        l.list_a.launch(1.0);
         l.scroll.snap(0.0);
         l.sel.clear();
         rebuild(l);

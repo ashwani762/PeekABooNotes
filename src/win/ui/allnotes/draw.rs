@@ -115,8 +115,10 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // (gliding, closing a gap) the text, put down on whole pixels, keeps to its row.
     let top = lay.list_top;
     let bottom = lay.h as f32;
-    let la = clamp01(l.list_a.value);
-    let slide = (1.0 - l.list_a.value) * 10.0 * s;
+    // Switching lists, the new one is drawn whole and cross-fades with the one before
+    // (below); opening, it fades in from the window's colour.
+    let la = if l.old_list.is_some() { 1.0 } else { clamp01(l.list_a.value) };
+    let slide = if anim::reduced() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
     let clip = Some(rect(0, top as i32, lay.list_w as i32, lay.h - top as i32));
     if l.rows.is_empty() {
         let (headline, sub) = if !l.query.is_empty() {
@@ -286,6 +288,11 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
                 c.rrect(tx as f32, sy, (right - tx) as f32 + 14.0 * s, 1.0, 0.0, mix(p.list, p.line, la), 1.0);
             }
         }
+    }
+    if let Some((r, px)) = l.old_list.as_ref() {
+        c.flush();
+        c.mix_in(*r, px, clamp01(l.list_a.value));
+        c.begin_batch();
     }
     // Overlay scrollbar, shown while scrolling.
     let max = max_scroll(l, lay);
