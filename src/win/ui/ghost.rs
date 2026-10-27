@@ -300,6 +300,11 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
         }
     }
     c.flush();
+    // The window's border, which Windows draws over its edge (its picture hasn't it): as
+    // much there as the window is.
+    if content > 0.002 {
+        c.shape(&sh, crate::win::ui::note::border_color(g.color, dark), content, 1.0, 1.0);
+    }
     (g.origin.0 + wx as i32 - g.pad, g.origin.1 + wy as i32 - g.pad)
 }
 
@@ -432,7 +437,9 @@ mod tests {
 
     /// How many pixels inside screen rect `at` (its corners, `r` px each way, left out) the
     /// card's canvas, put up at `win` on screen, shows other than `want`.
-    fn misses(g: &mut Ghost, win: (i32, i32), at: RECT, want: &[u32], r: i32) -> usize {
+    /// A window's edge, 1 px all round, is Windows' border over its picture: `border`, when
+    /// it's a window's picture that's wanted.
+    fn misses(g: &mut Ghost, win: (i32, i32), at: RECT, want: &[u32], r: i32, border: Option<u32>) -> usize {
         let local = RECT { left: at.left - win.0, top: at.top - win.1, right: at.right - win.0, bottom: at.bottom - win.1 };
         let got = g.canvas.copy_out(local);
         let (w, h) = (at.right - at.left, at.bottom - at.top);
@@ -440,7 +447,15 @@ mod tests {
             return want.len();
         }
         let corner = |x: i32, y: i32| (x < r || x >= w - r) && (y < r || y >= h - r);
-        (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| !corner(x, y) && got[(y * w + x) as usize] != want[(y * w + x) as usize]).count()
+        let near = |a: u32, b: u32| (0..4).all(|k| ((a >> (8 * k)) & 0xFF).abs_diff((b >> (8 * k)) & 0xFF) <= 1);
+        let miss = |x: i32, y: i32| {
+            let px = got[(y * w + x) as usize];
+            match border {
+                Some(b) if x == 0 || y == 0 || x == w - 1 || y == h - 1 => !near(px, 0xFF00_0000 | b),
+                _ => px != want[(y * w + x) as usize],
+            }
+        };
+        (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| !corner(x, y) && miss(x, y)).count()
     }
 
     /// One presented frame of a flight: the refresh it shows from, its step, where the card is
@@ -478,8 +493,10 @@ mod tests {
         let mut pacer = Pacer::new();
         // `fly` draws the first frame and puts it up at once.
         let win = paint(&mut g, false);
-        let first = if kind == Kind::Open { from_px.as_deref().map(|px| (from.0, px, 14)) } else { Some((from.0, &image_px[..], 8)) };
-        let first_misses = first.map(|(at, px, r)| misses(&mut g, win, at, px, r));
+        // A window's picture has Windows' border over its edge; the deck card's is as it is.
+        let border = crate::win::ui::note::border_color(3, false);
+        let first = if kind == Kind::Open { from_px.as_deref().map(|px| (from.0, px, 14, None)) } else { Some((from.0, &image_px[..], 8, Some(border))) };
+        let first_misses = first.map(|(at, px, r, b)| misses(&mut g, win, at, px, r, b));
         let mut frames = vec![seen(&g, 1, 0.0)];
         let (mut last_misses, mut held) = (None, 0);
         for tick in 0..400u32 {
@@ -498,7 +515,7 @@ mod tests {
                     if !done(&g) {
                         let win = paint(&mut g, false);
                         if kind == Kind::Open {
-                            last_misses = Some(misses(&mut g, win, to.0, &image_px, 8));
+                            last_misses = Some(misses(&mut g, win, to.0, &image_px, 8, Some(border)));
                         }
                         frames.push(seen(&g, refresh, dt));
                     }

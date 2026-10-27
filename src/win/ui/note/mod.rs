@@ -804,6 +804,12 @@ pub fn reload(id: u64) {
     }
 }
 
+/// The colour Windows draws a note window's 1 px border in, over its edge; its flying card
+/// draws the same, so the two hand over without the edge changing.
+pub fn border_color(color: u8, dark: bool) -> u32 {
+    mix(theme::color(color).ink, theme::paper(color, dark), 0.78)
+}
+
 fn apply_theme(h: HWND) {
     let Some(st) = state(h) else { return };
     let dark = app::dark();
@@ -826,7 +832,7 @@ fn apply_theme(h: HWND) {
     });
     st.loading = was;
     if !st.embedded {
-        theme::set_border_color(h, mix(theme::color(color).ink, bg, 0.78));
+        theme::set_border_color(h, border_color(color, dark));
         theme::set_dark_titlebar(h, false);
     }
     unsafe { InvalidateRect(h, std::ptr::null(), 1) };
