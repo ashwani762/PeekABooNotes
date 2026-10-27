@@ -129,7 +129,7 @@ struct NoteWin {
     bar_drag: Option<(i32, i32)>,
     bar_seen: Option<(i32, i32)>,
     /// Wheel scrolling glides to its target instead of jumping.
-    glide: Spring,
+    glide: scrollbar::Glide,
     /// Since when a save has waited for the note's own animations to settle (`T_SAVE`).
     save_held: Option<std::time::Instant>,
     /// The chrome's canvas, kept across paints (made again when the window's size changes).
@@ -221,7 +221,7 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         bar_hold: false,
         bar_drag: None,
         bar_seen: None,
-        glide: Spring::px(0.0, theme::motion::SNAPPY),
+        glide: scrollbar::Glide::new(),
         save_held: None,
         canvas: None,
     });
@@ -300,7 +300,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         bar_hold: false,
         bar_drag: None,
         bar_seen: None,
-        glide: Spring::px(0.0, theme::motion::SNAPPY),
+        glide: scrollbar::Glide::new(),
         save_held: None,
         canvas: None,
     });

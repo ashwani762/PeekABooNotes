@@ -120,6 +120,108 @@ pub(super) fn wheel(h: HWND, delta: i16) {
     crate::win::render::anim::wake(crate::win::render::anim::Client::Notes);
 }
 
+/// The wheel's glide: each notch sets the text off at once, at its fastest, slowing
+/// smoothly to land on a whole pixel at a set time, without a slow creep at the end. A
+/// notch while it's still moving carries on from the speed the text has, and picks up
+/// from there, sagging only a little between quick notches (one the other way starts
+/// afresh).
+///
+/// It was a spring from rest: each notch started slow (its first step a third of its
+/// second), so a spin surged and dipped at every notch (12, 32, 64, 32, 65 px a frame),
+/// and the spring's long tail crept the last pixels in, the final one half a second late.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Glide {
+    pub value: f32,
+    /// Where it ends up (a whole pixel).
+    pub target: f32,
+    /// The curve under way (`curve`): where it started, its starting speed (as a share of
+    /// the distance over the time), how long it takes and how far along it is (s).
+    from: f32,
+    a: f32,
+    dur: f32,
+    t: f32,
+}
+
+/// How long one notch's glide takes, from rest (s).
+const GLIDE: f32 = 0.22;
+/// The shortest and longest a notch caught up in a glide can take (s).
+const GLIDE_MIN: f32 = 0.12;
+const GLIDE_MAX: f32 = 0.36;
+/// The starting speed from rest, and the fastest start a curve can take without
+/// overshooting its end.
+const FRESH: f32 = 2.0;
+
+/// How far along (0 to 1) a curve that starts at speed `a` is at `u` of its time, and its
+/// speed there: `a u + (4 - 3a) u³ + (2a - 3) u⁴`, which starts at speed `a` without
+/// slowing at once (no u² term), and comes to rest at 1. At `a` = 2 it's
+/// `2(1 - u)²(1 + 2u)` fast: slowing all the way, gently at first; below that it picks up
+/// speed before slowing.
+fn curve(a: f32, u: f32) -> (f32, f32) {
+    let (b, c) = (4.0 - 3.0 * a, 2.0 * a - 3.0);
+    (a * u + b * u * u * u + c * u * u * u * u, a + 3.0 * b * u * u + 4.0 * c * u * u * u)
+}
+
+impl Glide {
+    pub(super) fn new() -> Glide {
+        Glide { value: 0.0, target: 0.0, from: 0.0, a: 0.0, dur: 0.0, t: 0.0 }
+    }
+
+    pub(super) fn settled(&self) -> bool {
+        self.t >= self.dur
+    }
+
+    /// At `v`, still.
+    pub(super) fn snap(&mut self, v: f32) {
+        *self = Glide { value: v, target: v, from: v, a: 0.0, dur: 0.0, t: 0.0 };
+    }
+
+    /// The position and speed (px/s) `t` seconds into the curve under way.
+    fn at(&self, t: f32) -> (f32, f32) {
+        if self.dur <= 0.0 {
+            return (self.target, 0.0);
+        }
+        let d = self.target - self.from;
+        let (p, v) = curve(self.a, (t / self.dur).clamp(0.0, 1.0));
+        (self.from + d * p, d * v / self.dur)
+    }
+
+    /// Head for `target` (rounded to a whole pixel) from where it is, at the speed it has.
+    pub(super) fn to(&mut self, target: f32) {
+        let (p, v) = if self.settled() { (self.value, 0.0) } else { self.at(self.t) };
+        let target = target.round();
+        let d = target - p;
+        if d.abs() < 0.5 {
+            self.snap(target);
+            return;
+        }
+        // Moving its way already: on at the speed it has, over as long as a curve from rest
+        // at that speed would take, within reason. From rest, or turning back, off at once
+        // at the fresh speed.
+        let (dur, a) = if v * d > 0.0 {
+            let dur = (FRESH * d / v).clamp(GLIDE_MIN, GLIDE_MAX);
+            (dur, (v * dur / d).min(FRESH))
+        } else {
+            (GLIDE, FRESH)
+        };
+        *self = Glide { value: p, target, from: p, a, dur, t: 0.0 };
+    }
+
+    /// Advance by `dt` seconds. True while still moving (its value short of the target).
+    pub(super) fn step(&mut self, dt: f32) -> bool {
+        if self.settled() || crate::win::render::anim::reduced() {
+            self.snap(self.target);
+            return false;
+        }
+        self.t += dt;
+        if self.t >= self.dur {
+            self.snap(self.target);
+            return false;
+        }
+        self.value = self.at(self.t).0;
+        true
+    }
+}
+
 /// Advance a wheel glide. True while it's still moving.
 pub(super) fn step(st: &mut NoteWin, dt: f32) -> bool {
     if st.glide.settled() {
@@ -336,4 +438,97 @@ pub(super) fn paint(h: HWND, st: &NoteWin, c: &mut Canvas, ink: u32) {
         let strength = crate::win::render::anim::lerp(0.30, 0.48, st.bar_wide.value);
         c.shape(&Shape::new(x, y, w, th, w / 2.0), ink, strength * a, 1.0, 0.0);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The glide's position at 60 frames a second, with a notch of `step` px down at each
+    /// of `notches` (s), until it lands.
+    fn glide(notches: &[f32], step: f32) -> Vec<f32> {
+        let mut g = Glide::new();
+        let (mut t, dt) = (0.0f32, 1.0 / 60.0);
+        let mut left = notches.to_vec();
+        let mut out = vec![0.0];
+        loop {
+            while left.first().is_some_and(|&n| n <= t + 1e-4) {
+                left.remove(0);
+                let from = if g.settled() { g.value } else { g.target };
+                g.to(from + step);
+            }
+            let moving = g.step(dt);
+            t += dt;
+            out.push(if moving { g.value } else { g.target });
+            if !moving && left.is_empty() {
+                return out;
+            }
+            assert!(out.len() < 200, "lands");
+        }
+    }
+
+    fn steps(p: &[f32]) -> Vec<f32> {
+        p.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    /// One notch: the text moves at once, its first step the biggest, each after it no
+    /// bigger than the one before, and it lands on its whole pixel in the glide's time,
+    /// with no late step.
+    #[test]
+    fn a_notch_eases_out_and_lands() {
+        let p = glide(&[0.0], 60.0);
+        let s = steps(&p);
+        assert!(s[0] > 8.0, "moves at once: {s:?}");
+        assert!(s.windows(2).all(|w| w[1] <= w[0] + 1e-3), "never speeds up: {s:?}");
+        assert_eq!(*p.last().unwrap(), 60.0);
+        assert!(p.len() as f32 - 1.0 <= (GLIDE * 60.0).ceil() + 1.0, "{} frames", p.len());
+        // Easing in to land: the last steps are the smallest.
+        assert!(s[s.len() - 1] < 1.0, "{s:?}");
+        // Up to the last frame it's still moving: no pause before the end.
+        assert!(s.iter().all(|&d| d > 0.0), "{s:?}");
+    }
+
+    /// Notches 30 and 50 ms apart (quick spins): the speed changes smoothly from frame to
+    /// frame (it went 64, 32, 65 px a frame), sags little between notches, and the text
+    /// lands where they add up to.
+    #[test]
+    fn a_spin_glides_without_surges() {
+        for (notches, end) in [(vec![0.0, 0.05, 0.10], 180.0), (vec![0.0, 0.03, 0.06, 0.09, 0.12], 300.0)] {
+            let p = glide(&notches, 60.0);
+            let s = steps(&p);
+            assert_eq!(*p.last().unwrap(), end);
+            // No step more than a quarter of the fastest one away from the one before, and
+            // from the fastest after the last notch on, only slower.
+            let last_notch = (notches.last().unwrap() * 60.0).round() as usize;
+            let peak = s.iter().cloned().fold(0.0, f32::max);
+            assert!(s.windows(2).all(|w| (w[1] - w[0]).abs() <= peak * 0.25), "{s:?}");
+            let late = s[last_notch..].iter().cloned().fold(0.0, f32::max);
+            let top = last_notch + s[last_notch..].iter().position(|&d| d == late).unwrap();
+            assert!(s[top..].windows(2).all(|w| w[1] <= w[0]), "{s:?}");
+            // Before it eases off for good, never under 80% of the first step.
+            assert!(s[..=last_notch].iter().all(|&d| d > s[0] * 0.8), "{s:?}");
+            assert!(s.iter().all(|&d| d > 0.0), "{s:?}");
+        }
+    }
+
+    /// A notch while gliding carries on at the speed the text has.
+    #[test]
+    fn a_notch_keeps_the_speed_it_finds() {
+        let mut g = Glide::new();
+        g.to(60.0);
+        for _ in 0..3 {
+            g.step(1.0 / 60.0);
+        }
+        let v = g.at(g.t).1;
+        g.to(120.0);
+        let v2 = g.at(0.0).1;
+        assert!((v - v2).abs() < 1.0, "{v} then {v2}");
+        // Turning back starts afresh, the other way.
+        g.to(0.0);
+        assert!(g.at(0.0).1 < 0.0);
+        // Snapped: settled where it is.
+        g.snap(33.0);
+        assert!(g.settled() && !g.step(0.1) && g.value == 33.0);
+    }
+
 }
