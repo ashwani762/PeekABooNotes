@@ -60,10 +60,8 @@ pub(super) fn caret_out_of_view(edit: HWND) -> Option<i32> {
     Some(if rich::pos_from_char(edit, start).y < 0 { rich::send(edit, EM_LINEINDEX, (line + 1) as usize, 0) as i32 } else { start }.max(0))
 }
 
-/// Nudge the scroll so the caret's line is wholly in view. RichEdit insists on that the
-/// moment it next paints or takes focus: a view restored with that line half under the top
-/// (or bottom) would jump by the hidden part right after the note appears.
-pub(super) fn keep_caret_in_view(edit: HWND) {
+/// The caret's line in `edit`: its top, its height, and the editor's client area.
+fn caret_line(edit: HWND) -> (i32, i32, RECT) {
     const EM_EXLINEFROMCHAR: u32 = 0x0400 + 54;
     let caret = rich::sel(edit).1;
     let line = rich::send(edit, EM_EXLINEFROMCHAR, 0, caret as isize) as i32;
@@ -76,6 +74,39 @@ pub(super) fn keep_caret_in_view(edit: HWND) {
     };
     let mut rc: RECT = unsafe { std::mem::zeroed() };
     unsafe { GetClientRect(edit, &mut rc) };
+    (top, line_h, rc)
+}
+
+/// Whether the caret's line is wholly in view.
+fn caret_line_in_view(edit: HWND) -> bool {
+    let (top, line_h, rc) = caret_line(edit);
+    top >= 0 && top + line_h <= rc.bottom
+}
+
+/// Before a key that may type: the selection, and whether the caret's line is wholly in
+/// view.
+pub(super) type Typing = ((i32, i32), bool);
+
+pub(super) fn before_typing(edit: HWND) -> Typing {
+    (rich::sel(edit), caret_line_in_view(edit))
+}
+
+/// After a key that may have typed (`before` it): typed on to a new line at the bottom
+/// edge (an item that wraps), RichEdit left the caret's line below the view, and the text
+/// 3 px lower, until the next key scrolled it into view (the note jumped down, then 27 px
+/// up). The caret's line comes into view at once, as Enter's does.
+pub(super) fn follow_typing(edit: HWND, before: Typing) {
+    let (sel, in_view) = before;
+    if sel.0 == sel.1 && in_view && rich::sel(edit) != sel && !caret_line_in_view(edit) {
+        keep_caret_in_view(edit);
+    }
+}
+
+/// Nudge the scroll so the caret's line is wholly in view. RichEdit insists on that the
+/// moment it next paints or takes focus: a view restored with that line half under the top
+/// (or bottom) would jump by the hidden part right after the note appears.
+pub(super) fn keep_caret_in_view(edit: HWND) {
+    let (top, line_h, rc) = caret_line(edit);
     let scroll = rich::scroll_y(edit);
     if top < 0 {
         rich::set_scroll_y(edit, scroll + top);
@@ -443,6 +474,7 @@ pub(super) fn paint(h: HWND, st: &NoteWin, c: &mut Canvas, ink: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryW;
 
     /// The glide's position at 60 frames a second, with a notch of `step` px down at each
     /// of `notches` (s), until it lands.
@@ -531,4 +563,39 @@ mod tests {
         assert!(g.settled() && !g.step(0.1) && g.value == 33.0);
     }
 
+    /// Typing on to a new line at the bottom edge of a scrolled note (a checklist item
+    /// that wraps) keeps the caret's line in view at once.
+    #[test]
+    fn typing_on_to_a_new_line_keeps_it_in_view() {
+        let (w, h) = (260, 240);
+        let e = unsafe {
+            LoadLibraryW(wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | (ES_MULTILINE | ES_AUTOVSCROLL) as u32, 0, 0, w, h, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(e);
+        let mut s = String::from("Tasks\r");
+        for i in 1..=14 {
+            s.push_str(&format!("\u{2610} task number {i} to do\r"));
+        }
+        s.pop();
+        rich::insert_text(e, &s);
+        rich::apply_base_format(e, 0, 0xFFFFFF);
+        rich::style_boxes(e);
+        let t = rich::text(e);
+        let at = rich::unmark_str(&t).find("task number 13 to do").unwrap() + "task number 13 to do".len();
+        rich::set_sel(e, at as i32, at as i32);
+        rich::set_scroll_y(e, max_scroll(e));
+        assert!(caret_line_in_view(e));
+        let mut wrapped = false;
+        for c in " jumps over the lazy dog".encode_utf16() {
+            let before = before_typing(e);
+            let lines = rich::send(e, EM_GETLINECOUNT, 0, 0);
+            rich::send(e, WM_CHAR, c as usize, 0);
+            wrapped |= rich::send(e, EM_GETLINECOUNT, 0, 0) > lines;
+            follow_typing(e, before);
+            assert!(caret_line_in_view(e), "after {:?}", char::from_u32(c as u32));
+        }
+        assert!(wrapped, "the item wrapped");
+        unsafe { DestroyWindow(e) };
+    }
 }

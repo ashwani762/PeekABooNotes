@@ -417,13 +417,22 @@ pub(super) unsafe extern "system" fn edit_proc(e: HWND, msg: u32, wp: WPARAM, lp
         WM_KEYUP | WM_CHAR | WM_PASTE | WM_CUT | WM_CLEAR | WM_UNDO | EM_UNDO | rich::EM_REDO | rich::EM_SETSCROLLPOS | WM_VSCROLL | WM_SIZE | WM_TIMER => true,
         _ => false,
     };
+    // Typing at the bottom edge keeps the caret's line in view (`follow_typing`).
+    let typed = matches!(msg, WM_CHAR | WM_KEYDOWN | WM_IME_CHAR | WM_IME_COMPOSITION).then(|| super::scrollbar::before_typing(e));
+    let now = || {
+        let r = unsafe { edit_now(e, msg, wp, lp, parent) };
+        if let Some(before) = typed {
+            super::scrollbar::follow_typing(e, before);
+        }
+        r
+    };
     if !quiet {
-        return unsafe { edit_now(e, msg, wp, lp, parent) };
+        return now();
     }
     let before = matches!(msg, WM_KEYDOWN | WM_KEYUP | WM_TIMER).then(|| view_of(e));
     rich::quiet_if(
         e,
-        || unsafe { edit_now(e, msg, wp, lp, parent) },
+        now,
         |_| match before {
             Some(b) if msg == WM_TIMER => view_of(e) != b,
             Some(b) => key_drew(msg, wp as u16, b, view_of(e)),
