@@ -292,6 +292,57 @@ impl FadeOut {
     }
 }
 
+/// A move from where it is to a target over a set time, along a quarter of a sine: it sets
+/// off at an even pace (its first steps alike, never a slow first one or a leap) and slows
+/// into its end, which it reaches exactly and on time. For what must start gently from
+/// nothing and come to rest without a tail: a toast's fade and rise.
+#[derive(Clone, Copy, Debug)]
+pub struct Ease {
+    from: f32,
+    to: f32,
+    t: f32,
+    dur: f32,
+}
+
+impl Ease {
+    /// At `v`, still.
+    pub fn at(v: f32) -> Ease {
+        Ease { from: v, to: v, t: 1.0, dur: 1.0 }
+    }
+
+    /// From where it is now to `to`, over `dur` seconds. Already on its way there, it
+    /// carries on.
+    pub fn go(&mut self, to: f32, dur: f32) {
+        if to == self.to {
+            return;
+        }
+        self.from = self.value();
+        self.to = to;
+        self.t = 0.0;
+        self.dur = dur.max(1e-3);
+    }
+
+    /// `dt` seconds on: whether it's still on its way.
+    pub fn step(&mut self, dt: f32) -> bool {
+        let moving = self.t < self.dur;
+        self.t = (self.t + dt).min(self.dur);
+        moving
+    }
+
+    pub fn value(&self) -> f32 {
+        let u = self.t / self.dur;
+        self.from + (self.to - self.from) * (u * std::f32::consts::FRAC_PI_2).sin()
+    }
+
+    pub fn target(&self) -> f32 {
+        self.to
+    }
+
+    pub fn done(&self) -> bool {
+        self.t >= self.dur
+    }
+}
+
 /// Linear interpolation helpers.
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
@@ -607,6 +658,24 @@ mod spring_tests {
             assert!(steps.windows(2).all(|w| w[1] <= w[0] + 1.0), "{hz} Hz: {levels:?}");
             assert!(steps[steps.len() - 1] <= 3.0, "{hz} Hz: {levels:?}");
             assert!(levels.len() as f32 <= 0.12 * hz + 2.0);
+        }
+    }
+
+    #[test]
+    fn an_ease_sets_off_evenly_and_lands_on_time() {
+        for hz in [60.0f32, 100.0, 144.0] {
+            let mut e = super::Ease::at(0.0);
+            e.go(1.0, 0.22);
+            let mut v = vec![0.0];
+            while e.step(1.0 / hz) {
+                v.push(e.value());
+            }
+            let steps: Vec<f32> = v.windows(2).map(|w| w[1] - w[0]).collect();
+            // The first frame a small step, the next no bigger, each after no bigger than
+            // the one before; exactly there at the end.
+            assert!(steps[0] < 0.12 && steps[0] > 0.04, "{hz} Hz: {steps:?}");
+            assert!(steps.windows(2).all(|w| w[1] <= w[0] + 1e-6), "{hz} Hz: {steps:?}");
+            assert_eq!(*v.last().unwrap(), 1.0);
         }
     }
 
