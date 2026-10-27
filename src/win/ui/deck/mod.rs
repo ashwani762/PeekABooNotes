@@ -98,6 +98,10 @@ struct Tab {
     y: Spring,
     press: Spring,
     pull: Spring, // 0 = tucked, 1 = pulled out (preview)
+    /// Its capsule's place in the pill (its index), sliding when one before it comes or goes.
+    cap: Spring,
+    /// 0 to 1 as a card that came into the deck (a new note, or one back on Undo) grows in.
+    born: Spring,
     /// Cached spine label layout: (max length, fitted text, text length, cell height).
     fitted: Option<(i32, String, i32, i32)>,
     /// The spine label drawn (see `draw::label_sprite`), let go with `fitted`.
@@ -125,6 +129,8 @@ impl Tab {
             y: Spring::px(y, motion::DEFAULT),
             press: Spring::unit(1.0, motion::SNAPPY),
             pull: Spring::unit(0.0, motion::DEFAULT),
+            cap: Spring::px(0.0, motion::DEFAULT),
+            born: Spring::fade(1.0, (0.75, 0.34)),
             fitted: None,
             sprites: Vec::new(),
             body_h: None,
@@ -138,8 +144,8 @@ impl Tab {
         self.sprites.clear();
     }
 
-    fn springs(&mut self) -> [&mut Spring; 6] {
-        [&mut self.reveal, &mut self.bulge, &mut self.lean, &mut self.y, &mut self.press, &mut self.pull]
+    fn springs(&mut self) -> [&mut Spring; 8] {
+        [&mut self.reveal, &mut self.bulge, &mut self.lean, &mut self.y, &mut self.press, &mut self.pull, &mut self.cap, &mut self.born]
     }
 }
 
@@ -183,12 +189,19 @@ impl Geo {
         self.top + i as f32 * self.step
     }
     fn pill_h(&self) -> f32 {
-        let n = self.caps.max(1) as f32;
+        self.pill_h_for(self.caps as f32)
+    }
+    /// The pill's height holding `n` capsules (a fraction while it grows or shrinks).
+    fn pill_h_for(&self, n: f32) -> f32 {
+        let n = n.max(1.0);
         (n * CAP_H + (n - 1.0) * CAP_GAP + 2.0 * (PILL_W - CAP_W) / 2.0) * self.s
     }
     /// Pill top in screen coordinates.
     fn pill_top(&self) -> f32 {
         self.centre as f32 - self.pill_h() / 2.0
+    }
+    fn pill_top_for(&self, n: f32) -> f32 {
+        self.centre as f32 - self.pill_h_for(n) / 2.0
     }
     fn more_y(&self) -> f32 {
         self.slot_y(self.n) + 8.0 * self.s
@@ -206,6 +219,10 @@ struct Deck {
     wide: bool, // window currently uses the expanded geometry
     previewing: bool,
     pill: Spring,
+    /// How many capsules the pill is sized for, growing and shrinking as notes come and go.
+    caps: Spring,
+    /// The cards have been made once: any made after that came into the deck.
+    synced: bool,
     extras: Spring, // plus button and "+N" tile
     extras_delay: f32,
     extras_goal: f32,
@@ -323,6 +340,8 @@ pub fn create() {
             wide: false,
             previewing: false,
             pill: Spring::fade(1.0, motion::DEFAULT),
+            caps: Spring::px(0.0, motion::DEFAULT),
+            synced: false,
             extras: Spring::unit(0.0, motion::SHINGLE),
             extras_delay: 0.0,
             extras_goal: 0.0,

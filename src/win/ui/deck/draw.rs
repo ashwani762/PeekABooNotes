@@ -88,10 +88,11 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
     let pa = clamp01(d.pill.value);
     if pa > 0.01 {
         let (px, pw) = span(&g, ww, PILL_INSET * s, (PILL_INSET + PILL_W) * s);
-        let pt = g.pill_top() - wy as f32;
+        let n = d.caps.value;
+        let pt = g.pill_top_for(n) - wy as f32;
         let empty = d.tabs.is_empty();
         let pill = |c: &mut Canvas, px: f32, pt: f32, a: f32| {
-            let shape = Shape::new(px, pt, pw, g.pill_h(), pw / 2.0);
+            let shape = Shape::new(px, pt, pw, g.pill_h_for(n), pw / 2.0);
             let mut drop = shape;
             drop.y += 1.0 * s;
             c.shape(&drop, 0x000000, 0.12 * a, 3.0 * s, 0.0);
@@ -107,13 +108,13 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
             // in turn, rather than fading all at once around the ones still waiting.
             let m = (6.0 * s).ceil() as i32;
             let (x0, y0) = (px.floor() as i32 - m, pt.floor() as i32 - m);
-            let (w, h) = (pw.ceil() as i32 + 2 * m + 1, g.pill_h().ceil() as i32 + 2 * m + 1);
+            let (w, h) = (pw.ceil() as i32 + 2 * m + 1, g.pill_h_for(n).ceil() as i32 + 2 * m + 1);
             let mut pc = Canvas::new(w, h);
             pc.clear(0);
             pill(&mut pc, px - x0 as f32, pt - y0 as f32, 1.0);
             let mut v = pc.copy_out(rect(0, 0, w, h));
             for (row, line) in v.chunks_mut(w as usize).enumerate() {
-                let k = sweep(pa, (row as f32 + y0 as f32 - pt) / g.pill_h());
+                let k = sweep(pa, (row as f32 + y0 as f32 - pt) / g.pill_h_for(n));
                 let k = (k * 256.0) as u32;
                 for p in line.iter_mut() {
                     let ch = |sh: u32| ((((*p >> sh) & 0xFF) * k) >> 8) << sh;
@@ -351,6 +352,17 @@ pub(super) fn draw_card_inner(d: &mut Deck, c: &mut Canvas, i: usize, w: i32, or
         // just back in, stays solid as the pill fades out or in around it: it would
         // otherwise have faded with the pill and come back whole as its card set off.
         let a = if d.tabs[i].open || !d.wide { clamp01(d.pill.value) } else { 1.0 };
+        // One that just came grows in from its middle.
+        let b = clamp01(d.tabs[i].born.value);
+        let a = a * b;
+        let mut cp = cp;
+        if b < 0.999 {
+            let sh = &mut cp.shape;
+            let (cx, cy) = (sh.x + sh.w / 2.0, sh.y + sh.h / 2.0);
+            let k = 0.4 + 0.6 * d.tabs[i].born.value.max(0.0);
+            (sh.w, sh.h, sh.r) = (sh.w * k, sh.h * k, sh.r * k);
+            (sh.x, sh.y) = (cx - sh.w / 2.0, cy - sh.h / 2.0);
+        }
         if d.tabs[i].open {
             c.shape(&cp.shape, col.accent, a, 1.0, 1.6 * s);
             if d.tabs[i].pinned {

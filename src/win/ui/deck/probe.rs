@@ -28,6 +28,7 @@ pub(super) fn deck() -> Deck {
         .map(|(i, (title, body))| {
             let mut t = Tab::new(i as u64 + 1, geo.slot_y(i));
             t.slot = i;
+            t.cap.snap(i as f32);
             t.title = title.to_string();
             t.label = title.to_uppercase();
             t.body = body_of(&format!("{title}\n{body}"));
@@ -42,6 +43,8 @@ pub(super) fn deck() -> Deck {
         wide: false,
         previewing: false,
         pill: Spring::fade(1.0, motion::DEFAULT),
+        caps: Spring::px(NOTES.len() as f32, motion::DEFAULT),
+        synced: true,
         extras: Spring::unit(0.0, motion::SHINGLE),
         extras_delay: 0.0,
         extras_goal: 0.0,
@@ -440,4 +443,57 @@ fn trim_deck(d: &mut Deck) {
     for t in d.tabs.iter_mut() {
         t.sprites = Vec::new();
     }
+}
+
+/// A note leaves the folded deck (deleted) and comes back (Undo): the capsules below its
+/// place slide up and back down a step at a time, the pill shrinks and grows with them, and
+/// the one that came back grows in, rather than any of it jumping in a frame.
+#[test]
+fn capsules_make_room_and_close_up_smoothly() {
+    let mut d = deck();
+    let tops = |d: &Deck| -> Vec<f32> { (0..d.tabs.len()).map(|i| pose(d, i, d.geo.cw, d.geo.cy as f32).shape.y).collect() };
+    let pill = |d: &Deck| d.geo.pill_top_for(d.caps.value);
+    let step = (CAP_H + CAP_GAP) * d.geo.s;
+    // Gone: the fourth note.
+    let gone = d.tabs.remove(3);
+    for (k, t) in d.tabs.iter_mut().enumerate() {
+        t.cap.to(k as f32);
+    }
+    d.caps.to(d.tabs.len() as f32);
+    let mut last = (tops(&d), pill(&d));
+    let mut frames = 0;
+    while step_deck(&mut d) {
+        let now = (tops(&d), pill(&d));
+        for (a, b) in last.0.iter().zip(&now.0) {
+            assert!((b - a).abs() < 0.45 * step, "a capsule leapt {} px", b - a);
+        }
+        assert!((now.1 - last.1).abs() < 0.3 * step);
+        last = now;
+        frames += 1;
+    }
+    assert!(frames > 8, "{frames} frames");
+    // The ones below it closed up a step; the pill is a capsule shorter, still centred.
+    let t = tops(&d);
+    assert!((t[3] - t[2] - step).abs() < 0.5);
+    // Back: it grows in at its place, and the ones below slide down to make room.
+    let mut back = gone;
+    back.born.snap(0.0);
+    back.born.to(1.0);
+    back.cap.snap(3.0);
+    d.tabs.insert(3, back);
+    for (k, t) in d.tabs.iter_mut().enumerate() {
+        t.cap.to(k as f32);
+    }
+    d.caps.to(d.tabs.len() as f32);
+    let mut grew = vec![d.tabs[3].born.value];
+    while step_deck(&mut d) {
+        grew.push(d.tabs[3].born.value);
+    }
+    assert!(grew.windows(2).all(|w| w[1] >= w[0] - 0.08), "{grew:?}");
+    assert!((d.tabs[3].born.value - 1.0).abs() < 0.01);
+}
+
+/// One frame at 60 Hz; whether anything still moves.
+fn step_deck(d: &mut Deck) -> bool {
+    step(d, 1.0 / 60.0)
 }
