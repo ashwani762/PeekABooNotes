@@ -815,6 +815,16 @@ unsafe extern "system" {
 /// What `hwnd` (children and all) looks like right now, as Windows composes it: painted
 /// first if anything is pending. None if Windows can't provide it.
 pub fn capture(hwnd: HWND) -> Option<Image> {
+    grab(hwnd, 2)
+}
+
+/// `capture` without waiting: None too while the compositor hasn't had a window just made
+/// (it comes back black), to try again a frame later.
+pub fn capture_now(hwnd: HWND) -> Option<Image> {
+    grab(hwnd, 1)
+}
+
+fn grab(hwnd: HWND, tries: u32) -> Option<Image> {
     const PW_CLIENTONLY: u32 = 1;
     const PW_RENDERFULLCONTENT: u32 = 2;
     unsafe {
@@ -833,8 +843,8 @@ pub fn capture(hwnd: HWND) -> Option<Image> {
         // A window just made can come back black, the compositor not having had it yet (a
         // new note's card went yellow, brown, black on its way open): give it a frame, and
         // if it's still black, there's no picture.
-        for tries in 0..2 {
-            if tries > 0 {
+        for tried in 0..tries {
+            if tried > 0 {
                 windows_sys::Win32::Graphics::Dwm::DwmFlush();
             }
             if PrintWindow(hwnd, dib.dc, PW_CLIENTONLY | PW_RENDERFULLCONTENT) == 0 {

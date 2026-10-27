@@ -83,7 +83,19 @@ struct Ghost {
     /// Frames the card stays whole over the window it has just revealed, which may take a
     /// frame to come up, before it fades.
     hold: u8,
+    /// Whether it has moved yet: its first step is one refresh, however long the frames
+    /// before took (the window it opens into is made while its first frame shows).
+    moved: bool,
+    /// The window it opens into, while its picture is still to be had, and the frames tried.
+    /// The card sets off before the window is made, and the compositor has a window just
+    /// made a frame or so later; meanwhile it's paper.
+    awaiting: Option<(HWND, u8)>,
+    /// How much of that picture shows, as it comes in late.
+    picture_in: Spring,
 }
+
+/// Frames a card tries for the picture of the window it opens into, before it does without.
+const PICTURE_TRIES: u8 = 30;
 
 /// How near its end a card has to be to have arrived, in px. A card that opens into a
 /// window arrives once its picture sits on the window's own pixels (it's drawn on whole
@@ -121,13 +133,14 @@ fn window_size(a: &RECT, b: &RECT, pad: i32) -> (i32, i32) {
     ((w as f32 * 1.1).ceil() as i32 + 2 * pad, (h as f32 * 1.1).ceil() as i32 + 2 * pad)
 }
 
-/// Fly a card from `from` to `to` (screen rects with corner radii).
-pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, on_arrive: Option<Box<dyn FnOnce()>>) {
+/// Fly a card from `from` to `to` (screen rects with corner radii). Its first frame is up
+/// when this returns; the card, to `adopt` a window, unless motion is reduced.
+pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, on_arrive: Option<Box<dyn FnOnce()>>) -> Option<HWND> {
     if anim::reduced() {
         if let Some(f) = on_arrive {
             f();
         }
-        return;
+        return None;
     }
     // The card shows what the note window draws, so it takes the scale of the monitor the
     // window is on (it may not be the deck's): where it opens, or where it closes from.
@@ -161,6 +174,53 @@ pub fn fly(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     anim::wake(Client::Ghost);
     // Its frames keep to the refreshes of the display the window is on.
     anim::pace_on(window);
+    Some(hwnd)
+}
+
+/// Card `ghost`, flying open, opens into `window`, made after it set off (so it set off at
+/// once): it takes the window's picture as soon as the compositor has it, and `on_arrive`
+/// runs when it gets there. With no card (motion reduced), `on_arrive` runs now.
+pub fn adopt(ghost: Option<HWND>, window: HWND, on_arrive: Option<Box<dyn FnOnce()>>) {
+    let left = GHOSTS.with(|gs| {
+        let mut gs = gs.borrow_mut();
+        match gs.iter_mut().find(|g| Some(g.hwnd) == ghost && !g.arrived) {
+            Some(g) => {
+                g.awaiting = (!window.is_null()).then_some((window, 0));
+                g.on_arrive = on_arrive;
+                None
+            }
+            None => on_arrive,
+        }
+    });
+    if let Some(f) = left {
+        f();
+    }
+}
+
+/// A card waiting for its window's picture tries once more (without waiting): got, it comes
+/// in, faded in when the card shows it already, at once when it doesn't yet.
+fn fetch_picture(g: &mut Ghost) {
+    let Some((window, tried)) = g.awaiting else { return };
+    let picture = if unsafe { IsWindow(window) } != 0 { crate::win::render::gfx::capture_now(window) } else { None };
+    if picture.is_none() && tried + 1 < PICTURE_TRIES {
+        g.awaiting = Some((window, tried + 1));
+        return;
+    }
+    received(g, picture);
+}
+
+/// The picture a card was waiting for came (or never will: None).
+fn received(g: &mut Ghost, picture: Option<crate::win::render::gfx::Image>) {
+    if picture.is_some() {
+        g.image = picture;
+    }
+    g.awaiting = None;
+    // What the card would show by now comes in over a moment rather than in one frame.
+    g.picture_in.snap(0.0);
+    g.picture_in.to(1.0);
+    if look(g).content <= 0.002 {
+        g.picture_in.snap(1.0);
+    }
 }
 
 /// The card flying from `from` to `to` at scale `s`, drawn in `hwnd`.
@@ -204,6 +264,9 @@ fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, c
         arrived: false,
         fresh: true,
         hold: 0,
+        moved: false,
+        awaiting: None,
+        picture_in: Spring::unit(1.0, theme::motion::DEFAULT),
     };
     g.x.to(lx(t));
     g.y.to(ly(t));
@@ -239,25 +302,35 @@ struct Look {
     content: f32,
 }
 
+/// 0 before `a`, 1 after `b`, easing in and out between: a fade that starts and ends at
+/// rest, as the motion it's part of does, never with a step.
+fn ease(p: f32, a: f32, b: f32) -> f32 {
+    let t = clamp01((p - a) / (b - a));
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn look(g: &Ghost) -> Look {
     let p = progress(g);
     let card = match g.kind {
         Kind::Open => g.fade.value,
-        Kind::Close => 1.0 - clamp01((p - 0.7) / 0.3),
-        Kind::Dissolve => 1.0 - p,
+        Kind::Close => 1.0 - ease(p, 0.7, 1.0),
+        Kind::Dissolve => 1.0 - ease(p, 0.0, 1.0),
     };
     // Content sits where the note window draws it; the growing card reveals it.
     let content = match (g.kind, g.from_image.is_some() && g.image.is_some()) {
-        // From the deck card into the window: the card's words fade before the window's
-        // come, so the two never show at once, doubled a little apart (they're laid out
-        // differently), and the paper never stands empty for long.
-        (Kind::Open, true) => card * clamp01((p - 0.27) / 0.33),
-        (Kind::Open, false) => card * clamp01((p - 0.25) / 0.6),
+        // Opening, it's paper until the window's picture comes.
+        (Kind::Open, _) if g.awaiting.is_some() => 0.0,
+        // From the deck card into the window: the card's words are all but gone before the
+        // window's come, so the two never show at once, doubled a little apart (they're
+        // laid out differently), and each fades over a stretch of the flight, not a frame
+        // or two of it.
+        (Kind::Open, true) => card * ease(p, 0.35, 0.9),
+        (Kind::Open, false) => card * ease(p, 0.25, 0.85),
         // Archived or deleted, the note fades as one, words and all: never an empty card.
         (Kind::Dissolve, _) => card,
-        (Kind::Close, _) => card * (1.0 - clamp01(p / 0.6)),
-    };
-    let from = if g.kind == Kind::Open && g.from_image.is_some() { card * (1.0 - clamp01((p - 0.05) / 0.25)) } else { 0.0 };
+        (Kind::Close, _) => card * (1.0 - ease(p, 0.0, 0.6)),
+    } * g.picture_in.value;
+    let from = if g.kind == Kind::Open && g.from_image.is_some() { card * (1.0 - ease(p, 0.0, 0.5)) } else { 0.0 };
     Look { card, from, content }
 }
 
@@ -275,12 +348,14 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32) {
     let sh = Shape::new(pad + g.x.value - wx, pad + g.y.value - wy, g.w.value.clamp(1.0, cw), g.h.value.clamp(1.0, ch), g.r.value.max(0.0));
     c.card(&sh, theme::paper(g.color, dark), alpha, 0x000000, 0.06 * alpha, 1.6 * alpha, s);
     c.begin_batch();
-    if let Some(img) = g.image.as_ref() {
-        // Anchored at the card's top-left, as the window lays itself out.
+    // The deck card it opens from, then the window's picture, both anchored at the card's
+    // top-left, as the window lays itself out.
+    if let Some(from) = g.from_image.as_ref() {
         c.flush();
-        if let Some(from) = g.from_image.as_ref() {
-            c.image(from, sh.x, sh.y, &sh, from_a);
-        }
+        c.image(from, sh.x, sh.y, &sh, from_a);
+    }
+    if let Some(img) = g.image.as_ref() {
+        c.flush();
         c.image(img, sh.x, sh.y, &sh, content);
     } else if content > 0.01 && sh.w > 40.0 * s && sh.h > 30.0 * s {
         let (x0, y0) = (sh.x + 18.0 * s, sh.y + 42.0 * s);
@@ -322,8 +397,8 @@ pub fn clear() {
 /// (the reveal's work, its paint, is done then too, so it never shortens the fade).
 const HOLD: u8 = 2;
 
-/// One frame of a card's flight, `dt` seconds on.
-fn advance(g: &mut Ghost, dt: f32) -> Step {
+/// One frame of a card's flight, `dt` seconds on, on a display refreshing every `period`.
+fn advance(g: &mut Ghost, dt: f32, period: f32) -> Step {
     if g.fresh {
         // Put up as the window (or deck card) it takes over from, pixel for pixel, in the
         // frame that one goes: that frame has to be seen before the card moves.
@@ -337,8 +412,13 @@ fn advance(g: &mut Ghost, dt: f32) -> Step {
         }
         g.fade.to(0.0);
     }
+    // Setting off, from rest: one refresh, whatever the frames before it took (the window
+    // it opens into made and painted while its first frame showed), so it never sets off
+    // with a leap.
+    let dt = if g.moved { dt } else { dt.min(period) };
+    g.moved = true;
     let mut moving = false;
-    for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade] {
+    for sp in [&mut g.x, &mut g.y, &mut g.w, &mut g.h, &mut g.r, &mut g.fade, &mut g.picture_in] {
         moving |= sp.step(dt);
     }
     if g.arrived {
@@ -371,7 +451,8 @@ pub fn frame(dt: f32) -> bool {
     let alive = GHOSTS.with(|gs| {
         let mut gs = gs.borrow_mut();
         for g in gs.iter_mut() {
-            match advance(g, dt) {
+            fetch_picture(g);
+            match advance(g, dt, anim::period()) {
                 Step::Still => {}
                 Step::Moved => render(g),
                 Step::Arrived => {
@@ -486,12 +567,21 @@ mod tests {
         held: u32,
     }
 
+    /// Opening, as the app does it: the window is made while the first frame shows (taking
+    /// `OPEN_WORK` refreshes), and its picture comes `PICTURE_LATE` frames after that.
     fn fly_off_screen(kind: Kind, from: (RECT, f32), to: (RECT, f32), image: (Image, Vec<u32>), from_image: Option<(Image, Vec<u32>)>, hz: f64) -> Flight {
+        const OPEN_WORK: f64 = 3.0;
+        const PICTURE_LATE: u32 = 2;
         let p = 1.0 / hz;
         let (image, image_px) = image;
         let (from_image, from_px) = from_image.map_or((None, None), |(i, px)| (Some(i), Some(px)));
-        let content = Content { title: "Q4 goals, draft".into(), body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(), body_top: None, image: Some(image), from_image };
+        let opening = kind == Kind::Open;
+        let (now, mut later) = if opening { (None, Some(image)) } else { (Some(image), None) };
+        let content = Content { title: "Q4 goals, draft".into(), body: "- Cut p95 latency to 200 ms\n- Ship offline mode".into(), body_top: None, image: now, from_image };
         let mut g = card(null_mut(), kind, from, to, 3, content, 1.0);
+        if opening {
+            g.awaiting = Some((null_mut(), 0));
+        }
         let mut pacer = Pacer::new();
         // `fly` draws the first frame and puts it up at once.
         let win = paint(&mut g, false);
@@ -504,10 +594,15 @@ mod tests {
         for tick in 0..400u32 {
             // The first tick comes right after `fly`, in the same refresh; the rest just after
             // a refresh, as DwmFlush returns.
-            let t = if tick == 0 { 0.92 * p } else { (tick as f64 + 0.1) * p };
+            let work = if opening && tick > 0 { OPEN_WORK } else { 0.0 };
+            let t = if tick == 0 { 0.92 * p } else { (tick as f64 + work + 0.1) * p };
+            if tick == PICTURE_LATE && opening {
+                received(&mut g, later.take());
+            }
             let dt = pacer.step(t, Some(Timing { period: p, vblank: Some((t / p).floor() * p), display: 1 }));
             let refresh = (t / p).floor() as u32 + 1;
-            match advance(&mut g, dt) {
+            let dt = if g.moved || g.fresh { dt } else { dt.min(p as f32) };
+            match advance(&mut g, dt, p as f32) {
                 Step::Still => held += 1,
                 Step::Moved => {
                     paint(&mut g, false);

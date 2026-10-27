@@ -202,17 +202,18 @@ pub fn open_note_from(id: u64, from: Option<(RECT, f32)>) {
             // from the pill from its capsule, and neither looks like the card.
             let from_card = deck::card_rect(id).is_some_and(|(r, _)| (r.left, r.top, r.right, r.bottom) == (from.0.left, from.0.top, from.0.right, from.0.bottom));
             let from_image = if from_card { deck::card_image(id) } else { None };
-            let h = note::create(id, r, note::Show::Later);
             deck::hand_off(id);
-            // Shows what the window will (it's already laid out, scrolled to the end).
-            let mut content = note::flight_content(h, &text);
-            content.from_image = from_image;
-            if text.trim().is_empty() {
-                content.title.clear();
-            }
+            // The card sets off at once, as what it flies from, and the window is made while
+            // its first frame shows (making it, and its picture, took 100 ms and more before
+            // anything moved). Until the card has the window's picture, it's paper; the words
+            // are there only should the picture never come.
+            let title = if text.trim().is_empty() { String::new() } else { crate::common::store::title_of(&text) };
+            let content = crate::win::ui::ghost::Content { title, body: crate::common::store::body_of(&text), body_top: None, image: None, from_image };
             // The window's corners, at the scale of the monitor it opens on (not the deck's).
-            let s = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(h) }.max(96) as f32 / 96.0;
-            crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, Some(Box::new(move || note::reveal(h))));
+            let s = crate::win::ui::screen::of_rect(&r).1;
+            let ghost = crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Open, from, (r, 8.0 * s), color, content, None);
+            let h = note::create(id, r, note::Show::Later);
+            crate::win::ui::ghost::adopt(ghost, h, Some(Box::new(move || note::reveal(h))));
         }
         _ => {
             note::create(id, r, note::Show::Now);
