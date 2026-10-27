@@ -50,6 +50,8 @@ const FULL_MS: u32 = 4000;
 const T_RECT: usize = 6;
 const RECT_DELAY_MS: u32 = 400;
 const EN_MAXTEXT: u32 = 0x0501;
+/// The longest a save waits for the note's own animations to settle, in ms.
+const SAVE_HOLD_MS: u64 = 1500;
 const SAVE_DELAY_MS: u32 = 250;
 /// A long note waits longer, up to 1.5 s at 100,000 characters: its save (the RTF, its
 /// text, notes.json) costs a tenth of a second or more there, and typing a key at a time
@@ -128,6 +130,8 @@ struct NoteWin {
     bar_seen: Option<(i32, i32)>,
     /// Wheel scrolling glides to its target instead of jumping.
     glide: Spring,
+    /// Since when a save has waited for the note's own animations to settle (`T_SAVE`).
+    save_held: Option<std::time::Instant>,
     /// The chrome's canvas, kept across paints (made again when the window's size changes).
     canvas: Option<Canvas>,
 }
@@ -218,6 +222,7 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         bar_drag: None,
         bar_seen: None,
         glide: Spring::px(0.0, theme::motion::SNAPPY),
+        save_held: None,
         canvas: None,
     });
     // Hidden-until-arrival windows are created layered at alpha 0 so they can take focus
@@ -296,6 +301,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         bar_drag: None,
         bar_seen: None,
         glide: Spring::px(0.0, theme::motion::SNAPPY),
+        save_held: None,
         canvas: None,
     });
     let h = unsafe {
@@ -570,6 +576,7 @@ pub fn id_of(h: HWND) -> Option<u64> {
 pub fn flush(h: HWND) {
     let Some(st) = state(h) else { return };
     unsafe { KillTimer(h, T_SAVE) };
+    st.save_held = None;
     let (id, edit) = (st.id, st.edit);
     // The place to reopen at is the note window's: the card in All Notes leaves it be.
     let view = if st.embedded { app::store(|s| s.note(id).and_then(|n| n.view)) } else { Some(view_of(edit)) };
@@ -1061,6 +1068,18 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return 0;
             }
             WM_TIMER if wp == T_SAVE => {
+                // Not while a box in this note ticks or its text glides: a save (the note
+                // read back, the file written and flushed to the disk) held the circle
+                // still for four frames. Soon after they settle instead, and never more
+                // than a second and a half late.
+                if let Some(st) = state(h) {
+                    let busy = crate::win::editor::checks::animating(st.edit) || !st.glide.settled();
+                    let held = *st.save_held.get_or_insert_with(std::time::Instant::now);
+                    if busy && held.elapsed() < std::time::Duration::from_millis(SAVE_HOLD_MS) {
+                        SetTimer(h, T_SAVE, 60, None);
+                        return 0;
+                    }
+                }
                 flush(h);
                 return 0;
             }

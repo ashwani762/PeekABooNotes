@@ -122,6 +122,11 @@ pub fn frame(dt: f32) -> bool {
     ANIMS.with(|a| !a.borrow().is_empty())
 }
 
+/// Whether any box of editor `e` is ticking or unticking.
+pub fn animating(e: HWND) -> bool {
+    ANIMS.with(|a| a.borrow().keys().any(|k| k.0 == e as isize))
+}
+
 /// The rows of the checklist item whose box is at `cp`, from the top of its first line to
 /// where the next paragraph starts (to the end of the text for the last), in client px.
 fn item_rows(e: HWND, cp: i32) -> (i32, i32) {
