@@ -44,6 +44,8 @@ thread_local! {
     static STYLES: RefCell<HashMap<isize, Style>> = RefCell::new(HashMap::new());
     /// Boxes mid-animation, by (editor, character position).
     static ANIMS: RefCell<HashMap<(isize, i32), Spring>> = RefCell::new(HashMap::new());
+    /// Boxes set off since the last frame: their first step is one refresh at most.
+    static STARTED: RefCell<Vec<(isize, i32)>> = const { RefCell::new(Vec::new()) };
     static HOT: RefCell<Option<(isize, i32)>> = const { RefCell::new(None) };
     /// What ticking items' text fades from, by (editor, character position).
     static LOOKS: RefCell<HashMap<(isize, i32), Look>> = RefCell::new(HashMap::new());
@@ -78,6 +80,7 @@ pub fn animate(e: HWND, cp: i32, checked: bool) {
     // (`draw_box`), and it sets off on the first frame.
     sp.launch(if checked { 1.0 } else { 0.0 });
     ANIMS.with(|a| a.borrow_mut().insert((e as isize, cp), sp));
+    STARTED.with(|s| s.borrow_mut().push((e as isize, cp)));
     anim::wake(Client::Notes);
 }
 
@@ -98,10 +101,16 @@ pub fn set_hot(e: HWND, cp: Option<i32>) {
 /// Step running animations and redraw their editors. Returns true while any move.
 pub fn frame(dt: f32) -> bool {
     let mut done = Vec::new();
+    // A box's first step is one refresh at most, as long as the click can have been on
+    // screen: a frame made late by the click's own work, while something else was moving,
+    // stepped two, and an untick's text darkened 2.4 times as much in its first frame as
+    // in its second.
+    let started = STARTED.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    let first = dt.min(anim::period());
     let live: Vec<(isize, i32)> = ANIMS.with(|a| {
         let mut a = a.borrow_mut();
         for (k, sp) in a.iter_mut() {
-            if !sp.step(dt) {
+            if !sp.step(if started.contains(k) { first } else { dt }) {
                 done.push(*k);
             }
         }
@@ -331,6 +340,27 @@ fn fonts(s: f32) -> Metrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tick's first step is one refresh, however late its frame: the work of the click
+    /// made one late while something else was moving, and its first step was two.
+    #[test]
+    fn a_ticks_first_step_is_one_refresh() {
+        let p = anim::period();
+        let value = |e: isize, steps: &[f32]| {
+            animate(e as HWND, 7, true);
+            for &dt in steps {
+                frame(dt);
+            }
+            ANIMS.with(|a| a.borrow().get(&(e, 7)).map(|sp| sp.value))
+        };
+        // Not windows: nothing is drawn.
+        let (late, on_time) = (value(-11, &[2.0 * p]), value(-12, &[p]));
+        assert!(late.is_some() && late == on_time, "{late:?} {on_time:?}");
+        // After it, steps are as long as the frames.
+        let (late, on_time) = (value(-13, &[p, 2.0 * p]), value(-14, &[p, p, p]));
+        assert!((late.unwrap() - on_time.unwrap()).abs() < 0.01, "{late:?} {on_time:?}");
+        ANIMS.with(|a| a.borrow_mut().retain(|k, _| k.0 > -11 || k.0 < -14));
+    }
 
     /// A tick's circle grows from the first frame and comes to rest once: never past its
     /// size and back, so once it stops changing by a visible amount, it doesn't start

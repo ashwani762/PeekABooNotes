@@ -259,7 +259,10 @@ impl Glide {
             self.snap(self.target);
             return false;
         }
-        self.t += dt;
+        // Its first step is one refresh at most, as long as the notch can have been on
+        // screen: a frame made late by the notch's own work, while something else was
+        // moving, stepped two, and the first notch after a note opened went 19 px, then 10.
+        self.t += if self.t == 0.0 { dt.min(crate::win::render::anim::period()) } else { dt };
         if self.t >= self.dur {
             self.snap(self.target);
             return false;
@@ -517,6 +520,27 @@ mod tests {
 
     fn steps(p: &[f32]) -> Vec<f32> {
         p.windows(2).map(|w| w[1] - w[0]).collect()
+    }
+
+    /// A notch's first step is one refresh, however late its frame (the notch's own work
+    /// made one late while something else moved: 19 px, then 10).
+    #[test]
+    fn a_notchs_first_step_is_one_refresh() {
+        let p = crate::win::render::anim::period();
+        let first = |dt: f32| {
+            let mut g = Glide::new();
+            g.to(100.0);
+            g.step(dt);
+            g.value
+        };
+        assert_eq!(first(2.0 * p), first(p));
+        // From there, as far as the frames go.
+        let mut g = Glide::new();
+        g.to(100.0);
+        g.step(p);
+        let a = g.value;
+        g.step(2.0 * p);
+        assert!(g.value - a > 1.5 * a, "{a} then {}", g.value - a);
     }
 
     /// One notch: the text moves at once, its first step the biggest, each after it no
