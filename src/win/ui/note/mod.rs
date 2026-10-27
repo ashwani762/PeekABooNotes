@@ -96,10 +96,9 @@ struct NoteWin {
     dirty: bool,
     loading: bool,
     discard: bool,
-    /// Going because another window took the foreground, which already covers most of it:
-    /// it goes home without the card flying from where it was, which would show over that
-    /// window as if Windows were minimizing something on it.
-    quiet: bool,
+    /// Kept on top of the window that took the foreground while it waits to fly home (see
+    /// `hide_later`); back in its place among windows if it's used again instead.
+    raised: bool,
     /// When the note was last changed in this window: the first change of a visit (the
     /// window just opened, or the note left alone a while) keeps a version of it first.
     edited_at: Option<std::time::Instant>,
@@ -200,7 +199,7 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
-        quiet: false,
+        raised: false,
         edited_at: None,
         before: None,
         full_at: None,
@@ -278,7 +277,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         dirty: false,
         loading: true,
         discard: false,
-        quiet: false,
+        raised: false,
         edited_at: None,
         before: None,
         full_at: None,
@@ -479,9 +478,6 @@ fn fly_home(h: HWND) {
     let id = st.id;
     if !crate::win::ui::deck::holds(id) {
         dissolve(h);
-        return;
-    }
-    if st.quiet {
         return;
     }
     let Some((r, color, content)) = snapshot(h) else { return };
@@ -973,6 +969,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     st.active = (wp & 0xFFFF) as u32 != WA_INACTIVE || crate::win::ui::menu::is_menu(lp as HWND);
                     if st.active {
                         KillTimer(h, T_HIDE);
+                        lower(h);
                         SetFocus(st.edit);
                         let id = st.id;
                         if app::store(|s| s.d.settings.last_note) != Some(id) {

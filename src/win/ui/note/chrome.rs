@@ -193,12 +193,51 @@ fn hides(h: HWND) -> bool {
 }
 
 /// The note lost the foreground to `to`: unless that's part of the note (a dialog it
-/// owns), start watching for the moment to go.
+/// owns), start watching for the moment to go. A click on another app's window brings
+/// that window over the note at once: the note is kept on top of it, in view, so it flies
+/// home from where it's seen as the click ends, rather than vanishing behind the window
+/// and a card coming out over it after.
 pub(super) fn hide_later(h: HWND, to: HWND) {
     if !hides(h) || (!to.is_null() && unsafe { GetWindow(to, GW_OWNER) } == h) {
         return;
     }
-    unsafe { SetTimer(h, T_HIDE, 300, None) };
+    if !pointer_on(h) {
+        raise(h);
+    }
+    unsafe { SetTimer(h, T_HIDE, 40, None) };
+}
+
+/// Whether the pointer is over the note's window.
+fn pointer_on(h: HWND) -> bool {
+    let mut p = POINT { x: 0, y: 0 };
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    unsafe {
+        GetCursorPos(&mut p);
+        GetWindowRect(h, &mut r);
+    }
+    crate::win::util::pt_in(&r, p.x, p.y)
+}
+
+/// On top of every other window until it goes (or `lower` puts it back).
+fn raise(h: HWND) {
+    let Some(st) = state(h) else { return };
+    if !st.raised {
+        st.raised = true;
+        unsafe { SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    }
+}
+
+/// Back among the other windows after `raise`, unless it's pinned (on top anyway).
+pub(super) fn lower(h: HWND) {
+    let Some(st) = state(h) else { return };
+    if !st.raised {
+        return;
+    }
+    st.raised = false;
+    let id = st.id;
+    if !app::store(|s| s.note(id).is_some_and(|n| n.pinned)) {
+        unsafe { SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    }
 }
 
 /// Go once the pointer is off the note with no button held: someone still pointing at it,
@@ -215,6 +254,7 @@ pub(super) fn hide_tick(h: HWND) {
     let ours = fg == h || (!fg.is_null() && unsafe { GetWindow(fg, GW_OWNER) } == h);
     if ours || !hides(h) {
         unsafe { KillTimer(h, T_HIDE) };
+        lower(h);
         return;
     }
     let mut p = POINT { x: 0, y: 0 };
@@ -229,30 +269,10 @@ pub(super) fn hide_tick(h: HWND) {
         unsafe { KillTimer(h, T_HIDE) };
         return;
     }
-    if let Some(st) = state(h) {
-        st.quiet = covered_by(h, fg);
-    }
     unsafe {
         KillTimer(h, T_HIDE);
         PostMessageW(h, WM_CLOSE, 0, 0);
     }
-}
-
-/// Whether window `by` (in front of the note: it has the foreground) hides at least half
-/// of note `h`.
-fn covered_by(h: HWND, by: HWND) -> bool {
-    if by.is_null() || unsafe { IsWindowVisible(by) == 0 || IsIconic(by) != 0 } {
-        return false;
-    }
-    let (mut a, mut b): (RECT, RECT) = unsafe { (std::mem::zeroed(), std::mem::zeroed()) };
-    unsafe {
-        GetWindowRect(h, &mut a);
-        GetWindowRect(by, &mut b);
-    }
-    let w = (a.right.min(b.right) - a.left.max(b.left)).max(0) as i64;
-    let ht = (a.bottom.min(b.bottom) - a.top.max(b.top)).max(0) as i64;
-    let area = ((a.right - a.left) as i64 * (a.bottom - a.top) as i64).max(1);
-    w * ht * 2 >= area
 }
 
 pub(super) fn click(h: HWND, b: Btn) {
