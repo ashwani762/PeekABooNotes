@@ -118,7 +118,7 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // Switching lists, the new one is drawn whole and cross-fades with the one before
     // (below); opening, it fades in from the window's colour.
     let la = if l.old_list.is_some() { 1.0 } else { clamp01(l.list_a.value) };
-    let slide = if anim::reduced() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
+    let slide = if anim::reduced() || l.old_list.is_some() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
     let clip = Some(rect(0, top as i32, lay.list_w as i32, lay.h - top as i32));
     if l.rows.is_empty() {
         let (headline, sub) = if !l.query.is_empty() {
