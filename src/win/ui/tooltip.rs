@@ -20,7 +20,7 @@ use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::win::app;
-use crate::win::render::anim::{self, Client, FadeOut, Spring, clamp01};
+use crate::win::render::anim::{self, Client, Ease, FadeOut, Spring, clamp01};
 use crate::win::render::gfx::{Canvas, Font, Shape};
 use crate::win::theme;
 use crate::win::util::{rect, wide};
@@ -38,6 +38,9 @@ const GONE_MS: u32 = 120;
 /// How long it takes to fade out, to nothing (in, it fades as a menu does).
 const OUT_S: f32 = 0.12;
 const IN: (f32, f32) = (1.0, 0.12);
+/// How long it takes to fade in: along an even curve, its first frame about a tenth shown
+/// (on a spring it showed at 25%, and 43 to 46% once the first frame was missed).
+const IN_S: f32 = 0.16;
 /// How long the tip takes to fade out on its way to the next button.
 const SWAP_S: f32 = 0.06;
 
@@ -61,7 +64,7 @@ struct Tip {
     fading: u32,
     shown: bool,
     hidden_at: Option<Instant>,
-    fade: Spring,
+    fade: Ease,
     /// Fading out: to nothing, on time (see `FadeOut`), then hidden.
     out: Option<FadeOut>,
     /// Where the card is (its window's top-left) and how wide, sliding to the next
@@ -132,7 +135,7 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 fading: 0,
                 shown: false,
                 hidden_at: None,
-                fade: Spring::fade(0.0, IN),
+                fade: Ease::at(0.0),
                 out: None,
                 at: (Spring::px(0.0, IN), Spring::px(0.0, IN)),
                 width: Spring::px(0.0, IN),
@@ -261,7 +264,7 @@ fn go_away(t: &mut Tip) {
         t.hidden_at = Some(Instant::now());
         // From the first frame, to nothing: a spring's tail left a faint card a few
         // frames that was then cut.
-        t.out = Some(FadeOut::new(clamp01(t.fade.value), OUT_S));
+        t.out = Some(FadeOut::new(clamp01(t.fade.value()), OUT_S));
         anim::wake(Client::Tip);
     }
 }
@@ -313,29 +316,29 @@ fn show(t: &mut Tip, swap: bool) {
     let (ox, oy) = ((x - t.margin) as f32, (y - t.margin) as f32);
     unsafe { KillTimer(t.hwnd, T_GONE) };
     let here = (t.at.0.target, t.at.1.target, t.size) == (ox, oy, (w, h)) && t.showing == (t.label.clone(), t.keys.clone());
-    if here && t.canvas.is_some() && t.fade.value > 0.0 {
+    if here && t.canvas.is_some() && t.fade.value() > 0.0 {
         // Back on the button it was fading out from: it fades back in from where it is.
         t.shown = true;
         t.out = None;
         t.next = None;
-        t.fade.retarget(1.0, IN);
+        t.fade.go(1.0, IN_S * (1.0 - clamp01(t.fade.value())).max(0.3));
         anim::wake(Client::Tip);
         return;
     }
-    if swap && t.canvas.is_some() && t.fade.value >= 0.05 && !(here && t.out.is_none()) {
+    if swap && t.canvas.is_some() && t.fade.value() >= 0.05 && !(here && t.out.is_none()) {
         // Up for another button: out where it is, then in at that one (see `frame`).
         t.shown = true;
         t.next = Some((ox, oy, (w, h)));
         if t.out.is_none() {
-            t.out = Some(FadeOut::new(clamp01(t.fade.value), SWAP_S));
+            t.out = Some(FadeOut::new(clamp01(t.fade.value()), SWAP_S));
         }
         anim::wake(Client::Tip);
         return;
     }
     // Fresh: fade in with a short settle toward the button.
     come_up(t, ox, oy, (w, h));
-    t.fade.snap(0.0);
-    t.fade.launch_as(1.0, IN);
+    t.fade = Ease::at(0.0);
+    t.fade.go(1.0, IN_S);
     render(t);
     // Above everything, pinned notes included.
     unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) };
@@ -395,14 +398,15 @@ pub fn frame(dt: f32) -> bool {
         if let Some(out) = t.out.as_mut() {
             let a = out.step(dt);
             let done = out.done();
-            let was = t.fade.value;
-            t.fade.snap(a);
+            let was = t.fade.value();
+            t.fade = Ease::at(a);
             // Hidden once a frame of nothing has been shown, not cut from the faint last one;
             // or, on its way to another button, up there.
             if done && was <= 0.0 {
                 if let Some((ox, oy, size)) = t.next {
                     come_up(t, ox, oy, size);
-                    t.fade.launch_as(1.0, IN);
+                    t.fade = Ease::at(0.0);
+                    t.fade.go(1.0, IN_S);
                     t.fade.step(dt);
                     render(t);
                     unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
@@ -412,7 +416,7 @@ pub fn frame(dt: f32) -> bool {
                 return false;
             }
             moving = true;
-        } else if !t.shown && t.fade.value < 0.002 {
+        } else if !t.shown && t.fade.value() < 0.002 {
             hide(t);
             return false;
         }
@@ -428,7 +432,7 @@ fn hide(t: &mut Tip) {
         KillTimer(t.hwnd, T_GONE);
         ShowWindow(t.hwnd, SW_HIDE);
     }
-    t.fade.snap(0.0);
+    t.fade = Ease::at(0.0);
     t.out = None;
     t.next = None;
     t.canvas = None;
@@ -449,9 +453,9 @@ fn render(t: &mut Tip) {
     }
     let mut c = t.canvas.take().unwrap();
     c.clear(0);
-    let a = clamp01(t.fade.value);
+    let a = clamp01(t.fade.value());
     // In whole pixels, so the card and its words (put down on whole pixels) move together.
-    let settle = if anim::reduced() { 0.0 } else { ((1.0 - t.fade.value) * 3.0 * s).round() * if t.above { 1.0 } else { -1.0 } };
+    let settle = if anim::reduced() { 0.0 } else { ((1.0 - t.fade.value()) * 3.0 * s).round() * if t.above { 1.0 } else { -1.0 } };
     let (ox, oy) = (t.margin as f32, t.margin as f32 + settle);
     let card = Shape::new(ox, oy, w as f32, h as f32, 8.0 * s);
     c.card(&card, surface, 1.0, edge, if dark { 0.14 } else { 0.09 }, 1.3, s);
