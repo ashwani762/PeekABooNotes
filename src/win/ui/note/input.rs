@@ -1124,4 +1124,81 @@ mod tests {
         // Nothing to divide by: square.
         assert_eq!(picture_bottom(0, 30, (0, 0)), 30);
     }
+
+    /// An item unticked by a click fades its text back as evenly as a tick fades it,
+    /// frame by frame at 100 Hz: its first step no bigger than the next, both ways the
+    /// same. (A fade's blend cut each level down, so the text was a level darker for as
+    /// long as it faded: an untick's first frame darkened 2.6 times as much as its second,
+    /// and a tick's barely moved.)
+    #[test]
+    fn an_unticks_text_fades_as_evenly_as_a_ticks() {
+        use crate::win::editor::view::frame_now;
+        let (w, h) = (360, 300);
+        let e = unsafe {
+            LoadLibraryW(crate::win::util::wide("Msftedit.dll").as_ptr());
+            CreateWindowExW(0, crate::win::util::wide(rich::CLASS).as_ptr(), std::ptr::null(), WS_POPUP | ES_MULTILINE as u32, 0, 0, w, h, null_mut(), null_mut(), null_mut(), null_mut())
+        };
+        rich::setup(e);
+        let mut s = String::from("Tick test");
+        for i in 1..=8 {
+            s.push_str(&format!("\r\u{2610} task number {i} to do"));
+        }
+        rich::insert_text(e, &s);
+        let (bg, color) = (crate::common::theme::paper(3, false), 3u8);
+        rich::apply_base_format(e, crate::common::theme::PAPER_TEXT, bg);
+        rich::style_title(e);
+        rich::set_box_colors(e, bg, crate::common::theme::paper_subtext(color, false), crate::common::theme::PAPER_TEXT);
+        crate::win::editor::checks::set_style(e, crate::common::theme::paper_ink(color, false), bg, 1.0);
+        rich::style_boxes(e);
+        crate::win::editor::view::own_caret(e);
+        unsafe { SetWindowSubclass(e, Some(edit_proc), 1, 0) };
+        unsafe { SendMessageW(e, WM_SETFOCUS, 0, 0) };
+        let t = rich::text(e);
+        let cp = t.iter().enumerate().filter(|&(_, &c)| c == rich::BOX).nth(5).unwrap().0 as i32;
+        let end = rich::para_end(&t, cp);
+        rich::set_sel(e, end, end);
+        rich::set_scroll_y(e, 0);
+        let y = rich::pos_from_char(e, cp).y;
+        let x0 = rich::pos_from_char(e, cp + 2).x;
+        let x1 = rich::pos_from_char(e, end).x;
+        let lum = |px: &[u32]| {
+            let mut s = 0.0;
+            let mut n = 0.0;
+            for yy in y..y + 22 {
+                for x in x0..x1 {
+                    let p = px[(yy * w + x) as usize];
+                    s += 0.299 * ((p >> 16) & 255) as f64 + 0.587 * ((p >> 8) & 255) as f64 + 0.114 * (p & 255) as f64;
+                    n += 1.0;
+                }
+            }
+            s / n
+        };
+        let (cx, cy, _) = crate::win::editor::checks::circle(e, cp, t.get(cp as usize + 1).copied());
+        let lp = ((cy as isize) << 16) | (cx as isize & 0xFFFF);
+        // Each way, the text's ink frame by frame: as a share of the whole change.
+        let mut runs = Vec::new();
+        for _ in 0..2 {
+            unsafe {
+                SendMessageW(e, WM_LBUTTONDOWN, 1, lp);
+                SendMessageW(e, WM_LBUTTONUP, 0, lp);
+            }
+            let mut ink = vec![lum(&frame_now(e).0)];
+            for _ in 0..6 {
+                crate::win::editor::checks::frame(0.01);
+                ink.push(lum(&frame_now(e).0));
+            }
+            while crate::win::editor::checks::frame(0.01) {}
+            let whole = lum(&frame_now(e).0) - ink[0];
+            assert!(whole.abs() > 0.5, "the text changed: {whole}");
+            runs.push(ink.windows(2).map(|p| (p[1] - p[0]) / whole).collect::<Vec<f64>>());
+        }
+        let (tick, untick) = (&runs[0], &runs[1]);
+        for steps in [tick, untick] {
+            assert!(steps[0] > 0.06 && steps[0] < 1.3 * steps[1], "{steps:?}");
+        }
+        for (a, b) in tick.iter().zip(untick) {
+            assert!((a - b).abs() < 0.02, "tick {tick:?}, untick {untick:?}");
+        }
+        unsafe { DestroyWindow(e) };
+    }
 }

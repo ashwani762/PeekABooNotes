@@ -776,11 +776,14 @@ impl Canvas {
                 let fast = img.opaque && k < 256 && !every_pixel();
                 if fast {
                     // Faded, a whole picture is the same sum on every channel: two at a time.
+                    // Rounded to the nearest level (cut down, every pixel that differs came
+                    // out up to a level darker for as long as anything faded, a step at the
+                    // fade's first frame and back at its last).
                     let keep = 256 - k;
                     for pxx in a..b {
                         let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
-                        let rb = ((s & 0x00FF_00FF) * k + (dst & 0x00FF_00FF) * keep) >> 8 & 0x00FF_00FF;
-                        let ag = (((s >> 8) & 0x00FF_00FF) * k + ((dst >> 8) & 0x00FF_00FF) * keep) & 0xFF00_FF00;
+                        let rb = ((s & 0x00FF_00FF) * k + (dst & 0x00FF_00FF) * keep + 0x0080_0080) >> 8 & 0x00FF_00FF;
+                        let ag = (((s >> 8) & 0x00FF_00FF) * k + ((dst >> 8) & 0x00FF_00FF) * keep + 0x0080_0080) & 0xFF00_FF00;
                         px[row + pxx as usize] = rb | ag;
                     }
                 }
@@ -791,7 +794,7 @@ impl Canvas {
                         continue;
                     }
                     let keep = 256 - k.min(256) * (s >> 24) / 255;
-                    let ch = |sh: u32| ((((s >> sh) & 0xFF) * k.min(256) + ((dst >> sh) & 0xFF) * keep) >> 8) << sh;
+                    let ch = |sh: u32| (((((s >> sh) & 0xFF) * k.min(256) + ((dst >> sh) & 0xFF) * keep + 128) >> 8).min(255)) << sh;
                     px[row + pxx as usize] = ch(24) | ch(16) | ch(8) | ch(0);
                 }
             }
@@ -809,7 +812,7 @@ impl Canvas {
                 let (s, dst) = (img.px[src_row + (pxx - ox) as usize], px[row + pxx as usize]);
                 let k = (a * 256.0) as u32;
                 let keep = 256 - k * (s >> 24) / 255;
-                let ch = |sh: u32| ((((s >> sh) & 0xFF) * k + ((dst >> sh) & 0xFF) * keep) >> 8) << sh;
+                let ch = |sh: u32| (((((s >> sh) & 0xFF) * k + ((dst >> sh) & 0xFF) * keep + 128) >> 8).min(255)) << sh;
                 px[row + pxx as usize] = ch(24) | ch(16) | ch(8) | ch(0);
             }
         }
@@ -1134,7 +1137,7 @@ mod tests {
                             let s = src[(sy * w + sx) as usize];
                             let k = (a * 256.0) as u32;
                             let keep = 256 - k * (s >> 24) / 255;
-                            let ch = |sh: u32| ((((s >> sh) & 0xFF) * k + ((want >> sh) & 0xFF) * keep) >> 8) << sh;
+                            let ch = |sh: u32| (((((s >> sh) & 0xFF) * k + ((want >> sh) & 0xFF) * keep + 128) >> 8).min(255)) << sh;
                             want = ch(24) | ch(16) | ch(8) | ch(0);
                         }
                     }
