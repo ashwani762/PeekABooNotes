@@ -541,6 +541,27 @@ impl Canvas {
         }
     }
 
+    /// Blend a rectangle toward `src` (its pixels, as `copy_out` took them from a rect of
+    /// the same size), keeping `a` of what's there: one picture cross-fading into another.
+    pub fn mix_in(&mut self, r: RECT, src: &[u32], a: f32) {
+        let (w, h) = (self.w, self.h);
+        let r = RECT { left: r.left.max(0), top: r.top.max(0), right: r.right.min(w), bottom: r.bottom.min(h) };
+        let rw = (r.right - r.left).max(0) as usize;
+        if a >= 0.999 || src.len() != rw * (r.bottom - r.top).max(0) as usize {
+            return;
+        }
+        let k = (a.clamp(0.0, 1.0) * 256.0) as u32;
+        let px = self.px();
+        for (n, y) in (r.top..r.bottom).enumerate() {
+            let row = (y * w) as usize + r.left as usize;
+            for (p, s) in px[row..row + rw].iter_mut().zip(&src[n * rw..(n + 1) * rw]) {
+                let (v, o) = (*p, *s);
+                let ch = |sh: u32| ((((v >> sh) & 0xFF) * k + ((o >> sh) & 0xFF) * (256 - k)) >> 8) << sh;
+                *p = ch(24) | ch(16) | ch(8) | ch(0);
+            }
+        }
+    }
+
     /// An anti-aliased disc whose colour sweeps around the centre through `stops`
     /// (a colour wheel), blended over an opaque canvas.
     pub fn conic_disc(&mut self, cx: f32, cy: f32, r: f32, stops: &[u32]) {
