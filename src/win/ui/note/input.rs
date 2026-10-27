@@ -712,7 +712,12 @@ unsafe fn edit_now(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, parent: usize) -> 
             unsafe { TrackMouseEvent(&mut tme) };
             crate::win::editor::checks::set_hot(e, hot);
             pointer_in(h);
-            link_tip(e, x_of(lp), y_of(lp));
+            // No link's or picture's tip in the middle of selecting by dragging.
+            if wp & 0x0001 != 0 {
+                crate::win::ui::tooltip::leave(e);
+            } else {
+                link_tip(e, x_of(lp), y_of(lp));
+            }
             if hot.is_some() && wp & 0x0001 == 0 {
                 // RichEdit may set its own cursor as it takes the move: the hand stays.
                 let r = unsafe { DefSubclassProc(e, msg, wp, lp) };
