@@ -111,17 +111,24 @@ pub struct Timing {
     pub display: u64,
 }
 
-/// The longest step a frame takes. A frame later than this (the system busy for a moment)
-/// moves on this far and no further, so the motion carries on rather than leaping to its end.
+/// The longest step a frame takes where the display's refreshes aren't known. A frame later
+/// than this (the system busy for a moment) moves on this far and no further, so the motion
+/// carries on rather than leaping to its end.
 const MAX_STEP: f64 = 1.0 / 20.0;
 
+/// How long without a frame, in refreshes, is the app having been busy (a delete, an undo, a
+/// window made) rather than frames paced unevenly: the next frame steps one refresh then.
+const BLOCKED: f64 = 2.5;
+
 /// How far each frame moves the springs. A frame is seen at a refresh of the display it's
-/// on, so it steps by the whole refresh periods from the last frame's refresh to its own:
-/// one when it's on time, two when it missed one, so the motion keeps to its time without a
-/// step of odd length, at whatever rate that display runs (60, 99.99, 144 Hz). The first
-/// frame after a rest steps by exactly one period (the pose before it was on screen a
-/// refresh ago), however long the work before it took. Portable: the platform reads the
-/// display's timing and the time.
+/// on, so it steps by one of that display's refresh periods, at whatever rate it runs (60,
+/// 99.99, 144 Hz), and none when it's drawn for the refresh the last one was. One that
+/// missed refreshes, the app busy, steps one too: the motion runs late rather than leaping
+/// (stepping the refreshes it missed, up to a twentieth of a second, a toast starting across
+/// a 100 ms delete came up 55% opaque in its first frame). The first frame after a rest
+/// steps by exactly one period (the pose before it was on screen a refresh ago), however
+/// long the work before it took; a step onto another display's refreshes goes by the time.
+/// Portable: the platform reads the display's timing and the time.
 #[derive(Clone, Copy, Debug)]
 pub struct Pacer {
     /// When the last frame was drawn, the refresh it was drawn for (when the display's
@@ -170,16 +177,20 @@ impl Pacer {
         let display = t.map_or(0, |t| t.display);
         let Some((then, last_at, last_display)) = self.last.replace((now, at, display)) else { return self.period as f32 };
         let elapsed = now - then;
-        let Some(t) = t.filter(|_| self.on_grid) else { return elapsed.clamp(0.0, MAX_STEP) as f32 };
+        // Without the refreshes to go by, the time since the last frame, but a refresh after
+        // the app was busy.
+        let by_time = |period: f64| if elapsed > BLOCKED * period { period } else { elapsed.clamp(0.0, MAX_STEP) };
+        let Some(t) = t.filter(|_| self.on_grid) else { return by_time(self.period) as f32 };
         let periods = match (at, last_at) {
             (Some(at), Some(last_at)) if display == last_display => {
                 // Two frames drawn for the same refresh: the second shows the same moment.
                 let n = ((at - last_at) / t.period).round().max(0.0);
                 if n == 0.0 && elapsed >= 0.6 * t.period {
                     self.on_grid = false;
-                    return elapsed.clamp(0.0, MAX_STEP) as f32;
+                    return by_time(t.period) as f32;
                 }
-                n
+                // Refreshes missed (the app busy): one, all the same.
+                n.min(1.0)
             }
             // The refreshes not known on one side (the first frame on a display, or moved to
             // another): the refreshes the time since the last frame comes to, one at least.
@@ -347,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn a_late_frame_steps_the_refreshes_it_missed_and_the_next_one_a_refresh() {
+    fn a_late_frame_steps_one_refresh_and_the_motion_runs_late_rather_than_leaping() {
         for hz in RATES {
             let p = 1.0 / hz;
             let mut c = Pacer::new();
@@ -357,11 +368,9 @@ mod tests {
                 let t = 7.0 + (n + ph) * p;
                 steps.push(c.step(t, timing(1, 7.0, p, t, true)));
             }
-            for (s, w) in steps.iter().zip([1.0, 1.0, 3.0, 1.0, 1.0]) {
-                assert!(close(*s, w * p), "{hz} Hz: {steps:?}");
+            for s in &steps {
+                assert!(close(*s, p), "{hz} Hz: {steps:?}");
             }
-            // The motion keeps to the display's time: seven refreshes, seven refreshes' steps.
-            assert!(close(steps.iter().sum(), 7.0 * p));
         }
     }
 
@@ -375,16 +384,40 @@ mod tests {
     }
 
     #[test]
-    fn a_long_stall_steps_no_more_than_a_twentieth_of_a_second_in_whole_refreshes() {
-        for hz in RATES {
+    fn after_the_app_was_busy_100_ms_the_next_frame_steps_one_refresh() {
+        for hz in [60.0, 100_000.0 / 1_000.1] {
             let p = 1.0 / hz;
+            // A run going on time, then 100 ms of work (a delete, an undo), then on time.
             let mut c = Pacer::new();
-            c.step(0.1 * p, timing(1, 0.0, p, 0.1 * p, false));
-            let t = 2.0 + 0.1 * p;
-            let dt = c.step(t, timing(1, 0.0, p, t, false)) as f64;
-            assert!(dt <= 1.0 / 20.0 + 1e-9 && dt > 1.0 / 20.0 - p, "{hz} Hz: {dt}");
-            let periods = dt / p;
-            assert!((periods - periods.round()).abs() < 1e-6, "{hz} Hz: {periods} refreshes");
+            let mut t = 5.0 + 0.1 * p;
+            let mut steps = vec![c.step(t, timing(1, 5.0, p, t, false))];
+            for _ in 0..3 {
+                t += p;
+                steps.push(c.step(t, timing(1, 5.0, p, t, false)));
+            }
+            t += 0.100;
+            steps.push(c.step(t, timing(1, 5.0, p, t, false)));
+            t += p;
+            steps.push(c.step(t, timing(1, 5.0, p, t, false)));
+            for s in &steps {
+                assert!(close(*s, p), "{hz} Hz: {steps:?}");
+            }
+            // A fade set off across the stall comes up one refresh's worth, not 55%.
+            let mut fade = crate::common::anim::Spring::fade(0.0, (1.0, 0.18));
+            fade.to(1.0);
+            fade.step(steps[4]);
+            assert!(fade.value < 0.15, "{hz} Hz: {}", fade.value);
+            // So too frames paced by another display than the one timed, and with no timing.
+            let mut c = Pacer::new();
+            c.step(1.0, timing(1, 0.0, p, 1.0, false));
+            c.step(1.0 + 0.3 * p, timing(1, 0.0, p, 1.0 + 0.3 * p, false));
+            c.step(1.0 + 0.95 * p, timing(1, 0.0, p, 1.0 + 0.95 * p, false));
+            let off = c.step(1.0 + 0.95 * p + 0.100, timing(1, 0.0, p, 1.0 + 0.95 * p + 0.100, false));
+            assert!(close(off, p), "{hz} Hz: {off}");
+            let mut c = Pacer::new();
+            c.step(2.0, Some(Timing { period: p, vblank: None, display: 1 }));
+            c.step(2.0 + p, None);
+            assert!(close(c.step(2.0 + p + 0.100, None), p), "{hz} Hz");
         }
     }
 
@@ -498,7 +531,8 @@ mod tests {
         let mut c = Pacer::new();
         assert!(close(c.step(10.0, None), 1.0 / 60.0));
         assert!(close(c.step(10.007, None), 0.007));
-        assert!(close(c.step(12.0, None), 1.0 / 20.0));
+        // Long after (the app busy): a refresh, as the last one known lasted.
+        assert!(close(c.step(12.0, None), 1.0 / 60.0));
         // Nonsense timing (a period of zero) is no timing.
         assert!(close(c.step(12.01, Some(Timing { period: 0.0, vblank: Some(0.0), display: 1 })), 0.01));
     }
