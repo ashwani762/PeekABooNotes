@@ -406,10 +406,12 @@ fn look(g: &Ghost) -> Look {
         (Kind::Open, _) if g.awaiting.is_some() => 0.0,
         // Fading in where the window comes up: the window's picture, as one.
         (Kind::Open, _) if g.appear => card,
-        // From the deck card into the window: the card's words are all but gone before the
-        // window's come, so the two never show at once, doubled a little apart (they're
-        // laid out differently), and each fades over a stretch of the flight, not a frame
-        // or two of it.
+        // From the deck card into the window: the window's picture comes in over the deck
+        // card's, which stays whole under it until it's covered, over a stretch of the
+        // flight, never a frame or two. The words are as strong as the two together all the
+        // way; the deck card's fading out before the window's came in, for some frames
+        // neither showed strongly, the card's content washed out.
+        (Kind::Open, true) if g.button.is_none() => card * ease(p, 0.3, 0.65),
         (Kind::Open, true) => card * ease(p, 0.35, 0.9),
         (Kind::Open, false) => card * ease(p, 0.25, 0.85),
         // Archived or deleted, the note fades as one, words and all: never an empty card.
@@ -418,7 +420,9 @@ fn look(g: &Ghost) -> Look {
     } * g.picture_in.value;
     let from = match (g.kind, g.from_image.is_some(), g.button) {
         (Kind::Open, true, Some(_)) => card * (1.0 - button_gone(g)),
-        (Kind::Open, true, None) => card * (1.0 - ease(p, 0.0, 0.5)),
+        // Under the window's picture, whole, until that covers it.
+        (Kind::Open, true, None) if content < 0.999 * card => card,
+        (Kind::Open, true, None) => 0.0,
         _ => 0.0,
     };
     Look { card, from, content }
@@ -931,6 +935,25 @@ mod tests {
             let gone = f.frames.iter().position(|s| s.look.from < 1e-6).expect("the button goes");
             assert!(gone as f64 <= 0.045 * hz + 1.0, "{hz} Hz: gone at frame {gone}");
             assert!(f.frames[1].look.from > 0.3, "{hz} Hz: not in one frame");
+        }
+    }
+
+    #[test]
+    fn opening_from_a_deck_card_the_window_comes_in_over_it_never_washing_out() {
+        for hz in [60.0, 99.0] {
+            let f = fly_off_screen(Kind::Open, (TAB, 14.0), (NOTE, 8.0), pattern(320, 360, 2), Some(pattern(304, 160, 3)), hz);
+            let mut mixing = 0;
+            for s in f.frames.iter().filter(|s| s.look.card > 0.999) {
+                let (from, content) = (s.look.from, s.look.content);
+                // The deck card is whole under the window's picture, or covered by it whole:
+                // what shows is the one, the other or both together, at full strength.
+                assert!(from > 0.999 || content > 0.999, "{hz} Hz: from {from}, content {content}");
+                if from > 0.999 && content > 0.01 {
+                    mixing += 1;
+                }
+            }
+            // Over a stretch of the flight, not a frame or two.
+            assert!(mixing >= 4, "{hz} Hz: {mixing} frames");
         }
     }
 
