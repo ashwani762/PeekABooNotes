@@ -212,7 +212,10 @@ pub(super) fn command(cmd: u32) {
         CMD_ARCHIVE => show_all_notes(true),
         CMD_REOPEN => reopen_last(),
         CMD_TOGGLE_DECK => update_settings(|s| s.deck_hidden = !s.deck_hidden),
-        CMD_SWAP_EDGE => update_settings(|s| s.edge_left = !s.edge_left),
+        CMD_SWAP_EDGE => {
+            deck::arrive();
+            update_settings(|s| s.edge_left = !s.edge_left)
+        }
         CMD_DECK_KEYS => deck::take_keys(),
         CMD_UNDO => undo(),
         CMD_QUIT => quit(),

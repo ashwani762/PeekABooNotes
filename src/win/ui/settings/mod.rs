@@ -780,7 +780,12 @@ fn apply(hwnd: HWND, k: Key, v: usize) {
         }
         Key::HideUnpinned => app::update_settings(|s| s.keep_open = v == 0),
         Key::ShowDeck => app::update_settings(|s| s.deck_hidden = v == 0),
-        Key::Edge => app::update_settings(|s| s.edge_left = v == 0),
+        Key::Edge => {
+            if app::store(|s| s.d.settings.edge_left) != (v == 0) {
+                crate::win::ui::deck::arrive();
+            }
+            app::update_settings(|s| s.edge_left = v == 0)
+        }
         Key::Cards => app::update_settings(|s| s.deck_max = CARDS[v.min(2)]),
         Key::NewAt => app::update_settings(|s| s.new_on_top = v == 0),
         Key::Fullscreen => app::update_settings(|s| s.over_fullscreen = v == 1),

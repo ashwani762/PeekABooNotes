@@ -25,7 +25,7 @@ pub(super) fn font(d: &mut Deck, face: u8, px: f32, weight: i32) -> Font {
 }
 
 pub(super) fn render(d: &mut Deck) {
-    if !d.visible {
+    if !d.visible && !d.hiding {
         return;
     }
     let (wx, wy) = paint(d, app::dark());
@@ -33,7 +33,7 @@ pub(super) fn render(d: &mut Deck) {
         c.present(d.hwnd, wx, wy);
     }
     unsafe {
-        if IsWindowVisible(d.hwnd) == 0 {
+        if d.visible && IsWindowVisible(d.hwnd) == 0 {
             ShowWindow(d.hwnd, SW_SHOWNOACTIVATE);
             SetWindowPos(d.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }

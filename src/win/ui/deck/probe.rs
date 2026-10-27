@@ -54,6 +54,7 @@ pub(super) fn deck() -> Deck {
         drag: None,
         fullscreen: false,
         visible: true,
+        hiding: false,
         geo,
         fonts: HashMap::new(),
         font_scale: 1.0,

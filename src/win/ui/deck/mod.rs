@@ -219,6 +219,8 @@ struct Deck {
     drag: Option<Drag>,
     fullscreen: bool,
     visible: bool,
+    /// Hidden, and its pill still fading out: the window goes once it has.
+    hiding: bool,
     geo: Geo,
     fonts: HashMap<(u8, i32, i32, u8), Font>,
     font_scale: f32,
@@ -277,9 +279,9 @@ pub fn monitor_geo() -> (RECT, f32) {
     crate::win::ui::displays::deck()
 }
 
-/// The deck is going to another display: fold it at once and fade the pill in there,
-/// rather than have it blink from one screen to the other (with reduced motion the
-/// spring settles at once, so it just appears).
+/// The deck is going to another display, or the other edge: fold it at once and fade the
+/// pill in there, rather than have it blink from one place to the other (with Reduce
+/// Motion too: it moves nothing).
 pub fn arrive() {
     with(|d| {
         set_open(d, false, true);
@@ -333,6 +335,7 @@ pub fn create() {
             drag: None,
             fullscreen: false,
             visible: false,
+            hiding: false,
             geo: Geo::default(),
             fonts: HashMap::new(),
             font_scale: 0.0,
@@ -431,6 +434,11 @@ pub fn frame(dt: f32) -> bool {
 /// One frame's motion: (still moving, just folded, anything to draw).
 fn advance(d: &mut Deck, dt: f32) -> (bool, bool, bool) {
     let moving = step(d, dt);
+    if d.hiding && (!moving || d.pill.value < 0.01) {
+        d.hiding = false;
+        unsafe { ShowWindow(d.hwnd, SW_HIDE) };
+        return (false, false, false);
+    }
     let folded = !d.open && !moving && d.wide;
     if folded {
         d.wide = false; // fully folded: shrink back to the small pill window
@@ -465,9 +473,16 @@ fn update_visibility(d: &mut Deck) {
         if !show {
             // Hiding the window hands its keys to whatever Windows picks next.
             drop_keys(d);
-            unsafe { ShowWindow(d.hwnd, SW_HIDE) };
         }
         set_open(d, false, true);
+        // The pill fades in, or out before the window goes, rather than blinking (at
+        // start, shown or hidden from the tray, or stepping aside for a full-screen app).
+        d.hiding = !show && !d.hwnd.is_null() && unsafe { IsWindowVisible(d.hwnd) } != 0;
+        if show {
+            d.pill.snap(0.0);
+        }
+        d.pill.to(if show { 1.0 } else { 0.0 });
+        anim::wake(Client::Deck);
     }
 }
 
@@ -1007,6 +1022,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 d.tracking = true;
             }
             unsafe { KillTimer(hwnd, T_COLLAPSE) };
+            if !d.visible {
+                // Fading out as it's hidden.
+                return Action::None;
+            }
             if !d.open {
                 // Respond on the very first movement: switch to the wide window and fan out.
                 fan_out(d);
