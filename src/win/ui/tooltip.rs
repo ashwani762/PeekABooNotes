@@ -3,7 +3,9 @@
 
 //! Tooltips for icon-only buttons, drawn like our menus: a small rounded card with a soft
 //! shadow, the action and (dimmer) its shortcut. It waits a moment before the first one
-//! shows; once one is up, moving to the next button swaps it at once.
+//! shows; once one is up, moving to the next button slides it there, its words crossing
+//! over, without the wait. It fades in with a short settle toward the button, and fades
+//! out quickly: on a click too, in a few frames, rather than vanishing in one.
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
@@ -28,6 +30,15 @@ const T_SHOW: usize = 1;
 const DELAY_MS: u32 = 550;
 /// A tooltip that went away less than this long ago comes back without the wait.
 const WARM_MS: u128 = 900;
+/// A click's fade, after which the tip is hidden whatever its frames did (a dialog's own
+/// message loop runs no frames, and would hold it half faded over the dialog).
+const T_GONE: usize = 2;
+const GONE_MS: u32 = 120;
+/// How quickly it fades out (in, it fades as a menu does).
+const OUT: (f32, f32) = (1.0, 0.09);
+const IN: (f32, f32) = (1.0, 0.12);
+/// How it slides to the next button.
+const SLIDE: (f32, f32) = (1.0, 0.16);
 
 struct Tip {
     hwnd: HWND,
@@ -48,10 +59,18 @@ struct Tip {
     shown: bool,
     hidden_at: Option<Instant>,
     fade: Spring,
+    /// Where the card is (its window's top-left) and how wide, sliding to the next
+    /// button's tip.
+    at: (Spring, Spring),
+    width: Spring,
+    /// What it said before it slid on, crossing over to what it says now (`swap` 0 to 1).
+    was: Option<(String, String)>,
+    swap: Spring,
+    /// What the card says now (label, keys).
+    showing: (String, String),
     s: f32,
     fonts: Option<(Font, Font)>,
     canvas: Option<Canvas>,
-    origin: (i32, i32),
     size: (i32, i32),
     margin: i32,
     above: bool,
@@ -101,11 +120,15 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 muted: false,
                 shown: false,
                 hidden_at: None,
-                fade: Spring::unit(0.0, (1.0, 0.12)),
+                fade: Spring::fade(0.0, IN),
+                at: (Spring::px(0.0, SLIDE), Spring::px(0.0, SLIDE)),
+                width: Spring::px(0.0, SLIDE),
+                was: None,
+                swap: Spring::fade(1.0, SLIDE),
+                showing: (String::new(), String::new()),
                 s: 1.0,
                 fonts: None,
                 canvas: None,
-                origin: (0, 0),
                 size: (0, 0),
                 margin: 0,
                 above: false,
@@ -189,12 +212,13 @@ pub fn mute() {
     if live {
         with(|t| {
             t.muted = true;
+            let up = t.shown;
             go_away(t);
-            // At once, not faded: a click may open a dialog or menu whose own message
-            // loop would hold the fade half-way, a ghost over it.
-            t.fade.snap(0.0);
-            t.canvas = None;
-            unsafe { ShowWindow(t.hwnd, SW_HIDE) };
+            // Quickly, in a few frames; and hidden in any case once that's had time, as a
+            // click may open a dialog whose own message loop runs no frames.
+            if up {
+                unsafe { SetTimer(t.hwnd, T_GONE, GONE_MS, None) };
+            }
             // A click is not a "just saw a tooltip" moment: the next one waits again.
             t.hidden_at = None;
         });
@@ -216,7 +240,8 @@ fn go_away(t: &mut Tip) {
     if t.shown {
         t.shown = false;
         t.hidden_at = Some(Instant::now());
-        t.fade.to(0.0);
+        t.fade.retarget(0.0, OUT);
+        t.fade.launch(0.0);
         anim::wake(Client::Tip);
     }
 }
@@ -265,14 +290,33 @@ fn show(t: &mut Tip, swap: bool) {
     }
     x = x.clamp(work.left, (work.right - w).max(work.left));
     y = y.clamp(work.top, (work.bottom - h).max(work.top));
+    let (old, old_size) = (std::mem::take(&mut t.showing), t.size);
     t.size = (w, h);
-    t.origin = (x - t.margin, y - t.margin);
-    t.shown = true;
-    if !swap || t.fade.value < 0.05 {
+    let (ox, oy) = ((x - t.margin) as f32, (y - t.margin) as f32);
+    let sliding = swap && t.fade.value >= 0.05 && t.canvas.is_some() && old_size.1 == h;
+    if sliding {
+        // From where it is, to the next button, its words crossing over.
+        t.at.0.to(ox);
+        t.at.1.to(oy);
+        t.width.to(w as f32);
+        if old != (t.label.clone(), t.keys.clone()) {
+            t.was = Some(old);
+            t.swap.snap(0.0);
+            t.swap.to(1.0);
+        }
+    } else {
         // Fresh: fade in with a short settle toward the button.
         t.fade.snap(0.0);
+        t.at.0.snap(ox);
+        t.at.1.snap(oy);
+        t.width.snap(w as f32);
+        t.was = None;
+        t.swap.snap(1.0);
     }
-    t.fade.to(1.0);
+    t.shown = true;
+    t.showing = (t.label.clone(), t.keys.clone());
+    unsafe { KillTimer(t.hwnd, T_GONE) };
+    t.fade.retarget(1.0, IN);
     render(t);
     // Above everything, pinned notes included.
     unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) };
@@ -289,22 +333,17 @@ const CAP_PAD: f32 = 5.5;
 const CAP_GAP: f32 = 3.0;
 const LABEL_CAPS: f32 = 10.0;
 
-/// The shortcut's keys, one keycap each ("Ctrl", "Shift", "A").
-fn caps(t: &Tip) -> Vec<(&str, i32)> {
-    let Some((_, key_f)) = t.fonts.as_ref() else { return Vec::new() };
-    let min = (CAP_H * t.s) as i32;
-    t.keys
-        .split('+')
-        .filter(|k| !k.is_empty())
-        .map(|k| (k, (key_f.measure(k).0 + (2.0 * CAP_PAD * t.s) as i32).max(min)))
-        .collect()
+/// Shortcut `keys`' keycaps, one each ("Ctrl", "Shift", "A"), and their widths.
+fn caps<'a>(keys: &'a str, key_f: &Font, s: f32) -> Vec<(&'a str, i32)> {
+    let min = (CAP_H * s) as i32;
+    keys.split('+').filter(|k| !k.is_empty()).map(|k| (k, (key_f.measure(k).0 + (2.0 * CAP_PAD * s) as i32).max(min))).collect()
 }
 
 fn measure(t: &Tip) -> (i32, i32) {
     let s = t.s;
-    let Some((label_f, _)) = t.fonts.as_ref() else { return (0, 0) };
+    let Some((label_f, key_f)) = t.fonts.as_ref() else { return (0, 0) };
     let lw = label_f.measure(&t.label).0;
-    let caps = caps(t);
+    let caps = caps(&t.keys, key_f, s);
     let w = if caps.is_empty() {
         lw + (2.0 * PAD_L * s) as i32
     } else {
@@ -316,10 +355,15 @@ fn measure(t: &Tip) -> (i32, i32) {
 
 pub fn frame(dt: f32) -> bool {
     with(|t| {
-        let moving = t.fade.step(dt);
+        let mut moving = t.fade.step(dt);
+        for sp in [&mut t.at.0, &mut t.at.1, &mut t.width, &mut t.swap] {
+            moving |= sp.step(dt);
+        }
+        if t.swap.value >= 0.999 {
+            t.was = None;
+        }
         if !t.shown && t.fade.value < 0.02 {
-            unsafe { ShowWindow(t.hwnd, SW_HIDE) };
-            t.canvas = None; // nothing to keep while hidden
+            hide(t);
             return false;
         }
         render(t);
@@ -328,13 +372,26 @@ pub fn frame(dt: f32) -> bool {
     .unwrap_or(false)
 }
 
+/// Out of sight, with nothing kept while hidden.
+fn hide(t: &mut Tip) {
+    unsafe {
+        KillTimer(t.hwnd, T_GONE);
+        ShowWindow(t.hwnd, SW_HIDE);
+    }
+    t.fade.snap(0.0);
+    t.canvas = None;
+    t.was = None;
+}
+
 fn render(t: &mut Tip) {
     let Some((label_f, key_f)) = t.fonts.as_ref() else { return };
     let dark = app::dark();
     // The menu's palette: (surface, edge, text, secondary).
     let (surface, edge, text, sub) = if dark { (0x2C2C2E, 0xFFFFFF, 0xF2F2F7, 0x98989D) } else { (0xF7F7F9, 0x000000, 0x1D1D1F, 0x86868B) };
     let s = t.s;
-    let (w, h) = t.size;
+    let h = t.size.1;
+    // As wide as it is on its way to the next button's width, on whole pixels.
+    let w = t.width.value.round().max(1.0) as i32;
     let (cw, ch) = (w + 2 * t.margin, h + 2 * t.margin);
     if t.canvas.as_ref().map(|c| (c.w, c.h)) != Some((cw, ch)) {
         t.canvas = Some(Canvas::new(cw, ch));
@@ -342,7 +399,8 @@ fn render(t: &mut Tip) {
     let mut c = t.canvas.take().unwrap();
     c.clear(0);
     let a = clamp01(t.fade.value);
-    let settle = (1.0 - t.fade.value) * 3.0 * s * if t.above { 1.0 } else { -1.0 };
+    // In whole pixels, so the card and its words (put down on whole pixels) move together.
+    let settle = if anim::reduced() { 0.0 } else { ((1.0 - t.fade.value) * 3.0 * s).round() * if t.above { 1.0 } else { -1.0 } };
     let (ox, oy) = (t.margin as f32, t.margin as f32 + settle);
     let card = Shape::new(ox, oy, w as f32, h as f32, 8.0 * s);
     c.card(&card, surface, 1.0, edge, if dark { 0.14 } else { 0.09 }, 1.3, s);
@@ -350,28 +408,43 @@ fn render(t: &mut Tip) {
         // Light catching the top edge.
         c.rrect(ox + 7.0 * s, oy + 1.0, w as f32 - 14.0 * s, 1.0, 0.0, 0xFFFFFF, 0.07);
     }
-    c.begin_batch();
-    let y0 = oy.round() as i32;
-    let x0 = ox as i32 + (PAD_L * s) as i32;
-    let lw = label_f.measure(&t.label).0;
-    c.text_ct(&t.label, label_f, rect(x0, y0, lw + 2, h), None, text, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    let (cap_h, cap_y) = (CAP_H * s, oy + (h as f32 - CAP_H * s) / 2.0);
     // A touch darker than secondary text in light mode, where the caps read faint.
     let key_ink = if dark { sub } else { 0x6E6E73 };
-    let mut kx = (x0 + lw) as f32 + LABEL_CAPS * s;
-    for (k, kw) in caps(t) {
-        let cap = Shape::new(kx, cap_y, kw as f32, cap_h, 5.0 * s);
-        c.shape(&cap, edge, if dark { 0.10 } else { 0.06 }, 1.0, 0.0);
-        c.shape(&cap, edge, if dark { 0.10 } else { 0.08 }, 1.0, 1.0);
-        c.text_ct(k, key_f, rect(kx as i32, cap_y.round() as i32, kw, cap_h.round() as i32), None, key_ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        kx += kw as f32 + CAP_GAP * s;
+    let inside = rect(ox as i32 + 1, oy as i32, w - 2, h);
+    // What it says, at `k` (crossing over from what it said, as it slides on).
+    let words = |c: &mut Canvas, label: &str, keys: &str, k: f32| {
+        if k <= 0.003 {
+            return;
+        }
+        c.begin_batch();
+        let y0 = oy as i32;
+        let x0 = ox as i32 + (PAD_L * s) as i32;
+        let lw = label_f.measure(label).0;
+        c.text(label, label_f, rect(x0, y0, (lw + 2).min(inside.right - x0), h), text, k, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        let (cap_h, cap_y) = (CAP_H * s, oy + ((h as f32 - CAP_H * s) / 2.0).round());
+        let mut kx = (x0 + lw) as f32 + LABEL_CAPS * s;
+        for (key, kw) in caps(keys, key_f, s) {
+            if kx as i32 + kw > inside.right {
+                break;
+            }
+            let cap = Shape::new(kx.round(), cap_y, kw as f32, cap_h, 5.0 * s);
+            c.shape(&cap, edge, k * if dark { 0.10 } else { 0.06 }, 1.0, 0.0);
+            c.shape(&cap, edge, k * if dark { 0.10 } else { 0.08 }, 1.0, 1.0);
+            c.text(key, key_f, rect(kx.round() as i32, cap_y as i32, kw, cap_h.round() as i32), key_ink, k, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            kx += kw as f32 + CAP_GAP * s;
+        }
+        c.flush();
+    };
+    let k = clamp01(t.swap.value);
+    if let Some((label, keys)) = t.was.as_ref() {
+        words(&mut c, label, keys, 1.0 - k);
     }
-    c.flush();
+    words(&mut c, &t.label, &t.keys, if t.was.is_some() { k } else { 1.0 });
     c.make_opaque_rect(rect((ox + 3.0 * s) as i32, (oy + 3.0 * s) as i32, w - (6.0 * s) as i32, h - (6.0 * s) as i32));
     if a < 0.999 {
         c.scale_alpha(a);
     }
-    c.present(t.hwnd, t.origin.0, t.origin.1);
+    c.present(t.hwnd, t.at.0.value.round() as i32, t.at.1.value.round() as i32);
     t.canvas = Some(c);
 }
 
@@ -390,6 +463,15 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         if !t.owner.is_null() && (t.by_key || (ScreenToClient(t.owner, &mut q) != 0 && crate::win::util::pt_in(&t.anchor, q.x, q.y))) {
                             show(t, false);
                         }
+                    }
+                });
+                return 0;
+            }
+            WM_TIMER if wp == T_GONE => {
+                KillTimer(h, T_GONE);
+                with(|t| {
+                    if !t.shown {
+                        hide(t);
                     }
                 });
                 return 0;
