@@ -134,8 +134,9 @@ struct NoteWin {
     glide: scrollbar::Glide,
     /// Since when a save has waited for the note's own animations to settle (`T_SAVE`).
     save_held: Option<std::time::Instant>,
-    /// A drag on its edge or corner: the window's rect and the pointer where it began.
-    sizing: Option<(RECT, POINT)>,
+    /// A drag on its edge or corner: the window's rect and the pointer where it began, and
+    /// the edge (`WMSZ_*`).
+    sizing: Option<(RECT, POINT, u32)>,
     /// The chrome's canvas, kept across paints (made again when the window's size changes).
     canvas: Option<Canvas>,
 }
@@ -1251,6 +1252,41 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 scrollbar::timer(h);
                 return 0;
             }
+            // A press on an edge or corner sizes the window here, not in Windows' own sizing
+            // loop: to its rect at the press plus how far the pointer has gone since. Fed
+            // small fast moves (4 px every 16 ms), Windows' loop grew the note by more at
+            // each step than the pointer had moved in all, the corner running off the screen.
+            WM_NCLBUTTONDOWN if (HTLEFT..=HTBOTTOMRIGHT).contains(&(wp as u32)) => {
+                if let Some(st) = state(h) {
+                    let mut r: RECT = std::mem::zeroed();
+                    GetWindowRect(h, &mut r);
+                    // HTLEFT..HTBOTTOMRIGHT run in the same order as WMSZ_LEFT..WMSZ_BOTTOMRIGHT.
+                    st.sizing = Some((r, POINT { x: x_of(lp), y: y_of(lp) }, wp as u32 - HTLEFT + WMSZ_LEFT));
+                    SetCapture(h);
+                }
+                return 0;
+            }
+            WM_MOUSEMOVE if state(h).is_some_and(|st| st.sizing.is_some()) => {
+                if let Some((r0, p0, edge)) = state(h).and_then(|st| st.sizing) {
+                    let s = state(h).map_or(1.0, |st| st.s);
+                    let mut p = POINT { x: 0, y: 0 };
+                    GetCursorPos(&mut p);
+                    let n = sized(r0, p.x - p0.x, p.y - p0.y, edge, ((220.0 * s) as i32, (150.0 * s) as i32));
+                    SetWindowPos(h, null_mut(), n.left, n.top, n.right - n.left, n.bottom - n.top, SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                return 0;
+            }
+            WM_LBUTTONUP | WM_CAPTURECHANGED if state(h).is_some_and(|st| st.sizing.is_some()) => {
+                if let Some(st) = state(h) {
+                    st.sizing = None;
+                }
+                if msg == WM_LBUTTONUP {
+                    ReleaseCapture();
+                }
+                KillTimer(h, T_RECT);
+                save_rect(h);
+                return 0;
+            }
             WM_CAPTURECHANGED => scrollbar::cancel(h),
             // The wheel over the margins (the scroll bar's included) scrolls the text too.
             WM_MOUSEWHEEL => {
@@ -1320,36 +1356,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 return 0;
             }
-            // A drag on an edge or corner sizes the window to its rect at the press plus how
-            // far the pointer has gone since, whatever Windows' own sizing made of it: small
-            // fast moves (4 px every 16 ms) grew it by more at each step than the pointer
-            // had moved in all, the corner running off the screen.
-            WM_ENTERSIZEMOVE => {
-                if let Some(st) = state(h) {
-                    st.sizing = None;
-                    if key_down(VK_LBUTTON) {
-                        let mut r: RECT = std::mem::zeroed();
-                        GetWindowRect(h, &mut r);
-                        // Where the press was: the message that began the drag.
-                        let at = GetMessagePos();
-                        st.sizing = Some((r, POINT { x: (at & 0xFFFF) as i16 as i32, y: (at >> 16) as i16 as i32 }));
-                    }
-                }
-            }
-            WM_SIZING => {
-                if let Some((r0, p0)) = state(h).and_then(|st| st.sizing) {
-                    let s = state(h).map_or(1.0, |st| st.s);
-                    let mut p = POINT { x: 0, y: 0 };
-                    GetCursorPos(&mut p);
-                    let r = &mut *(lp as *mut RECT);
-                    *r = sized(r0, p.x - p0.x, p.y - p0.y, wp as u32, ((220.0 * s) as i32, (150.0 * s) as i32));
-                    return 1;
-                }
-            }
             WM_EXITSIZEMOVE => {
-                if let Some(st) = state(h) {
-                    st.sizing = None;
-                }
                 KillTimer(h, T_RECT);
                 save_rect(h);
                 return 0;
