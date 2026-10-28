@@ -119,6 +119,7 @@
         <item quantity="other">No se pudieron leer %d archivos</item>
     </plurals>
     <string name="toast_undo">Deshacer</string>
+    <string name="toast_dismiss">Descartar</string>
 
     <!-- All Notes -->
     <string name="library_title_notes">Notas</string>

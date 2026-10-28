@@ -473,7 +473,8 @@ pub fn set_archived(ids: &[u64], archived: bool) {
     refresh();
 }
 
-/// What the Undo toast can take back (see `common::undo`): one entry of the stack.
+/// What the Undo toast can take back (see `common::undo`): one entry of the stack, one
+/// card on the toast. Each action is one of its own, however like the one before it.
 pub enum Undo {
     /// Notes deleted, with their places among the notes, in the order they were taken out.
     Deleted(Vec<(usize, Note)>),
@@ -482,29 +483,8 @@ pub enum Undo {
     /// Notes restored from the archive.
     Restored(Vec<u64>),
     /// Notes an import brought in, how many files it left out as notes here already, and
-    /// how many it couldn't read (or held more than a note can). Each import is one of its
-    /// own.
+    /// how many it couldn't read (or held more than a note can).
     Imported(Vec<u64>, usize, usize),
-}
-
-impl crate::common::undo::Action for Undo {
-    fn merge(&mut self, newer: Undo) -> Option<Undo> {
-        match (self, newer) {
-            (Undo::Deleted(a), Undo::Deleted(b)) => {
-                a.extend(b);
-                None
-            }
-            (Undo::Archived(a), Undo::Archived(b)) => {
-                a.extend(b);
-                None
-            }
-            (Undo::Restored(a), Undo::Restored(b)) => {
-                a.extend(b);
-                None
-            }
-            (_, newer) => Some(newer),
-        }
-    }
 }
 
 impl Undo {
@@ -536,10 +516,11 @@ fn done(a: Undo, at: (RECT, f32)) {
     show_undo(Some(at));
 }
 
-/// The toast shows what Undo takes back now, or goes when there's nothing left; it rises
-/// on `at`, or (None) stays where it is.
+/// The toast shows what Undo takes back now on top of the actions before it, or goes when
+/// there's nothing left; it rises on `at`, or (None) stays where it is.
 fn show_undo(at: Option<(RECT, f32)>) {
-    toast::undo(ui(|u| u.undo.top().map(|e| e.action.message())), at);
+    let cards = ui(|u| u.undo.newest_first().take(toast::CARDS).map(|e| toast::Card { id: e.id, text: e.action.message(), left: e.left }).collect());
+    toast::undo(cards, at);
 }
 
 /// The tray menu's Undo row, while the toast has something to take back.
@@ -685,10 +666,19 @@ pub fn undo() {
     crate::win::ui::allnotes::select(&ids);
 }
 
+/// The toast's ×: the newest action is made final now, as when its time runs out (notes
+/// deleted are gone for good), and the toast shows the one before it, if any. Nothing
+/// dismissed can be undone after: Undo is only ever the toast's.
+pub fn dismiss_undo() {
+    let Some(a) = ui(|u| u.undo.dismiss()) else { return };
+    show_undo(None);
+    make_final(a);
+}
+
 /// The toast's clock ran `dt` seconds (0 while the pointer holds it): every action whose
-/// own time ran out is made final, and the toast shows what's left. The seconds the newest
-/// has left, if any.
-pub fn undo_clock(dt: f32) -> Option<f32> {
+/// own time ran out is made final, and the toast shows what's left. The seconds each card
+/// the toast stacks has left, newest first, by id.
+pub fn undo_clock(dt: f32) -> Vec<(u64, f32)> {
     let due = ui(|u| if dt > 0.0 { u.undo.tick(dt) } else { Vec::new() });
     if !due.is_empty() {
         for a in due {
@@ -696,7 +686,7 @@ pub fn undo_clock(dt: f32) -> Option<f32> {
         }
         show_undo(None);
     }
-    ui(|u| u.undo.top().map(|e| e.left))
+    ui(|u| u.undo.newest_first().take(toast::CARDS).map(|e| (e.id, e.left)).collect())
 }
 
 /// Every action the toast could still take back is final now (quitting).

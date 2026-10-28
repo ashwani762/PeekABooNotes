@@ -110,6 +110,7 @@
         <item quantity="other">%d 件のファイルを読み込めませんでした</item>
     </plurals>
     <string name="toast_undo">取り消す</string>
+    <string name="toast_dismiss">閉じる</string>
 
     <!-- All Notes -->
     <string name="library_title_notes">メモ</string>

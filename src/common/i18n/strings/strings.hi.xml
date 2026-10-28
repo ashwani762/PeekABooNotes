@@ -119,6 +119,7 @@
         <item quantity="other">%d फ़ाइलें पढ़ी नहीं जा सकीं</item>
     </plurals>
     <string name="toast_undo">पूर्ववत करें</string>
+    <string name="toast_dismiss">ख़ारिज करें</string>
 
     <!-- All Notes -->
     <string name="library_title_notes">नोट्स</string>

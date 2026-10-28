@@ -119,6 +119,7 @@
         <item quantity="other">%d fichiers illisibles</item>
     </plurals>
     <string name="toast_undo">Annuler</string>
+    <string name="toast_dismiss">Ignorer</string>
 
     <!-- All Notes -->
     <string name="library_title_notes">Notes</string>
