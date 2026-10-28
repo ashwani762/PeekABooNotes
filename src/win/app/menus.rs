@@ -180,8 +180,7 @@ pub fn note_menu_beside(id: u64, p: POINT, align_right: bool, leave: Option<Box<
 pub fn tray_menu(at: Option<POINT>) {
     use menu::{Item, action, check};
     let hidden = store(|s| s.d.settings.deck_hidden);
-    // What Undo would take back, while it can: notes deleted or archived (the toast's, or
-    // the last after its toast has gone).
+    // What the Undo toast would take back, while it can: notes deleted or archived.
     let undo = undo_label();
     let mut v = vec![
         action(CMD_NEW, t!("menu_new_note"), &hotkey_text(hotkey::NEW_NOTE), IC_ADD),

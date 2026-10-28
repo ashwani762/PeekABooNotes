@@ -504,10 +504,6 @@ impl crate::common::undo::Action for Undo {
             (_, newer) => Some(newer),
         }
     }
-
-    fn lingers(&self) -> bool {
-        !matches!(self, Undo::Imported(..))
-    }
 }
 
 impl Undo {
@@ -533,25 +529,21 @@ impl Undo {
 }
 
 /// `a` was just done: it goes on the undo stack, and the toast shows it on the display
-/// `at` (`toast_place`). The action that waited for Undo after its toast had gone is
-/// final now.
+/// `at` (`toast_place`).
 fn done(a: Undo, at: (RECT, f32)) {
-    if let Some(over) = ui(|u| u.undo.push(a)) {
-        make_final(over);
-    }
+    ui(|u| u.undo.push(a));
     show_undo(Some(at));
 }
 
-/// The toast shows what Undo takes back now, or goes when there's nothing left in time;
-/// it rises on `at`, or (None) stays where it is.
+/// The toast shows what Undo takes back now, or goes when there's nothing left; it rises
+/// on `at`, or (None) stays where it is.
 fn show_undo(at: Option<(RECT, f32)>) {
     toast::undo(ui(|u| u.undo.top().map(|e| e.action.message())), at);
 }
 
-/// The tray menu's Undo row, while there's something to take back (the toast's, or the
-/// last action after its toast has gone).
+/// The tray menu's Undo row, while the toast has something to take back.
 pub(super) fn undo_label() -> Option<&'static str> {
-    ui(|u| u.undo.next().map(Undo::menu_label))
+    ui(|u| u.undo.top().map(|e| e.action.menu_label()))
 }
 
 /// Archive notes from a click or key, with the Undo toast, as deleting has.
@@ -643,17 +635,16 @@ fn confirm_delete_all(owner: HWND, n: usize, at: Option<POINT>) -> bool {
     popup(items, p.x, p.y, owner) == ID_DELETE
 }
 
-/// Whether Undo has something to take back: what the toast shows, or the last action
-/// after its toast has gone.
+/// Whether the Undo toast has something to take back (it is showing).
 pub fn can_undo() -> bool {
     ui(|u| !u.undo.is_empty())
 }
 
 /// The toast's Undo (its button, Ctrl+Z in All Notes, the tray menu): the newest action
-/// still in time is taken back, and the toast shows the one before it, if any; with none
-/// in time, the last whose toast has gone. Notes deleted come back where they were, notes
-/// archived return to the deck where they were, notes restored go back to the archive,
-/// and notes imported go (for good, with the files they brought).
+/// still in time is taken back, and the toast shows the one before it, if any. Notes
+/// deleted come back where they were, notes archived return to the deck where they were,
+/// notes restored go back to the archive, and notes imported go (for good, with the files
+/// they brought).
 pub fn undo() {
     let Some(a) = ui(|u| u.undo.pop()) else { return };
     show_undo(None);
@@ -694,25 +685,20 @@ pub fn undo() {
 }
 
 /// The toast's clock ran `dt` seconds (0 while the pointer holds it): every action whose
-/// own time ran out leaves the toast, and is made final but for the last of them, which
-/// Undo can still take back (`undo::Stack::tick`). The seconds the newest still in time
+/// own time ran out is made final, and the toast shows what's left. The seconds the newest
 /// has left, if any.
 pub fn undo_clock(dt: f32) -> Option<f32> {
-    let (was, due, now) = ui(|u| {
-        let was = u.undo.in_time();
-        let due = if dt > 0.0 { u.undo.tick(dt) } else { Vec::new() };
-        (was, due, u.undo.in_time())
-    });
-    for a in due {
-        make_final(a);
-    }
-    if now != was {
+    let due = ui(|u| if dt > 0.0 { u.undo.tick(dt) } else { Vec::new() });
+    if !due.is_empty() {
+        for a in due {
+            make_final(a);
+        }
         show_undo(None);
     }
     ui(|u| u.undo.top().map(|e| e.left))
 }
 
-/// Every action Undo could still take back is final now (quitting).
+/// Every action the toast could still take back is final now (quitting).
 pub fn finalize_undo() {
     for a in ui(|u| u.undo.drain()) {
         make_final(a);
@@ -773,7 +759,7 @@ fn delete_attachments(gone: &[Note]) {
     }
 }
 
-/// The notes deleted that Undo can still bring back.
+/// The notes deleted whose Undo is still in time.
 fn pending_notes(u: &Ui) -> impl Iterator<Item = &Note> {
     u.undo.iter().flat_map(|a| match a {
         Undo::Deleted(v) => v.as_slice(),
