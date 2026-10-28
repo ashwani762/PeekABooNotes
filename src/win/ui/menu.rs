@@ -5,7 +5,7 @@
 //!
 //! Drawn in the same material and type as the rest of PeekABoo Notes (native Win32 menus can't be
 //! styled to match). Opens with a 120 ms fade-and-settle from the pointer, highlights on
-//! hover instantly, confirms a choice with a quick blink and fades out.
+//! hover instantly, and on a choice fades out at once, the chosen row lit all the way.
 //! `show` runs a nested message loop, like `TrackPopupMenu`, and returns the command id
 //! (0 if dismissed). Keyboard: arrows (Up and Down between rows, Left and Right along
 //! the colour and tool rows), Enter or Space, Esc, and first-letter jumps.
@@ -22,7 +22,6 @@
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
-use std::time::Instant;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{DT_CENTER, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FW_BOLD, FW_NORMAL, FW_SEMIBOLD};
@@ -151,14 +150,19 @@ impl Menu {
     }
 }
 
+/// The choice made, lit as the menus fade out.
 #[derive(Clone, Copy)]
 struct Blink {
     cmd: u32,
-    t0: Instant,
     /// The menu it's in, and where.
     level: usize,
     at: Target,
 }
+
+/// How long the menus take to fade out after a choice, from the frame after it: the
+/// chosen row stays lit. (It blinked off and on for 110 ms first, the menu whole, and the
+/// row was unlit as it faded.)
+const CHOSEN_S: f32 = 0.1;
 
 /// The menus showing: the one `show` opened first, then each open submenu, beside the one
 /// before it.
@@ -379,6 +383,8 @@ pub fn show_with(items: Vec<Item>, at: POINT, align_right: bool, leave: Option<B
             ReleaseCapture();
             KillTimer(hwnd, T_SUB);
             for m in o.menus.iter().rev() {
+                // A swatch's or tool's tip still to come goes with its menu.
+                crate::win::ui::tooltip::leave(m.hwnd);
                 announce(m.hwnd, false);
                 DestroyWindow(m.hwnd);
             }
@@ -409,12 +415,11 @@ pub fn frame(dt: f32) -> bool {
             draw_all(o);
             return true;
         }
-        // Confirmation blink, then close.
+        // A choice: the menus fade to nothing from the frame after it (`choose`), the
+        // chosen row lit all the way, and it's acted on once a frame of nothing has shown.
         if let Some(b) = o.blink {
-            // After the blink, it fades to nothing in 80 ms, and goes once a frame of
-            // nothing has shown (it went at 190 ms, a few percent left).
-            if b.t0.elapsed().as_millis() > 110 && o.out.is_none() {
-                o.out = Some(FadeOut::new(clamp01(o.menus[0].fade.value), 0.08));
+            if o.out.is_none() {
+                o.out = Some(FadeOut::new(clamp01(o.menus[0].fade.value), CHOSEN_S));
             }
             if let Some(f) = o.out.as_mut() {
                 let was = o.menus[0].fade.value;
@@ -531,7 +536,12 @@ fn choose(o: &mut Open, level: usize, t: Target) {
         return;
     }
     if let Some(cmd) = o.menus.get(level).and_then(|m| command_of(m, t)) {
-        o.blink = Some(Blink { cmd, t0: Instant::now(), level, at: t });
+        // No tip comes up for it as the menus go, and no submenu opens or closes.
+        crate::win::ui::tooltip::mute();
+        o.blink = Some(Blink { cmd, level, at: t });
+        o.pending = None;
+        unsafe { KillTimer(o.menus[0].hwnd, T_SUB) };
+        o.out = Some(FadeOut::new(clamp01(o.menus[0].fade.value), CHOSEN_S));
         anim::wake(Client::Menu);
     }
 }
@@ -603,11 +613,11 @@ fn dismiss(o: &mut Open) {
 
 /// Redraw menu `level` as it stands.
 fn draw(o: &mut Open, level: usize) {
-    let blink = o.blink.filter(|b| b.level == level).map(|b| (b.t0, b.at));
+    let chosen = o.blink.filter(|b| b.level == level).map(|b| b.at);
     let open = o.menus.get(level + 1).map(|c| c.parent_row);
     let inner = o.keys > level;
     if let Some(m) = o.menus.get_mut(level) {
-        render(m, blink, open, inner);
+        render(m, chosen, open, inner);
     }
 }
 
@@ -617,10 +627,10 @@ fn draw_all(o: &mut Open) {
     }
 }
 
-/// Draw menu `m`, with `blink` (when, and where) if a choice in it is blinking, and `open`
+/// Draw menu `m`, with `chosen` where a choice in it was made (lit as it fades), and `open`
 /// the row whose submenu is showing beside it; `inner` when the keys have gone into that
 /// submenu.
-fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, inner: bool) {
+fn render(m: &mut Menu, chosen: Option<Target>, open: Option<usize>, inner: bool) {
     let dark = app::dark();
     let (surface, edge, text, sub, hi) = pal(dark);
     let s = m.s;
@@ -641,8 +651,7 @@ fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, i
     let card = Shape::new(ox, oy, m.w as f32, m.h as f32, 12.0 * s);
     c.card(&card, surface, 1.0, edge, if dark { 0.14 } else { 0.10 }, 1.6, s);
     c.begin_batch();
-    let blink_on = blink.map(|(t0, _)| (t0.elapsed().as_millis() / 55) % 2 == 1).unwrap_or(true);
-    let blinking = |t: Target| blink.is_some_and(|(_, b)| b == t);
+    let blinking = |t: Target| chosen == Some(t);
     let rows = layout_rows(m);
     // Interior is opaque: draw ClearType text, then restore alpha just there.
     for (i, it) in m.items.iter().enumerate() {
@@ -662,7 +671,7 @@ fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, i
                 // A row whose submenu is showing stays marked, softly once the keys or the
                 // pointer have gone on into the submenu, so it's plain where it came from.
                 let opened = open == Some(i);
-                let lit = hot && blink_on && !(opened && inner);
+                let lit = hot && !(opened && inner);
                 // Destructive rows stay red all the way: red label and icon, red highlight.
                 let red = if dark { 0xFF453A } else { 0xE5352B };
                 let hl_rgb = if danger { red } else { hi };
@@ -718,7 +727,7 @@ fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, i
                     let tx = ox + tool_x(m, tools.len(), k);
                     let hot = m.hot == Target::Tool(i, k) || blinking(Target::Tool(i, k));
                     let r = Shape::new(tx, y + (rh - TOOL * s) / 2.0, TOOL * s, TOOL * s, 7.0 * s);
-                    if hot && blink_on {
+                    if hot {
                         c.shape(&r, hi, 1.0, 1.0, 0.0);
                     } else {
                         c.shape(&r, edge, if dark { 0.08 } else { 0.05 }, 1.0, 0.0);
@@ -731,7 +740,7 @@ fn render(m: &mut Menu, blink: Option<(Instant, Target)>, open: Option<usize>, i
                         ToolStyle::Plain => &m.fonts.tools[4],
                         ToolStyle::Icon => &m.fonts.icon,
                     };
-                    let ink = if hot && blink_on { 0xFFFFFF } else { text };
+                    let ink = if hot { 0xFFFFFF } else { text };
                     c.text_ct(t.glyph, f, rect(r.x as i32, r.y as i32, r.w as i32, r.h as i32), None, ink, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 }
             }
@@ -1194,6 +1203,11 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     let p = on_screen(o, h, x, y);
                     if !o.closing && !o.menus.iter().any(|m| m.holds(p)) {
                         dismiss(o); // click outside (captured)
+                    } else {
+                        // A press on a swatch or tool: its tip, coming or up, gets out of
+                        // the way for the click, rather than fading in between the press
+                        // and the release, as the menu went.
+                        crate::win::ui::tooltip::mute();
                     }
                 });
                 return 0;
