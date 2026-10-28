@@ -387,10 +387,16 @@ pub fn set_archived(ids: &[u64], archived: bool) {
     if archived {
         ids.iter().for_each(|&id| put_away(id));
     }
+    // When, for the Archive's newest-first order. A restore keeps it, so an Undo of the
+    // restore puts the note back in the Archive where it was.
+    let t = crate::common::util::now();
     store_mut(|s| {
         for &id in ids {
             if let Some(n) = s.note_mut(id) {
                 n.archived = archived;
+                if archived {
+                    n.archived_at = Some(t);
+                }
             }
         }
     });

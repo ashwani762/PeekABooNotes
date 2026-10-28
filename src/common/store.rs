@@ -199,6 +199,10 @@ pub struct Note {
     pub color: u8,
     #[serde(default)]
     pub archived: bool,
+    /// When it was last archived (Unix seconds), for the Archive's newest-first order;
+    /// None for notes archived before this was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<i64>,
     #[serde(default)]
     pub pinned: bool,
     /// Kept out of the edge deck (still active, still in All Notes).
@@ -278,6 +282,10 @@ pub struct Settings {
     /// The folder the last import came from; the file picker starts there.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub import_dir: String,
+    /// Where All Notes was left (its window rect, screen coordinates), so it opens there
+    /// again when that's on the display in use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_rect: Option<[i32; 4]>,
     /// Unpinned notes stay open when you click away (by default they fly back to the deck).
     #[serde(default)]
     pub keep_open: bool,
@@ -342,6 +350,7 @@ impl Default for Settings {
             reopen: Vec::new(),
             export_dir: String::new(),
             import_dir: String::new(),
+            library_rect: None,
             keep_open: false,
             mcp: false,
             developer: false,

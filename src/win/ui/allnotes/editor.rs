@@ -81,6 +81,17 @@ pub(super) fn editor_focused(l: &Lib) -> bool {
     }
 }
 
+thread_local! {
+    static FORCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `sync_editor`, the editor made now even while the card cross-fades: the keys go into it.
+pub(super) fn sync_editor_now() {
+    FORCE.with(|f| f.set(true));
+    sync_editor();
+    FORCE.with(|f| f.set(false));
+}
+
 /// Create, move or retire the inline editor to match the selection. Runs outside the
 /// library's state borrow (creating/destroying windows re-enters `refresh`).
 pub(super) fn sync_editor() {
@@ -103,14 +114,28 @@ pub(super) fn sync_editor() {
                 if let Some((id, r)) = want {
                     // Not while rows close a gap (a note archived or deleted, or back): a
                     // new editor's first paint costs a frame 20 ms or more, a hitch in
-                    // their motion. Its note shows as a preview meanwhile.
-                    if with(|l| super::list::gaps_moving(l)).unwrap_or(false) {
+                    // their motion. Its note shows as a preview meanwhile. Nor while the
+                    // card cross-fades from what it showed before: the editor, a window of
+                    // its own, came up whole at once inside the fading card, a hard-edged
+                    // inset of the new note in the old one; it comes as the fade ends
+                    // (`frame`). Unless the keys are going into it now (Enter).
+                    let force = FORCE.with(|f| f.get());
+                    let fading = with(|l| l.old_detail.is_some()).unwrap_or(false);
+                    if force && fading {
+                        with(|l| {
+                            l.old_detail = None;
+                            l.detail_a.snap(1.0);
+                        });
+                    }
+                    if !force && (fading || with(|l| super::list::gaps_moving(l)).unwrap_or(false)) {
                         unsafe { SetTimer(hwnd, T_SYNC, 320, None) };
                     } else {
                         let h = crate::win::ui::note::create_embedded(id, hwnd, r);
                         with(|l| {
                             l.editor = h;
                             l.editor_id = id;
+                            // A picture of an editor closed before is out of date now.
+                            l.editor_pic = None;
                         });
                     }
                 }

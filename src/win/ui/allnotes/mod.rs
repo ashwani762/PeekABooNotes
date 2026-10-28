@@ -128,6 +128,7 @@ struct Row {
     updated: i64,
     color: u8,
     archived: bool,
+    archived_at: Option<i64>,
     /// While searching: how well it matched, the matched parts of the title (char
     /// ranges), and a piece of the body around a match the title doesn't show.
     score: i32,
@@ -264,7 +265,6 @@ struct Lib {
     elsewhere: usize,
     sel: Vec<u64>, // the last entry is the primary selection
     anchor: Option<u64>,
-    focus_search: bool,
     /// The drawn control with the keys while the window itself has focus, and the swatch
     /// it's on when that's the swatches.
     kbd: Focus,
@@ -285,8 +285,11 @@ struct Lib {
     detail_a: Spring,
     bar_a: Spring,
     last_scroll: Instant,
-    edit_brush: HBRUSH,
-    edit_brush_rgb: u32,
+    /// The empty list's words, fading in once the last row has faded out of it.
+    empty_a: Spring,
+    /// What the card showed when last drawn: the one note selected, if one is, and whether
+    /// it was open in its own window ("Open Here" in its place).
+    card_was: (Option<u64>, bool),
     /// Inline editor hosted in the detail card (a child note window) and its note.
     editor: HWND,
     editor_id: u64,
@@ -360,6 +363,10 @@ thread_local! {
     static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LIB: RefCell<Option<Lib>> = const { RefCell::new(None) };
     static START_ARCHIVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The search field's background brush and its colour. Not in `Lib`: the field asks
+    /// for it while it draws, which it does at once as the focus leaves it, often from
+    /// inside a borrow of `Lib` (a click on a row); it went without, and drew itself white.
+    static EDIT_BRUSH: std::cell::Cell<(HBRUSH, u32)> = const { std::cell::Cell::new((null_mut(), u32::MAX)) };
 }
 
 fn with<R>(f: impl FnOnce(&mut Lib) -> R) -> Option<R> {
@@ -401,9 +408,14 @@ pub fn show(archived: bool) {
     }
     START_ARCHIVED.with(|c| c.set(archived));
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
-    // On the monitor in use, at its scale (the window takes that monitor's DPI).
+    // On the monitor in use, at its scale (the window takes that monitor's DPI): where it
+    // was left when that was on this monitor, else in its middle.
     let (work, s) = crate::win::ui::screen::active();
-    let r = crate::win::ui::screen::centred(work, (960.0 * s) as i32, (620.0 * s) as i32);
+    let saved = app::store(|st| st.d.settings.library_rect).map(|[l, t, r, b]| RECT { left: l, top: t, right: r, bottom: b });
+    let r = saved
+        .filter(|r| corners(crate::win::ui::screen::of_rect(r).0) == corners(work))
+        .and_then(|r| on_screen(r, work, (420.0 * s) as i32))
+        .unwrap_or_else(|| crate::win::ui::screen::centred(work, (960.0 * s) as i32, (620.0 * s) as i32));
     let (x, y, w, h) = (r.left, r.top, r.right - r.left, r.bottom - r.top);
     unsafe {
         let hwnd = CreateWindowExW(
@@ -424,6 +436,40 @@ pub fn show(archived: bool) {
         ShowWindow(hwnd, SW_SHOW);
         SetForegroundWindow(hwnd);
     }
+}
+
+fn corners(r: RECT) -> (i32, i32, i32, i32) {
+    (r.left, r.top, r.right, r.bottom)
+}
+
+/// Window rect `r` moved (and made smaller where it must be) to lie wholly in `work`, or
+/// None when it's narrower or shorter than `min`, a size it can't have been left at.
+fn on_screen(r: RECT, work: RECT, min: i32) -> Option<RECT> {
+    let (w, h) = ((r.right - r.left).min(work.right - work.left), (r.bottom - r.top).min(work.bottom - work.top));
+    if w < min.min(work.right - work.left) || h < min.min(work.bottom - work.top) {
+        return None;
+    }
+    let x = r.left.clamp(work.left, work.right - w);
+    let y = r.top.clamp(work.top, work.bottom - h);
+    Some(RECT { left: x, top: y, right: x + w, bottom: y + h })
+}
+
+/// Keep where the window is and its size, so it opens there again (not while it's
+/// minimized or maximized: neither is a place it was put).
+fn save_rect(h: HWND) {
+    if unsafe { IsIconic(h) != 0 || IsZoomed(h) != 0 } {
+        return;
+    }
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    if unsafe { GetWindowRect(h, &mut r) } == 0 {
+        return;
+    }
+    let rect = Some([r.left, r.top, r.right, r.bottom]);
+    if app::store(|s| s.d.settings.library_rect) == rect {
+        return;
+    }
+    app::store_mut(|s| s.d.settings.library_rect = rect);
+    app::save();
 }
 
 /// The window's title (what the taskbar and Alt+Tab show): the Archive's while it shows
@@ -460,6 +506,15 @@ pub fn select(ids: &[u64]) {
 pub fn refresh() {
     let h = with(|l| {
         rebuild(l);
+        // The note on the card opened in its own window, or came back from it: the card and
+        // the "Open Here" standing in for it cross-fade (each went in a frame), the editor
+        // that just closed in the picture.
+        let now = card_now(l);
+        if now.0.is_some() && now.0 == l.card_was.0 && now.1 != l.card_was.1 {
+            swap_detail(l);
+            anim::wake(Client::List);
+        }
+        l.card_was = now;
         l.hwnd
     });
     if let Some(h) = h {
@@ -655,9 +710,16 @@ pub fn frame(dt: f32) -> bool {
             }
         }
         l.arriving.retain(|_, (_, sp)| sp.value < 0.998);
+        // Once the last row that left has faded, the empty list's words fade in.
+        if l.leaving.is_empty() && l.empty_a.target < 1.0 {
+            l.empty_a.launch(1.0);
+        }
+        moving |= l.empty_a.step(dt);
         if l.list_a.value >= 0.999 {
             l.old_list = None;
         }
+        // The card's cross-fade over, its note's editor comes (it waited: see `sync_editor`).
+        let faded = l.old_detail.is_some() && l.detail_a.value >= 0.999;
         if l.detail_a.value >= 0.999 {
             l.old_detail = None;
         }
@@ -675,15 +737,24 @@ pub fn frame(dt: f32) -> bool {
             }
             l.sel_last = now;
         }
-        (moving || l.bar_a.value > 0.01, l.hwnd)
+        (moving || l.bar_a.value > 0.01, l.hwnd, faded)
     });
     match r {
-        Some((moving, h)) => {
+        Some((moving, h, faded)) => {
+            if faded {
+                sync_editor();
+            }
             paint_now(h);
             moving
         }
         None => false,
     }
+}
+
+/// What the card shows: the one note selected, if one is, and whether it's open in its
+/// own window.
+fn card_now(l: &Lib) -> (Option<u64>, bool) {
+    (l.sel.last().copied().filter(|_| l.sel.len() == 1), in_window(l).is_some())
 }
 
 // ---------------------------------------------------------------- inline editor
@@ -745,8 +816,9 @@ fn perform_inner(hwnd: HWND, a: Action) {
     match a {
         Action::None | Action::Browse => {}
         Action::Edit => {
-            // Its editor, if the keys moved onto the note a moment ago and it's still to come.
-            sync_editor();
+            // Its editor, if the keys moved onto the note a moment ago and it's still to come
+            // (or waits for the card's cross-fade: the keys go in now).
+            sync_editor_now();
             if let Some(e) = with(|l| l.editor)
                 && !e.is_null() {
                     unsafe { SetFocus(e) };
@@ -870,6 +942,13 @@ pub fn pre_translate(msg: &MSG) -> bool {
                 move_selection(l, -1);
                 Some(Action::Browse)
             }
+            // The first or last note: from the list, and from the search field while it's
+            // empty (with words in it, they move its caret).
+            VK_HOME | VK_END if own || l.query.is_empty() => {
+                let n = l.rows.len() as i32;
+                move_selection(l, if vk == VK_HOME { -n } else { n });
+                Some(Action::Browse)
+            }
             // Into the note's text; in its own window when it has none here (several
             // selected, a narrow window, or it's open already).
             VK_RETURN => Some(if l.editor.is_null() && wanted_editor(l).is_none() { open_selected(l) } else { Action::Edit }),
@@ -947,7 +1026,6 @@ fn on_create(hwnd: HWND) {
         elsewhere: 0,
         sel: Vec::new(),
         anchor: None,
-        focus_search: false,
         kbd: Focus::List,
         swatch_k: 0,
         cues: false,
@@ -965,8 +1043,8 @@ fn on_create(hwnd: HWND) {
         detail_a: Spring::fade(0.0, motion::DEFAULT),
         bar_a: Spring::unit(0.0, motion::DEFAULT),
         last_scroll: now,
-        edit_brush: null_mut(),
-        edit_brush_rgb: u32::MAX,
+        empty_a: Spring::fade(1.0, motion::DEFAULT),
+        card_was: (None, false),
         editor: null_mut(),
         editor_id: 0,
         drag: None,
@@ -1146,65 +1224,55 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_CTLCOLOREDIT => {
                 let dark = app::dark();
                 let rgb = field_color(dark);
-                let brush = with(|l| {
-                    if l.edit_brush_rgb != rgb {
-                        if !l.edit_brush.is_null() {
-                            DeleteObject(l.edit_brush);
-                        }
-                        l.edit_brush = CreateSolidBrush(cref(rgb));
-                        l.edit_brush_rgb = rgb;
+                let (mut brush, had) = EDIT_BRUSH.with(|b| b.get());
+                if had != rgb || brush.is_null() {
+                    if !brush.is_null() {
+                        DeleteObject(brush);
                     }
-                    l.edit_brush
-                });
+                    brush = CreateSolidBrush(cref(rgb));
+                    EDIT_BRUSH.with(|b| b.set((brush, rgb)));
+                }
                 SetTextColor(wp as HDC, cref(pal(dark).text));
                 SetBkColor(wp as HDC, cref(rgb));
-                return brush.unwrap_or(null_mut()) as LRESULT;
+                return brush as LRESULT;
             }
             WM_COMMAND => {
                 let (id, code) = (wp & 0xFFFF, ((wp >> 16) & 0xFFFF) as u32);
                 if id == ID_SEARCH {
-                    match code {
-                        EN_CHANGE => {
-                            // All of it: the field holds up to SEARCH_MAX characters.
-                            let n = GetWindowTextLengthW(lp as HWND).max(0) as usize + 1;
-                            let mut buf = vec![0u16; n];
-                            GetWindowTextW(lp as HWND, buf.as_mut_ptr(), n as i32);
-                            let q = from_wide(&buf);
-                            with(|l| {
-                                // The list fades in as a search starts or ends, not again with
-                                // every letter: each fade redraws the window many times over.
-                                let started = l.query.is_empty() != q.is_empty();
-                                l.query = q;
-                                l.scroll.snap(0.0);
-                                if started {
-                                    l.list_a.snap(0.55);
-                                    l.list_a.to(1.0);
-                                }
-                                // Typing selects the best match; clearing the search keeps
-                                // the note you found, scrolled into view.
-                                let cleared = l.query.is_empty();
-                                let before = l.sel.last().copied();
-                                if !cleared {
-                                    l.sel.clear();
-                                }
-                                rebuild(l);
-                                // Still the best match: its card stays as it is.
-                                if l.sel.last().copied() == before {
-                                    l.detail_a.snap(1.0);
-                                }
-                                if let Some(i) = primary_index(l).filter(|_| cleared) {
-                                    let lay = layout(l);
-                                    l.sel_y.snap(lay.list_top + i as f32 * lay.row_h);
-                                    ensure_visible(l, i);
-                                }
-                            });
-                        }
-                        EN_SETFOCUS | EN_KILLFOCUS => {
-                            with(|l| l.focus_search = code == EN_SETFOCUS);
-                        }
-                        _ => {}
-                    }
                     if code == EN_CHANGE {
+                        // All of it: the field holds up to SEARCH_MAX characters.
+                        let n = GetWindowTextLengthW(lp as HWND).max(0) as usize + 1;
+                        let mut buf = vec![0u16; n];
+                        GetWindowTextW(lp as HWND, buf.as_mut_ptr(), n as i32);
+                        let q = from_wide(&buf);
+                        with(|l| {
+                            // The list fades in as a search starts or ends, not again with
+                            // every letter: each fade redraws the window many times over.
+                            let started = l.query.is_empty() != q.is_empty();
+                            l.query = q;
+                            l.scroll.snap(0.0);
+                            if started {
+                                l.list_a.snap(0.55);
+                                l.list_a.to(1.0);
+                            }
+                            // Typing selects the best match; clearing the search keeps
+                            // the note you found, scrolled into view.
+                            let cleared = l.query.is_empty();
+                            let before = l.sel.last().copied();
+                            if !cleared {
+                                l.sel.clear();
+                            }
+                            rebuild(l);
+                            // Still the best match: its card stays as it is.
+                            if l.sel.last().copied() == before {
+                                l.detail_a.snap(1.0);
+                            }
+                            if let Some(i) = primary_index(l).filter(|_| cleared) {
+                                let lay = layout(l);
+                                l.sel_y.snap(lay.list_top + i as f32 * lay.row_h);
+                                ensure_visible(l, i);
+                            }
+                        });
                         // While typing, the best match changes with each letter: its card
                         // shows the quick preview, and the editor comes once typing pauses
                         // (making one per letter made every keystroke lag).
@@ -1214,6 +1282,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         paint_now(hwnd);
                         SetTimer(hwnd, T_SYNC, 250, None);
                     } else {
+                        // Focus in or out: the field drawn as it is now (`draw` asks the
+                        // system which).
                         paint_now(hwnd);
                         sync_editor();
                     }
@@ -1463,21 +1533,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 SetWindowPos(hwnd, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
                 return 0;
             }
+            // Moved or sized: it opens there again.
+            WM_EXITSIZEMOVE => {
+                save_rect(hwnd);
+            }
             WM_CLOSE => {
                 DestroyWindow(hwnd);
                 return 0;
             }
             WM_DESTROY => {
+                save_rect(hwnd);
                 crate::win::ui::tooltip::leave(hwnd);
                 // The detail card's pixels (one to several MB) go with the window.
                 CARD_CACHE.with(|c| c.borrow_mut().take());
                 LIB.with(|l| {
-                    if let Ok(mut l) = l.try_borrow_mut()
-                        && let Some(lib) = l.take()
-                            && !lib.edit_brush.is_null() {
-                                DeleteObject(lib.edit_brush);
-                            }
+                    if let Ok(mut l) = l.try_borrow_mut() {
+                        l.take();
+                    }
                 });
+                let (brush, _) = EDIT_BRUSH.with(|b| b.replace((null_mut(), u32::MAX)));
+                if !brush.is_null() {
+                    DeleteObject(brush);
+                }
                 app::schedule_trim();
                 return 0;
             }
@@ -1520,6 +1597,18 @@ mod tests {
         assert!(step > 18.0 && step < 40.0, "{step}");
         let (_, first2, step2) = editor::editor_pace(2.0).expect("measured");
         assert!((first2 - 2.0 * first).abs() < 3.0 && (step2 - 2.0 * step).abs() < 3.0, "{first2} {step2}");
+    }
+
+    /// All Notes opens where it was left, kept wholly on the screen and no larger than it;
+    /// a rect smaller than the window can be is not taken.
+    #[test]
+    fn the_window_opens_where_it_was_left_on_screen() {
+        let r = |l, t, rr, b| RECT { left: l, top: t, right: rr, bottom: b };
+        let work = r(0, 0, 1920, 1040);
+        assert_eq!(on_screen(r(1100, 200, 2060, 820), work, 420).map(corners), Some((960, 200, 1920, 820)));
+        assert_eq!(on_screen(r(300, 100, 1260, 720), work, 420).map(corners), Some((300, 100, 1260, 720)));
+        assert_eq!(on_screen(r(-500, -50, 2500, 1500), work, 420).map(corners), Some(corners(work)));
+        assert_eq!(on_screen(r(10, 10, 110, 110), work, 420).map(corners), None);
     }
 
     #[test]
