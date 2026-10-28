@@ -656,7 +656,9 @@ pub fn paste_markdown(h: HWND, clip: &str) -> bool {
         return false;
     }
     still(h, || {
-        insert_text(h, &joined);
+        // Undoably: `insert_text` isn't, and Ctrl+Z took back the lists alone, leaving
+        // their text.
+        replace_sel(h, &joined);
         let (end, _) = sel(h);
         set_sel(h, a, end);
         set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
@@ -1324,6 +1326,28 @@ mod tests {
             assert!(!paste_markdown(h, clip), "{at} {clip:?}");
             assert_eq!(text(h), t);
         }
+    }
+
+    /// A Markdown list pasted is one step: one Ctrl+Z takes all of it back, the line and
+    /// the caret as they were, and Ctrl+Y brings it all again.
+    #[test]
+    fn pasted_markdown_undoes_in_one() {
+        let h = editor();
+        load_markdown(h, "T\nbefore\n\nafter");
+        send(h, EM_EMPTYUNDOBUFFER, 0, 0);
+        let (t0, md0) = (text(h), to_markdown(h, true));
+        let at = t0.iter().enumerate().filter(|&(_, &c)| c == CR).nth(1).unwrap().0 as i32 + 1;
+        set_sel(h, at, at);
+        assert!(paste_markdown(h, "- one\n- [ ] two\n1. three"));
+        let (t1, md1) = (text(h), to_markdown(h, true));
+        assert_eq!(md1.replace("  \n", "\n"), "# T\nbefore\n- one\n- [ ] two\n1. three\nafter");
+        assert!(undo_group(h));
+        assert_eq!(text(h), t0, "one undo takes the whole paste back");
+        assert_eq!(to_markdown(h, true), md0);
+        assert_eq!(sel(h), (at, at), "the caret where it was");
+        assert!(redo_group(h));
+        assert_eq!(text(h), t1, "redo brings it all again");
+        assert_eq!(to_markdown(h, true), md1);
     }
 
     /// What assistants write: `*italic*`, `__bold__`, `***both***` (written back the way

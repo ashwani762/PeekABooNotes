@@ -339,15 +339,39 @@ pub fn untab_lines(h: HWND) -> bool {
 }
 
 /// The caret's paragraph lost its checklist marker but kept the hanging indent: reset.
-/// `t`: the editor's text.
+/// Or it's an item that lost its indent: what followed it deleted up to the note's end
+/// (Shift+Ctrl+End, Del) leaves it the paragraph mark that ended the note, and that one's
+/// format: the item's look back. Ctrl+Z of that selects what it put back, which ends in
+/// the paragraph the item's look went to: that one is put right too. `t`: the editor's text.
 pub(super) fn fix_caret_indent(h: HWND, t: &[u16]) {
-    let (a, _) = sel(h);
-    let ps = para_start(t, a) as usize;
-    if t.get(ps).copied().is_some_and(is_task) {
-        return;
+    let (a, b) = sel(h);
+    let back = a != b && sel_backwards(h);
+    let (pa, pb) = (para_start(t, a), para_start(t, b));
+    fix_indent(h, t, pa, a == b);
+    if pb != pa {
+        fix_indent(h, t, pb, false);
+    }
+    match (a != b, back) {
+        (true, true) => set_sel(h, b, a),
+        (true, false) => set_sel(h, a, b),
+        _ => {}
+    }
+}
+
+/// `fix_caret_indent` for the paragraph starting at `ps`, which the caret is in (`here`)
+/// or is put in to read it.
+fn fix_indent(h: HWND, t: &[u16], ps: i32, here: bool) {
+    if !here {
+        set_sel(h, ps, ps);
     }
     let mut pf = ParaFormat2::new();
     send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+    if t.get(ps as usize).copied().is_some_and(is_task) {
+        if ps > 0 && pf.numbering == 0 && pf.offset != mark_w() {
+            style_boxes_in(h, ps, ps);
+        }
+        return;
+    }
     let base = list_base(true);
     let dx = pf.start_indent - base;
     if pf.numbering == 0 && pf.offset == mark_w() && dx >= 0 && level_indent(level_at(dx)) == dx {
@@ -470,5 +494,50 @@ mod tests {
             assert_eq!(level_at(level_indent(l) + DEEP_LEVEL / 2 - 1), l);
         }
         assert_eq!((0..=FULL_LEVELS).map(level_indent).collect::<Vec<_>>(), vec![0, 320, 640, 960, 1280, 1600]);
+    }
+
+    /// Everything after a checklist's last item deleted (Shift+Ctrl+End, Del): the item keeps
+    /// its place, though the paragraph mark left to it is the plain line's that ended the
+    /// note. Ctrl+Z puts that line back plain.
+    #[test]
+    fn an_item_keeps_its_indent_when_the_rest_is_deleted() {
+        let h = editor();
+        load_markdown(h, "T\n- [ ] one\n- [ ] two\nplain");
+        style_boxes(h);
+        send(h, EM_EMPTYUNDOBUFFER, 0, 0);
+        let md = to_markdown(h, true);
+        let para = |at: i32| {
+            set_sel(h, at, at);
+            let mut pf = ParaFormat2::new();
+            send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+            (pf.start_indent, pf.offset, pf.numbering)
+        };
+        let find = |s: &str| {
+            let w: Vec<u16> = s.encode_utf16().collect();
+            text(h).windows(w.len()).position(|v| v == &w[..]).unwrap() as i32
+        };
+        let (one, two) = (find("one"), find("two") + 3);
+        let plain = para(find("plain"));
+        let item = para(one);
+        assert_ne!(plain, item);
+        assert_eq!(para(two), item);
+        set_sel(h, two, text(h).len() as i32);
+        replace_sel(h, "");
+        restyle(h);
+        assert_eq!(sel(h), (two, two));
+        assert_eq!(to_markdown(h, true), "# T\n- [ ] one\n- [ ] two");
+        assert_eq!(para(two), item, "the last item where the others are");
+        const EM_UNDO: u32 = 0x00C7;
+        send(h, EM_UNDO, 0, 0);
+        restyle(h);
+        assert_eq!(to_markdown(h, true), md);
+        assert_eq!(para(find("plain")), plain, "the plain line plain again");
+        assert_eq!(para(two), item);
+        // A selection made backwards over lines stays so.
+        set_sel(h, find("plain") + 2, one);
+        assert!(sel_backwards(h));
+        restyle(h);
+        assert_eq!(sel(h), (one, find("plain") + 2));
+        assert!(sel_backwards(h));
     }
 }
