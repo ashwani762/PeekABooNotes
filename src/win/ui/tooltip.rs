@@ -17,6 +17,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     ClientToScreen, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, FW_SEMIBOLD, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, ScreenToClient,
 };
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_LBUTTON, VK_RBUTTON};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::win::app;
@@ -38,9 +39,10 @@ const GONE_MS: u32 = 120;
 /// How long it takes to fade out, to nothing (in, it fades as a menu does).
 const OUT_S: f32 = 0.12;
 const IN: (f32, f32) = (1.0, 0.12);
-/// How long it takes to fade in: along an even curve, its first frame about a tenth shown
-/// (on a spring it showed at 25%, and 43 to 46% once the first frame was missed).
-const IN_S: f32 = 0.16;
+/// How long a tip takes to fade in where it comes up, along `fade_in`: from faint, its
+/// first frame on screen 5 to 10% shown (on a quarter sine, 16% a frame in, it showed at
+/// 20 to 30%, the window's first frame having come and gone unseen), and whole quickly.
+const IN_S: f32 = 0.13;
 /// How long the tip takes to fade out on its way to the next button.
 const SWAP_S: f32 = 0.06;
 
@@ -65,6 +67,12 @@ struct Tip {
     shown: bool,
     hidden_at: Option<Instant>,
     fade: Ease,
+    /// Fading in where it came up: seconds into `fade_in` (None once it's whole, or on its
+    /// way out).
+    rising: Option<f32>,
+    /// Frames to hold still at nothing as it's put up, before it fades in: the first frame
+    /// a window is shown at comes and goes before the screen has it.
+    hold: u8,
     /// Fading out: to nothing, on time (see `FadeOut`), then hidden.
     out: Option<FadeOut>,
     /// Where the card is (its window's top-left) and how wide, sliding to the next
@@ -136,6 +144,8 @@ fn with<R>(f: impl FnOnce(&mut Tip) -> R) -> Option<R> {
                 shown: false,
                 hidden_at: None,
                 fade: Ease::at(0.0),
+                rising: None,
+                hold: 0,
                 out: None,
                 at: (Spring::px(0.0, IN), Spring::px(0.0, IN)),
                 width: Spring::px(0.0, IN),
@@ -261,6 +271,7 @@ fn go_away(t: &mut Tip) {
     t.next = None;
     if t.shown {
         t.shown = false;
+        t.rising = None;
         t.hidden_at = Some(Instant::now());
         // From the first frame, to nothing: a spring's tail left a faint card a few
         // frames that was then cut.
@@ -321,6 +332,7 @@ fn show(t: &mut Tip, swap: bool) {
         t.shown = true;
         t.out = None;
         t.next = None;
+        t.rising = None;
         t.fade.go(1.0, IN_S * (1.0 - clamp01(t.fade.value())).max(0.3));
         anim::wake(Client::Tip);
         return;
@@ -329,16 +341,18 @@ fn show(t: &mut Tip, swap: bool) {
         // Up for another button: out where it is, then in at that one (see `frame`).
         t.shown = true;
         t.next = Some((ox, oy, (w, h)));
+        t.rising = None;
         if t.out.is_none() {
             t.out = Some(FadeOut::new(clamp01(t.fade.value()), SWAP_S));
         }
         anim::wake(Client::Tip);
         return;
     }
-    // Fresh: fade in with a short settle toward the button.
+    // Fresh: fade in with a short settle toward the button, from a frame of nothing.
     come_up(t, ox, oy, (w, h));
     t.fade = Ease::at(0.0);
-    t.fade.go(1.0, IN_S);
+    t.rising = Some(0.0);
+    t.hold = 1;
     render(t);
     // Above everything, pinned notes included.
     unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) };
@@ -388,10 +402,33 @@ fn come_up(t: &mut Tip, ox: f32, oy: f32, size: (i32, i32)) {
     t.next = None;
 }
 
+/// How far a tip fading in where it came up has got, `x` of the way through (0 to 1): an
+/// even mix of a straight line and an ease in and out, so its first frame (an eighth of the
+/// way, at 60 Hz) is faint, near 8%, and it comes up quickly from there, in steps that
+/// grow towards the middle and shrink towards the end.
+fn fade_in(x: f32) -> f32 {
+    let x = clamp01(x);
+    0.5 * x + 0.5 * x * x * (3.0 - 2.0 * x)
+}
+
 pub fn frame(dt: f32) -> bool {
     with(|t| {
         t.fading = t.fading.saturating_add(1);
-        let mut moving = t.fade.step(dt);
+        let mut moving = match t.rising.as_mut() {
+            Some(e) => {
+                if t.hold > 0 {
+                    t.hold -= 1;
+                } else {
+                    *e += dt;
+                }
+                t.fade = Ease::at(fade_in(*e / IN_S));
+                if *e >= IN_S {
+                    t.rising = None;
+                }
+                true
+            }
+            None => t.fade.step(dt),
+        };
         for sp in [&mut t.at.0, &mut t.at.1, &mut t.width] {
             moving |= sp.step(dt);
         }
@@ -405,9 +442,9 @@ pub fn frame(dt: f32) -> bool {
             if done && was <= 0.0 {
                 if let Some((ox, oy, size)) = t.next {
                     come_up(t, ox, oy, size);
-                    t.fade = Ease::at(0.0);
-                    t.fade.go(1.0, IN_S);
-                    t.fade.step(dt);
+                    // The window is on screen already: no frame to hold.
+                    t.rising = Some(dt);
+                    t.fade = Ease::at(fade_in(dt / IN_S));
                     render(t);
                     unsafe { SetWindowPos(t.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
                     return true;
@@ -433,6 +470,7 @@ fn hide(t: &mut Tip) {
         ShowWindow(t.hwnd, SW_HIDE);
     }
     t.fade = Ease::at(0.0);
+    t.rising = None;
     t.out = None;
     t.next = None;
     t.canvas = None;
@@ -507,6 +545,13 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 with(|t| {
                     if t.pending {
                         t.pending = false;
+                        // A button held down is a click (or a drag) on its way: no tip
+                        // fading in over it (a swatch's, as its menu went), nor after it
+                        // while the pointer stays on that button.
+                        if crate::win::util::key_down(VK_LBUTTON) || crate::win::util::key_down(VK_RBUTTON) {
+                            t.muted = true;
+                            return;
+                        }
                         // Only while the pointer is still over the button (or it has focus).
                         let mut p = POINT { x: 0, y: 0 };
                         GetCursorPos(&mut p);
@@ -534,5 +579,22 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             _ => {}
         }
         DefWindowProcW(h, msg, wp, lp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IN_S, fade_in};
+
+    /// The live test saw a tip's first frame at 20 to 30%: it starts faint now, a frame in
+    /// (the window's first frame held at nothing), and is whole by the end of its 130 ms,
+    /// never stepping back nor leaping on the way.
+    #[test]
+    fn a_tooltip_fades_in_from_faint() {
+        let first = fade_in(1.0 / 60.0 / IN_S);
+        assert!((0.05..=0.10).contains(&first), "first frame at {first}");
+        assert_eq!((fade_in(0.0), fade_in(0.5), fade_in(1.0), fade_in(2.0)), (0.0, 0.5, 1.0, 1.0));
+        let steps: Vec<f32> = (0..=8).map(|i| fade_in(i as f32 / 8.0)).collect();
+        assert!(steps.windows(2).all(|w| w[1] > w[0] && w[1] - w[0] < 0.2), "{steps:?}");
     }
 }

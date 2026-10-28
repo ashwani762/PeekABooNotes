@@ -377,7 +377,75 @@ fn put_away(id: u64) {
     if let Some(h) = note_hwnd(id) {
         note::flush(h);
         note::dissolve(h);
+        pass_keys_on(h);
         note::discard(h);
+    }
+}
+
+/// Note window `h` is going while it has the keys: they go to the window behind it on its
+/// display, else to the desktop (and on from there as the deck sees fit). Left to Windows,
+/// they went to the next window down wherever it was: All Notes on the other display,
+/// which then came to the front there.
+fn pass_keys_on(h: HWND) {
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows_sys::Win32::Graphics::Gdi::MonitorFromWindow;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+    unsafe {
+        if GetForegroundWindow() != h {
+            return;
+        }
+        let mon = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+        let class = |w: HWND| {
+            let mut buf = [0u16; 32];
+            let n = GetClassNameW(w, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
+            String::from_utf16_lossy(&buf[..n])
+        };
+        // A window that would take the keys: shown, not minimized, not disabled, not a
+        // tool or no-activate window (the deck, menus, the toast), not cloaked (on another
+        // virtual desktop), not the taskbar; the desktop itself ends the search.
+        let takes_keys = |w: HWND| {
+            let ex = GetWindowLongW(w, GWL_EXSTYLE) as u32;
+            let mut cloaked = 0u32;
+            IsWindowVisible(w) != 0
+                && IsIconic(w) == 0
+                && IsWindowEnabled(w) != 0
+                && ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) == 0
+                && !(DwmGetWindowAttribute(w, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut _, 4) == 0 && cloaked != 0)
+                && !class(w).starts_with("Shell_")
+        };
+        let desktop = GetShellWindow();
+        let mut w = GetWindow(h, GW_HWNDNEXT);
+        while !w.is_null() && w != desktop && !(IsWindowVisible(w) != 0 && matches!(class(w).as_str(), "Progman" | "WorkerW")) {
+            if takes_keys(w) && MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST) == mon {
+                SetForegroundWindow(w);
+                return;
+            }
+            w = GetWindow(w, GW_HWNDNEXT);
+        }
+        if !desktop.is_null() {
+            SetForegroundWindow(desktop);
+            deck::pass_on_later();
+        }
+    }
+}
+
+/// Where the toast for an action on notes `ids` goes, worked out before the action (which
+/// may close their windows and move the keys): the display of our window in front (the
+/// note acted on, All Notes, the deck with the keys), else of a window of the notes', else
+/// the deck's. Not where the keys go after it: archiving a note had the toast follow them
+/// to All Notes on the other display.
+fn toast_place(ids: &[u64]) -> (RECT, f32) {
+    use crate::win::ui::screen;
+    unsafe {
+        let fg = GetForegroundWindow();
+        let mut pid = 0u32;
+        if !fg.is_null() && GetWindowThreadProcessId(fg, &mut pid) != 0 && pid == windows_sys::Win32::System::Threading::GetCurrentProcessId() && IsWindowVisible(fg) != 0 && IsIconic(fg) == 0 {
+            return screen::of(fg);
+        }
+    }
+    match ids.iter().find_map(|&id| note_hwnd(id)) {
+        Some(h) => screen::of(h),
+        None => deck::monitor_geo(),
     }
 }
 
@@ -430,6 +498,10 @@ impl crate::common::undo::Action for Undo {
             (_, newer) => Some(newer),
         }
     }
+
+    fn lingers(&self) -> bool {
+        !matches!(self, Undo::Imported(..))
+    }
 }
 
 impl Undo {
@@ -454,20 +526,26 @@ impl Undo {
     }
 }
 
-/// `a` was just done: it goes on the undo stack, and the toast shows it.
-fn done(a: Undo) {
-    ui(|u| u.undo.push(a));
-    show_undo();
+/// `a` was just done: it goes on the undo stack, and the toast shows it on the display
+/// `at` (`toast_place`). The action that waited for Undo after its toast had gone is
+/// final now.
+fn done(a: Undo, at: (RECT, f32)) {
+    if let Some(over) = ui(|u| u.undo.push(a)) {
+        make_final(over);
+    }
+    show_undo(Some(at));
 }
 
-/// The toast shows what Undo takes back now, or goes when there's nothing left.
-fn show_undo() {
-    toast::undo(ui(|u| u.undo.top().map(|e| e.action.message())));
+/// The toast shows what Undo takes back now, or goes when there's nothing left in time;
+/// it rises on `at`, or (None) stays where it is.
+fn show_undo(at: Option<(RECT, f32)>) {
+    toast::undo(ui(|u| u.undo.top().map(|e| e.action.message())), at);
 }
 
-/// The tray menu's Undo row, while the toast has something to take back.
+/// The tray menu's Undo row, while there's something to take back (the toast's, or the
+/// last action after its toast has gone).
 pub(super) fn undo_label() -> Option<&'static str> {
-    ui(|u| u.undo.top().map(|e| e.action.menu_label()))
+    ui(|u| u.undo.next().map(Undo::menu_label))
 }
 
 /// Archive notes from a click or key, with the Undo toast, as deleting has.
@@ -476,8 +554,9 @@ pub fn archive(ids: &[u64]) {
     if away.is_empty() {
         return;
     }
+    let at = toast_place(&away);
     set_archived(&away, true);
-    done(Undo::Archived(away));
+    done(Undo::Archived(away), at);
 }
 
 /// What an import's toast says: the notes it brought in, the files it left out as notes
@@ -508,7 +587,8 @@ pub(super) fn imported(ids: Vec<u64>, here: usize, unread: usize) {
         }
         return;
     }
-    done(Undo::Imported(ids, here, unread));
+    let at = toast_place(&[]);
+    done(Undo::Imported(ids, here, unread), at);
 }
 
 /// Bring notes back from the archive, to their places in the deck, with the Undo toast,
@@ -518,11 +598,13 @@ pub fn restore(ids: &[u64]) {
     if back.is_empty() {
         return;
     }
+    let at = toast_place(&back);
     set_archived(&back, false);
-    done(Undo::Restored(back));
+    done(Undo::Restored(back), at);
 }
 
 pub fn delete(ids: Vec<u64>) {
+    let at = toast_place(&ids);
     ids.iter().for_each(|&id| put_away(id));
     let removed: Vec<(usize, Note)> = store_mut(|s| ids.iter().filter_map(|id| s.remove(*id)).collect());
     if removed.is_empty() {
@@ -530,7 +612,7 @@ pub fn delete(ids: Vec<u64>) {
     }
     save();
     refresh();
-    done(Undo::Deleted(removed));
+    done(Undo::Deleted(removed), at);
 }
 
 /// Delete every note, archived ones too, once the user has said yes. The usual Undo toast
@@ -555,19 +637,20 @@ fn confirm_delete_all(owner: HWND, n: usize, at: Option<POINT>) -> bool {
     popup(items, p.x, p.y, owner) == ID_DELETE
 }
 
-/// Whether the Undo toast has something to take back (it is showing).
+/// Whether Undo has something to take back: what the toast shows, or the last action
+/// after its toast has gone.
 pub fn can_undo() -> bool {
     ui(|u| !u.undo.is_empty())
 }
 
 /// The toast's Undo (its button, Ctrl+Z in All Notes, the tray menu): the newest action
-/// still in time is taken back, and the toast shows the one before it, if any. Notes
-/// deleted come back where they were, notes archived return to the deck where they were,
-/// notes restored go back to the archive, and notes imported go (for good, with the files
-/// they brought).
+/// still in time is taken back, and the toast shows the one before it, if any; with none
+/// in time, the last whose toast has gone. Notes deleted come back where they were, notes
+/// archived return to the deck where they were, notes restored go back to the archive,
+/// and notes imported go (for good, with the files they brought).
 pub fn undo() {
     let Some(a) = ui(|u| u.undo.pop()) else { return };
-    show_undo();
+    show_undo(None);
     let archive = matches!(a, Undo::Restored(_));
     let ids: Vec<u64> = match a {
         // Each back in its place: archiving left it there (see `set_archived`).
@@ -605,20 +688,25 @@ pub fn undo() {
 }
 
 /// The toast's clock ran `dt` seconds (0 while the pointer holds it): every action whose
-/// own time ran out is made final, and the toast shows what's left. The seconds the newest
+/// own time ran out leaves the toast, and is made final but for the last of them, which
+/// Undo can still take back (`undo::Stack::tick`). The seconds the newest still in time
 /// has left, if any.
 pub fn undo_clock(dt: f32) -> Option<f32> {
-    let due = ui(|u| if dt > 0.0 { u.undo.tick(dt) } else { Vec::new() });
-    if !due.is_empty() {
-        for a in due {
-            make_final(a);
-        }
-        show_undo();
+    let (was, due, now) = ui(|u| {
+        let was = u.undo.in_time();
+        let due = if dt > 0.0 { u.undo.tick(dt) } else { Vec::new() };
+        (was, due, u.undo.in_time())
+    });
+    for a in due {
+        make_final(a);
+    }
+    if now != was {
+        show_undo(None);
     }
     ui(|u| u.undo.top().map(|e| e.left))
 }
 
-/// Every action the toast could still take back is final now (quitting).
+/// Every action Undo could still take back is final now (quitting).
 pub fn finalize_undo() {
     for a in ui(|u| u.undo.drain()) {
         make_final(a);
@@ -679,7 +767,7 @@ fn delete_attachments(gone: &[Note]) {
     }
 }
 
-/// The notes deleted whose Undo is still in time.
+/// The notes deleted that Undo can still bring back.
 fn pending_notes(u: &Ui) -> impl Iterator<Item = &Note> {
     u.undo.iter().flat_map(|a| match a {
         Undo::Deleted(v) => v.as_slice(),

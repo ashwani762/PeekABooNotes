@@ -104,29 +104,35 @@ pub fn window() -> HWND {
 
 /// What Undo would take back now changed (an action was done, undone or made final):
 /// the toast shows `msg`, rising if it wasn't up, or goes when there's nothing left and
-/// no notice.
-pub fn undo(msg: Option<String>) {
+/// no notice. A new action raises it on the display it was done on, `at` (work area and
+/// scale); otherwise (None) it stays where it is.
+pub fn undo(msg: Option<String>, at: Option<(RECT, f32)>) {
     if msg.is_none() && TOAST.with(|t| t.borrow().is_none()) {
         return;
     }
-    with_toast(|t| {
+    with_toast(at, |t| {
+        // The ring starts full for what it shows now; with nothing left, it stays where
+        // it was as the toast sinks away.
+        if msg.is_some() {
+            t.left = SECONDS;
+        }
         t.undo = msg;
-        t.left = SECONDS;
     });
 }
 
 /// Tell the user something that can't be undone or acted on here, for a few seconds.
 pub fn notice(text: String) {
-    with_toast(|t| {
+    with_toast(None, |t| {
         t.notice = Some(text);
         t.notice_left = SECONDS;
     });
 }
 
-/// The toast, made if need be on the monitor in use, after `f` changed what it says:
-/// measured again, named after it (what screen readers read), up or on its way out.
-fn with_toast(f: impl FnOnce(&mut Toast)) {
-    let (work, s) = crate::win::ui::screen::active();
+/// The toast, made if need be, after `f` changed what it says: measured again, named
+/// after it (what screen readers read), up or on its way out. It rises on `at`, or (None)
+/// where it is, or on the monitor in use when it wasn't up.
+fn with_toast(at: Option<(RECT, f32)>, f: impl FnOnce(&mut Toast)) {
+    let (work, s) = at.unwrap_or_else(crate::win::ui::screen::active);
     TOAST.with(|t| {
         let mut t = t.borrow_mut();
         if t.is_none() {
@@ -180,10 +186,9 @@ fn with_toast(f: impl FnOnce(&mut Toast)) {
             });
         }
         let t = t.as_mut().unwrap();
-        let was = (t.undo.clone(), t.notice.clone());
         f(t);
         let showing = t.undo.is_some() || t.notice.is_some();
-        if showing && (!t.alive || was != (t.undo.clone(), t.notice.clone())) {
+        if showing && (!t.alive || at.is_some()) {
             // Raised again while showing, perhaps from another monitor: it moves there.
             t.work = work;
             if t.s != s {
@@ -310,8 +315,7 @@ fn step(dt: f32) -> bool {
         if !t.alive && t.shown.done() && was <= 0.0 {
             unsafe { DestroyWindow(t.hwnd) };
             *slot = None;
-            // What it offered to undo (an archived note kept ready to come back) is gone
-            // too: memory can go back to Windows once nothing else is open.
+            // Memory can go back to Windows once nothing else is open.
             crate::win::app::schedule_trim();
             return false;
         }
@@ -561,7 +565,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 // A notice has nothing to undo: a click just dismisses it (and shows what
                 // can still be undone, if anything).
                 if notice == Some(true) {
-                    with_toast(|t| t.notice = None);
+                    with_toast(None, |t| t.notice = None);
                 } else {
                     app::undo();
                 }
