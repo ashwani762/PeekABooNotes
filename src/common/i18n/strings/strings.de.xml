@@ -119,6 +119,7 @@
         <item quantity="other">%d Dateien nicht lesbar</item>
     </plurals>
     <string name="toast_undo">Widerrufen</string>
+    <string name="toast_dismiss">Verwerfen</string>
 
     <!-- All Notes -->
     <string name="library_title_notes">Notizen</string>
