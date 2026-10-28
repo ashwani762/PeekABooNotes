@@ -26,7 +26,9 @@ pub(super) fn run_command(h: HWND, cmd: u32) {
         NC_TASK => fmt(&|| rich::still(e, || toggle_task_lines(e))),
         NC_TOGGLE_CHECK => fmt(&|| toggle_check_at_caret(e)),
         NC_CUT => fmt(&|| {
-            rich::send(e, WM_CUT, 0, 0);
+            if !rich::delete_keeping_item(e, true) {
+                rich::send(e, WM_CUT, 0, 0);
+            }
         }),
         NC_COPY => {
             rich::send(e, WM_COPY, 0, 0);

@@ -315,10 +315,10 @@ type Group = (isize, Vec<u16>, Vec<u16>, (i32, i32));
 
 thread_local! {
     static LAST_GROUP: std::cell::RefCell<Option<Group>> = const { std::cell::RefCell::new(None) };
-    /// The group `undo_group` took back last, for `redo_group`, and how many of
-    /// RichEdit's steps that was (a format step doesn't change the text, so the text
-    /// alone can't tell redo when to stop).
-    static UNDONE_GROUP: std::cell::RefCell<Option<(Group, u32)>> = const { std::cell::RefCell::new(None) };
+    /// The group `undo_group` took back last, for `redo_group`, how many of RichEdit's
+    /// steps that was (a format step doesn't change the text, so the text alone can't tell
+    /// redo when to stop), and the selection it was taken back from.
+    static UNDONE_GROUP: std::cell::RefCell<Option<(Group, u32, (i32, i32))>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A change that leaves the text as it was (a picture's new size) came after the last
@@ -337,6 +337,8 @@ pub fn undo_group(h: HWND) -> bool {
     if e != h as isize || text(h) != after {
         return false;
     }
+    // Where the change left it (after a paste, its end), for Ctrl+Y to put it back.
+    let now = sel(h);
     let mut steps = 0;
     held(h, || {
         for _ in 0..32 {
@@ -351,19 +353,19 @@ pub fn undo_group(h: HWND) -> bool {
         // Where it was, not wherever RichEdit's last undone step left it.
         set_sel(h, caret.0, caret.1);
     });
-    UNDONE_GROUP.with(|g| *g.borrow_mut() = Some(((e, before, after, caret), steps)));
+    UNDONE_GROUP.with(|g| *g.borrow_mut() = Some(((e, before, after, caret), steps, now)));
     true
 }
 
-/// Ctrl+Y straight after `undo_group`: the whole change again, as one. False when
-/// anything has changed since.
+/// Ctrl+Y straight after `undo_group`: the whole change again, as one, the selection where
+/// Ctrl+Z found it (after a paste, at its end, not where RichEdit's first redone step put
+/// it). False when anything has changed since.
 pub fn redo_group(h: HWND) -> bool {
     const EM_REDO: u32 = WM_USER + 84;
-    let Some(((e, before, after, caret), steps)) = UNDONE_GROUP.with(|g| g.borrow_mut().take()) else { return false };
+    let Some(((e, before, after, caret), steps, (a, b))) = UNDONE_GROUP.with(|g| g.borrow_mut().take()) else { return false };
     if e != h as isize || text(h) != before {
         return false;
     }
-    let (a, b) = sel(h);
     held(h, || {
         for _ in 0..steps {
             if send(h, EM_REDO, 0, 0) == 0 {

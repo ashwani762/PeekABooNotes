@@ -386,6 +386,40 @@ fn fix_indent(h: HWND, t: &[u16], ps: i32, here: bool) {
         });
     }
 }
+
+/// Delete (`copy`: cut) the selection when it runs from inside a checklist item's text to
+/// the note's end (Shift+Ctrl+End, Del): the item keeps its own look. Left to RichEdit, the
+/// item takes the paragraph mark that ended the note, and its format, which a numbered or
+/// bulleted line after it made a "1. ○" item; `fix_caret_indent` can't put that right
+/// unseen, as Ctrl+Z would bring the line back with the item's format. Done here, as one
+/// step, Ctrl+Z puts back both. False, with nothing done, for any other selection.
+pub fn delete_keeping_item(h: HWND, copy: bool) -> bool {
+    let (a, b) = sel(h);
+    let (a, b) = (a.min(b).max(0), a.max(b));
+    let t = text(h);
+    let ps = para_start(&t, a);
+    if a == b || (b as usize) < t.len() || a <= ps || !t.get(ps as usize).copied().is_some_and(is_task) {
+        return false;
+    }
+    // Only lines: a block's marks are its own to take apart.
+    if !t[a as usize..].contains(&CR) || t[ps as usize..].iter().any(|&c| c == CELL || c == ROW_START || c == ROW_END) {
+        return false;
+    }
+    if copy {
+        send(h, windows_sys::Win32::UI::WindowsAndMessaging::WM_COPY, 0, 0);
+    }
+    still(h, || {
+        set_sel(h, ps, ps);
+        let mut pf = ParaFormat2::new();
+        send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+        pf.mask = PFM_NUMBERING | PFM_NUMBERINGSTYLE | PFM_NUMBERINGSTART | PFM_NUMBERINGTAB | PFM_STARTINDENT | PFM_OFFSET | PFM_ALIGNMENT | PFM_LINESPACING | PFM_SPACEBEFORE | PFM_SPACEAFTER;
+        set_sel(h, a, b);
+        replace_sel(h, "");
+        // Recorded: Ctrl+Z gives the line it went to its own format back with the text.
+        send(h, EM_SETPARAFORMAT, 0, &pf as *const _ as isize);
+    });
+    true
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,5 +573,59 @@ mod tests {
         restyle(h);
         assert_eq!(sel(h), (one, find("plain") + 2));
         assert!(sel_backwards(h));
+    }
+
+    /// The same with a numbered or bulleted line after the checklist: the last item stays
+    /// an item, not numbered or bulleted, at its own indent; Ctrl+Z puts the line back
+    /// numbered or bulleted, and Ctrl+Y takes it away again.
+    #[test]
+    fn an_item_stays_an_item_when_a_list_after_it_is_deleted() {
+        for after in ["1. three", "- three", "  - [ ] nested\n1. three"] {
+            let h = editor();
+            load_markdown(h, &format!("T\n- [ ] one\n  - [ ] two\n{after}"));
+            style_boxes(h);
+            send(h, EM_EMPTYUNDOBUFFER, 0, 0);
+            let md = to_markdown(h, true);
+            let para = |at: i32| {
+                set_sel(h, at, at);
+                let mut pf = ParaFormat2::new();
+                send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+                (pf.start_indent, pf.offset, pf.numbering)
+            };
+            let find = |s: &str| {
+                let w: Vec<u16> = s.encode_utf16().collect();
+                text(h).windows(w.len()).position(|v| v == &w[..]).unwrap() as i32
+            };
+            let two = find("two") + 3;
+            let item = para(two);
+            let three = para(find("three"));
+            assert_ne!(three.2, 0, "{after}");
+            set_sel(h, two, text(h).len() as i32);
+            assert!(delete_keeping_item(h, false), "{after}");
+            restyle(h);
+            assert_eq!(sel(h), (two, two));
+            assert_eq!(to_markdown(h, true), "# T\n- [ ] one\n  - [ ] two", "{after}");
+            assert_eq!(para(two), item, "{after}: the last item as it was");
+            assert!(undo_group(h));
+            restyle(h);
+            assert_eq!(to_markdown(h, true), md, "{after}");
+            assert_eq!(para(find("three")), three, "{after}: the list line as it was");
+            assert_eq!(para(two), item);
+            assert!(redo_group(h));
+            restyle(h);
+            assert_eq!(to_markdown(h, true), "# T\n- [ ] one\n  - [ ] two", "{after}");
+            assert_eq!(para(two), item);
+        }
+        // Not from the box, nor short of the end, nor at a plain line: left to RichEdit.
+        let h = editor();
+        load_markdown(h, "T\n- [ ] one\n1. two\nplain");
+        style_boxes(h);
+        let t = text(h);
+        let one = t.iter().position(|&c| is_task(c)).unwrap() as i32;
+        for (a, b) in [(one, t.len() as i32), (one + 3, t.len() as i32 - 2), (0, t.len() as i32), (one + 3, one + 3)] {
+            set_sel(h, a, b);
+            assert!(!delete_keeping_item(h, false), "{a}..{b}");
+            assert_eq!(text(h), t);
+        }
     }
 }

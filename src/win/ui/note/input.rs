@@ -525,6 +525,14 @@ unsafe fn edit_now(e: HWND, msg: u32, wp: WPARAM, lp: LPARAM, parent: usize) -> 
                     unsafe { PostMessageW(h, WM_NOTE_CMD, cmd as usize, 0) };
                     return 0;
                 }
+                // From a checklist item's text to the note's end, deleted or cut: the item
+                // stays an item (RichEdit gave it the format of the line that ended the note).
+                let cut = (ctrl && !shift && vk == b'X' as u16) || (shift && !ctrl && vk == VK_DELETE);
+                if (cut || matches!(vk, VK_DELETE | VK_BACK)) && rich::delete_keeping_item(e, cut) {
+                    st.swallow = true;
+                    mark_dirty(h);
+                    return 0;
+                }
                 if vk == VK_BACK && !ctrl && block_backspace(e) {
                     st.swallow = true;
                     mark_dirty(h);
