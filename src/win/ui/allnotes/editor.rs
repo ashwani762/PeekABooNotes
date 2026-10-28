@@ -169,6 +169,7 @@ pub(super) fn sync_editor() {
                         });
                         if with(|l| l.editor_first.is_none()).unwrap_or(true) {
                             unsafe { ShowWindow(h, SW_SHOWNA) };
+                            crate::win::ui::note::embedded_shown(h);
                         }
                     }
                 }
@@ -209,6 +210,7 @@ pub(super) fn reveal_editor() {
         && !h.is_null()
     {
         unsafe { ShowWindow(h, SW_SHOWNA) };
+        crate::win::ui::note::embedded_shown(h);
     }
 }
 

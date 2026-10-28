@@ -329,8 +329,14 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
             Box::into_raw(st) as _,
         )
     };
-    scrollbar::hint(h);
     h
+}
+
+/// Inline editor `h` comes into sight (made now, or shown after the card's fade to its
+/// picture): a long note flashes its bar so it's clear there's more. Flashed as it was made,
+/// unseen behind its picture, the bar came up whole in one frame as the editor showed.
+pub fn embedded_shown(h: HWND) {
+    scrollbar::hint(h);
 }
 
 pub fn is_embedded(h: HWND) -> bool {
