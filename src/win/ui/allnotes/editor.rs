@@ -128,7 +128,8 @@ pub(super) fn sync_editor() {
                     // card cross-fades from what it showed before: the editor, a window of
                     // its own, came up whole at once inside the fading card, a hard-edged
                     // inset of the new note in the old one; it comes as the fade ends
-                    // (`frame`). Unless the keys are going into it now (Enter).
+                    // (`frame`), unless the fade has only just set off (below). Unless the
+                    // keys are going into it now (Enter).
                     let force = FORCE.with(|f| f.get());
                     let fading = with(|l| l.old_detail.is_some()).unwrap_or(false);
                     if force && fading {
@@ -137,7 +138,14 @@ pub(super) fn sync_editor() {
                             l.detail_a.snap(1.0);
                         });
                     }
-                    if !force && (fading || with(|l| super::list::gaps_moving(l)).unwrap_or(false)) {
+                    // A cross-fade only just set off (Open Here, another note clicked), none
+                    // of what it fades to drawn yet: the editor comes now, behind its picture,
+                    // and the card fades straight to that. Made after the fade, the card
+                    // faded to the note's plain preview first (its picture smaller, its links
+                    // plain), and half a second on to the editor's picture over it: two
+                    // changes, the second with both pictures showing.
+                    let joins = !force && fading && with(|l| l.detail_a.value <= 0.0).unwrap_or(false);
+                    if !force && ((fading && !joins) || with(|l| super::list::gaps_moving(l)).unwrap_or(false)) {
                         unsafe { SetTimer(hwnd, T_SYNC, 320, None) };
                     } else {
                         let h = crate::win::ui::note::create_embedded(id, hwnd, r);
@@ -154,7 +162,8 @@ pub(super) fn sync_editor() {
                             // A picture of an editor closed before is out of date now.
                             l.editor_pic = None;
                             l.editor_first = first;
-                            if l.editor_first.is_some() && !fade_to_editor(l) {
+                            // Joining a cross-fade under way: it goes on, to the picture.
+                            if l.editor_first.is_some() && !joins && !fade_to_editor(l) {
                                 l.editor_first = None;
                             }
                         });
