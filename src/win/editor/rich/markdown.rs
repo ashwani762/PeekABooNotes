@@ -660,6 +660,11 @@ pub fn paste_markdown(h: HWND, clip: &str) -> bool {
         // their text.
         replace_sel(h, &joined);
         let (end, _) = sel(h);
+        // Body type, as typed there, the paragraph mark it ends at with it: on the line
+        // just made under the title, that mark is the title's, and its face went to the
+        // last line pasted and to what was typed after it.
+        set_sel(h, a, end + 1);
+        set_body_format(h);
         set_sel(h, a, end);
         set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
         put_body(h, a, &body);
@@ -1339,7 +1344,7 @@ mod tests {
         let at = t0.iter().enumerate().filter(|&(_, &c)| c == CR).nth(1).unwrap().0 as i32 + 1;
         set_sel(h, at, at);
         assert!(paste_markdown(h, "- one\n- [ ] two\n1. three"));
-        let (t1, md1) = (text(h), to_markdown(h, true));
+        let (t1, md1, s1) = (text(h), to_markdown(h, true), sel(h));
         assert_eq!(md1.replace("  \n", "\n"), "# T\nbefore\n- one\n- [ ] two\n1. three\nafter");
         assert!(undo_group(h));
         assert_eq!(text(h), t0, "one undo takes the whole paste back");
@@ -1348,6 +1353,41 @@ mod tests {
         assert!(redo_group(h));
         assert_eq!(text(h), t1, "redo brings it all again");
         assert_eq!(to_markdown(h, true), md1);
+        assert_eq!(sel(h), s1, "the caret after it again, not before it");
+        assert!(s1.0 > at);
+    }
+
+    /// A Markdown list pasted onto the line under the title, just typed (the title's look
+    /// still on its paragraph mark), is body text, as typing it there makes it: no word of
+    /// it in the title's type, nor what's typed after it.
+    #[test]
+    fn pasted_markdown_under_the_title_is_body_text() {
+        let h = editor();
+        replace_sel(h, "Paste test");
+        style_title(h);
+        // Enter on the title, as the note's Enter does it.
+        replace_sel(h, "\r");
+        let (c, _) = sel(h);
+        set_sel(h, c, para_end(&text(h), c));
+        set_body_format(h);
+        set_sel(h, c, c);
+        set_body_format(h);
+        assert!(paste_markdown(h, "- one\r\n- [ ] two\r\n1. three"));
+        restyle(h);
+        replace_sel(h, " more");
+        replace_sel(h, "\r");
+        replace_sel(h, "plain");
+        restyle(h);
+        let t = text(h);
+        for cp in c..t.len() as i32 {
+            if is_task(t[cp as usize]) || t[cp as usize] == CR {
+                continue;
+            }
+            set_sel(h, cp, cp + 1);
+            let cf = char_format(h, SCF_SELECTION);
+            let what = String::from_utf16_lossy(&t[cp as usize..cp as usize + 1]);
+            assert!(cf.effects & CFM_BOLD == 0 && face_is(&cf, body_face()) && cf.height == body_size(), "{what:?} at {cp} in the title's type");
+        }
     }
 
     /// What assistants write: `*italic*`, `__bold__`, `***both***` (written back the way
