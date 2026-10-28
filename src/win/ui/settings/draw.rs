@@ -251,18 +251,12 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             // The knob stretches while pressed, like a finger squashing it.
             let d = sh.h - 4.0 * s;
             let kw = d + if pressed(0) { 6.0 * s * clamp01(w.press.value) } else { 0.0 };
-            let knob_at = |c: &mut Canvas, t: f32, a: f32| {
-                let kx = sh.x + 2.0 * s + t * (sh.w - 4.0 * s - kw);
-                let k = Shape::new(kx, sh.y + 2.0 * s, kw, d, d / 2.0);
-                c.card(&k, dim(0xFFFFFF), a, 0x000000, 0.04 * fade * a, 0.5 * fade * a, s);
-            };
-            if anim::reduced() && t > 0.0 && t < 1.0 {
-                // Reduce Motion: the knob fades from one end to the other.
-                knob_at(c, 0.0, 1.0 - t);
-                knob_at(c, 1.0, t);
-            } else {
-                knob_at(c, t, 1.0);
-            }
+            // Reduce Motion: the knob is at its new end at once, and only the track's colour
+            // fades (two half knobs, one fading out at each end, read as a glitch).
+            let at = if anim::reduced() { clamp01(row.key.and_then(|k| w.knobs.get(&k)).map_or(t, |sp| sp.target)) } else { t };
+            let kx = sh.x + 2.0 * s + at * (sh.w - 4.0 * s - kw);
+            let k = Shape::new(kx, sh.y + 2.0 * s, kw, d, d / 2.0);
+            c.card(&k, dim(0xFFFFFF), 1.0, 0x000000, 0.04 * fade, 0.5 * fade, s);
         }
         Ctl::Seg(labels) => {
             let (sh, item) = seg_metrics(w, labels, &r);

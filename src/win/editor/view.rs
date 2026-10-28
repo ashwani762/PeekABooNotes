@@ -147,6 +147,37 @@ fn selected_pictures(e: HWND, c: &mut Canvas, top: i32, rows: i32, t: &rich::Spa
         c.invert_rect(r);
         let hl = unsafe { windows_sys::Win32::Graphics::Gdi::GetSysColor(windows_sys::Win32::Graphics::Gdi::COLOR_HIGHLIGHT) };
         c.fade_rect(r, ((hl & 0xFF) << 16) | (hl & 0xFF00) | ((hl >> 16) & 0xFF), 0.8);
+        // Its paragraph mark selected too (Shift+Right from a picked picture): RichEdit marks
+        // it with a slim block of the selection's colour, as tall as the picture's line, so
+        // a bar ran down the picture's side and on past it through the line's spacing.
+        let eop = cp + 1;
+        if eop < a.max(b) as usize
+            && eop < t.from + t.t.len()
+            && t.t[eop - t.from] == rich::CR
+            && let Some(m) = rich::char_box(e, eop as i32)
+        {
+            unmark(c, RECT { left: m.left.max(0), top: (m.top - top).max(0), right: m.right.min(c.w), bottom: (m.bottom - top).min(rows) }, paper);
+        }
+    }
+}
+
+/// Paint out the block RichEdit marks a selected paragraph mark with, in its box `r`: the
+/// colour at the top of its middle, wherever it is in the box, goes back to the paper.
+fn unmark(c: &mut Canvas, r: RECT, paper: u32) {
+    if r.right <= r.left || r.bottom <= r.top {
+        return;
+    }
+    let mark = c.row(r.top)[((r.left + r.right) / 2) as usize] & 0xFF_FFFF;
+    if mark == paper {
+        return;
+    }
+    for y in r.top..r.bottom {
+        let row = c.row(y)[r.left as usize..r.right as usize].to_vec();
+        for (x, p) in (r.left..).zip(row) {
+            if p & 0xFF_FFFF == mark {
+                c.fill_raw(x, y, x + 1, y + 1, 0xFF00_0000 | paper);
+            }
+        }
     }
 }
 
@@ -975,6 +1006,17 @@ mod tests {
                 assert!(checked >= 30 * pw.min(96) as usize / 2, "{checked}");
             }
         }
+        // The picture and its paragraph mark (Shift+Right from a picked picture): no bar of
+        // the selection's colour down its side and below it, nothing changed right of it.
+        rich::set_sel(e, obj, obj + 2);
+        let with_mark = draw(0, h);
+        let m = rich::char_box(e, obj + 1).unwrap();
+        assert!(m.left >= p0.x + pw - 1 && m.right > m.left && m.bottom > p0.y + ph, "the mark's box: {} {} {} {}", m.left, m.top, m.right, m.bottom);
+        let changed: Vec<(i32, i32)> = (p0.y - 4..(p0.y + ph + 60).min(h))
+            .flat_map(|y| (p0.x + pw..w).map(move |x| (x, y)))
+            .filter(|&(x, y)| with_mark[(y * w + x) as usize] & 0xFF_FFFF != plain[(y * w + x) as usize] & 0xFF_FFFF)
+            .collect();
+        assert!(changed.is_empty(), "{} pixels right of the picture changed, from {:?} to {:?}", changed.len(), changed.first(), changed.last());
         // Picked: its selection hidden, drawn as it is.
         rich::set_sel(e, obj, obj + 1);
         rich::hold_selection_hidden(e, true);

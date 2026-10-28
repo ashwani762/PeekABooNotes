@@ -67,6 +67,7 @@ pub(super) fn deck() -> Deck {
         fonts: HashMap::new(),
         font_scale: 1.0,
         canvas: None,
+        under: None,
         marquee: None,
         marquee_live: false,
         kbd: None,
@@ -183,6 +184,69 @@ pub(super) fn settle_for(d: &mut Deck, limit: Duration) -> (u32, Duration) {
         if let Some(rest) = period.checked_sub(t0.elapsed()) {
             std::thread::sleep(rest);
         }
+    }
+}
+
+/// Every frame of a fan-out, a card pointed at and pulled out, it going back and the deck
+/// folding is the same, pixel for pixel, with what was kept from the frames before put
+/// down for the cards at rest as drawn afresh, at either edge, as the window widens and
+/// narrows with the card; and the card's frames out and back are most of them drawn so.
+#[test]
+fn what_is_kept_of_the_cards_at_rest_is_what_drawing_them_shows() {
+    crate::common::i18n::init("en");
+    for left in [false, true] {
+        let mut d = deck();
+        if left {
+            d.geo = with_caps(geo_for(NOTES.len(), true, 0.42, 8, d.geo.work, 1.0));
+        }
+        let mut used = 0;
+        let mut frames = |d: &mut Deck| {
+            for _ in 0..400 {
+                let (moving, _, draw) = advance(d, 1.0 / 60.0);
+                if draw {
+                    let was = d.under.as_ref().map(|u| u.2.as_ptr());
+                    paint(d, false);
+                    used += (was.is_some() && was == d.under.as_ref().map(|u| u.2.as_ptr())) as usize;
+                    let c = d.canvas.as_mut().unwrap();
+                    let shown = c.copy_out(rect(0, 0, c.w, c.h));
+                    let under = d.under.take();
+                    paint(d, false);
+                    let c = d.canvas.as_mut().unwrap();
+                    let fresh = c.copy_out(rect(0, 0, c.w, c.h));
+                    // Put down at another width, the cards were worked out a whole number
+                    // of pixels further along, which can round an edge's pixel a level apart.
+                    let near = |a: u32, b: u32| (0..4).all(|k| ((a >> (8 * k)) & 0xFF).abs_diff((b >> (8 * k)) & 0xFF) <= 1);
+                    let first = shown.iter().zip(&fresh).position(|(&a, &b)| !near(a, b));
+                    let w = c.w;
+                    assert!(first.is_none(), "left {left}: a frame drawn over what was kept differs at {:?} (canvas {w} wide): {:08x?} {:08x?}", first.map(|i| (i as i32 % w, i as i32 / w)), first.map(|i| shown[i]), first.map(|i| fresh[i]));
+                    d.under = under;
+                }
+                if !moving {
+                    return;
+                }
+            }
+        };
+        set_open(&mut d, true, false);
+        frames(&mut d);
+        // The groceries: a label short enough not to scroll.
+        d.hover = Hit::Tab(6);
+        frames(&mut d);
+        begin_preview(&mut d, 6);
+        frames(&mut d);
+        d.hover = Hit::None;
+        end_preview(&mut d);
+        frames(&mut d);
+        // Another card, after the window was wider.
+        d.hover = Hit::Tab(2);
+        frames(&mut d);
+        begin_preview(&mut d, 2);
+        frames(&mut d);
+        set_open(&mut d, false, false);
+        d.hover = Hit::None;
+        end_preview(&mut d);
+        frames(&mut d);
+        assert!(used > 30, "left {left}: {used}");
+        assert!(d.under.is_none());
     }
 }
 

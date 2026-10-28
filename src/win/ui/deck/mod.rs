@@ -265,6 +265,10 @@ struct Deck {
     fonts: HashMap<(u8, i32, i32, u8), Font>,
     font_scale: f32,
     canvas: Option<Canvas>,
+    /// What lay under the first card that moved, at rest, as the frame that drew it left
+    /// the canvas: its key (`draw::still_part`), the canvas's width then, and its pixels.
+    /// Let go as the deck folds.
+    under: Option<(u64, i32, Vec<u32>)>,
     /// The hovered tab whose spine label is too long scrolls.
     marquee: Option<Marquee>,
     /// A label scrolled in the last frame, so the frame clock keeps running.
@@ -298,6 +302,7 @@ thread_local! {
 pub fn trim() {
     with(|d| {
         d.fonts.clear();
+        d.under = None;
         for t in d.tabs.iter_mut() {
             t.sprites = Vec::new();
         }
@@ -397,6 +402,7 @@ pub fn create() {
             fonts: HashMap::new(),
             font_scale: 0.0,
             canvas: None,
+            under: None,
             marquee: None,
             marquee_live: false,
             kbd: None,
