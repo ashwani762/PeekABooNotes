@@ -304,7 +304,7 @@
     <string name="shortcut_code">Codeblock</string>
     <string name="shortcut_table">Tabelle</string>
     <string name="shortcut_leave_text">Notiztext verlassen</string>
-    <string name="shortcut_undo_toast">Letztes Archivieren oder Löschen widerrufen</string>
+    <string name="shortcut_undo_toast">Widerrufen, solange die Meldung zu sehen ist</string>
     <string name="shortcut_deck_keys">Zum Stapel wechseln</string>
     <string name="shortcut_deck_move">Zwischen Karten wechseln</string>
     <string name="shortcut_deck_ends">Erste oder letzte Karte</string>

@@ -319,7 +319,7 @@
     <string name="shortcut_code">Code block</string>
     <string name="shortcut_table">Table</string>
     <string name="shortcut_leave_text">Leave the note's text</string>
-    <string name="shortcut_undo_toast">Undo the last archive or delete</string>
+    <string name="shortcut_undo_toast">Undo an archive or delete while its toast shows</string>
     <string name="shortcut_deck_keys">Go to the deck</string>
     <string name="shortcut_deck_move">Move between cards</string>
     <string name="shortcut_deck_ends">First or last card</string>

@@ -304,7 +304,7 @@
     <string name="shortcut_code">Bloque de código</string>
     <string name="shortcut_table">Tabla</string>
     <string name="shortcut_leave_text">Salir del texto de la nota</string>
-    <string name="shortcut_undo_toast">Deshacer el último archivado o borrado</string>
+    <string name="shortcut_undo_toast">Deshacer mientras se ve el aviso</string>
     <string name="shortcut_deck_keys">Ir al mazo</string>
     <string name="shortcut_deck_move">Moverse entre tarjetas</string>
     <string name="shortcut_deck_ends">Primera o última tarjeta</string>
