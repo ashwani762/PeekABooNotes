@@ -149,12 +149,14 @@ fn selected_pictures(e: HWND, c: &mut Canvas, top: i32, rows: i32, t: &rich::Spa
         c.fade_rect(r, ((hl & 0xFF) << 16) | (hl & 0xFF00) | ((hl >> 16) & 0xFF), 0.8);
         // Its paragraph mark selected too (Shift+Right from a picked picture): RichEdit marks
         // it with a slim block of the selection's colour, as tall as the picture's line, so
-        // a bar ran down the picture's side and on past it through the line's spacing.
-        let eop = cp + 1;
+        // a bar ran down the picture's side and on past it through the line's spacing. An
+        // attachment's link comes between them, its address hidden and its name empty: the
+        // mark is the line's next, right where the picture ends.
+        let Some(eop) = t.t[cp + 1 - t.from..].iter().position(|&c| c == rich::CR).map(|i| cp + 1 + i) else { continue };
         if eop < a.max(b) as usize
-            && eop < t.from + t.t.len()
-            && t.t[eop - t.from] == rich::CR
             && let Some(m) = rich::char_box(e, eop as i32)
+            && m.left <= bx.right + 1
+            && m.top < bx.bottom
         {
             unmark(c, RECT { left: m.left.max(0), top: (m.top - top).max(0), right: m.right.min(c.w), bottom: (m.bottom - top).min(rows) }, paper);
         }
@@ -959,10 +961,15 @@ mod tests {
         let t = rich::text(e);
         let at = t.iter().enumerate().filter(|&(_, &c)| c == rich::CR).nth(1).unwrap().0 as i32 + 1;
         rich::set_sel(e, at, at);
-        rich::insert_rtf(e, &format!("{{\\rtf1 {}}}", rich::test_picture(48, 24, 1440, 720)));
+        // With its attachment's link after it, as a note has it: a hidden address and an
+        // empty name, between the picture and its paragraph mark.
+        let link = "{\\field{\\*\\fldinst{HYPERLINK \"attachment:p.png\"}}{\\fldrslt{\\u8203?}}}";
+        rich::insert_rtf(e, &format!("{{\\rtf1 {}{link}}}", rich::test_picture(48, 24, 1440, 720)));
         rich::apply_base_format(e, 0x1D1D1F, PAPER);
         checks::set_style(e, 0x303030, PAPER, 1.0);
         let obj = rich::text(e).iter().position(|&c| c == 0xFFFC).unwrap() as i32;
+        let eop = rich::para_end(&rich::text(e), obj);
+        assert!(eop > obj + 2, "the link between: {obj} {eop}");
         let draw = |top: i32, rows: i32| {
             let mut c = Canvas::new(w, rows);
             assert!(compose(e, &mut c, top, w, rows, Parts::Text));
@@ -1008,9 +1015,9 @@ mod tests {
         }
         // The picture and its paragraph mark (Shift+Right from a picked picture): no bar of
         // the selection's colour down its side and below it, nothing changed right of it.
-        rich::set_sel(e, obj, obj + 2);
+        rich::set_sel(e, obj, eop + 1);
         let with_mark = draw(0, h);
-        let m = rich::char_box(e, obj + 1).unwrap();
+        let m = rich::char_box(e, eop).unwrap();
         assert!(m.left >= p0.x + pw - 1 && m.right > m.left && m.bottom > p0.y + ph, "the mark's box: {} {} {} {}", m.left, m.top, m.right, m.bottom);
         let changed: Vec<(i32, i32)> = (p0.y - 4..(p0.y + ph + 60).min(h))
             .flat_map(|y| (p0.x + pw..w).map(move |x| (x, y)))

@@ -442,6 +442,13 @@ pub fn caret_point(h: HWND) -> Option<(i32, i32)> {
     Some((x, y))
 }
 
+/// Whether editor `h`'s selection was made backwards (Shift+Left, a drag up): it grows
+/// from its start, and `set_sel(h, b, a)` puts it back so.
+pub(super) fn sel_backwards(h: HWND) -> bool {
+    use windows::Win32::UI::Controls::RichEdit::tomSelStartActive;
+    doc(h).and_then(|d| unsafe { d.GetSelection2().ok()?.GetFlags().ok() }).is_some_and(|f| f & tomSelStartActive.0 != 0)
+}
+
 /// The box character `cp` of editor `h` takes, in its client px: as wide as it's drawn, as
 /// tall as its line (with the space it has under it).
 pub fn char_box(h: HWND, cp: i32) -> Option<RECT> {
