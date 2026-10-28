@@ -130,9 +130,12 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     let la = if l.old_list.is_some() { clamp01(2.0 * l.list_a.value - 1.0) } else { clamp01(l.list_a.value) };
     let slide = if anim::reduced() || l.old_list.is_some() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
     let clip = Some(rect(0, top as i32, lay.list_w as i32, lay.h - top as i32));
-    if l.rows.is_empty() {
-        // After the last row that left has faded (see `frame`).
-        let la = la * clamp01(l.empty_a.value);
+    // After the last row that left has faded (see `frame`). Not drawn at all until then:
+    // its words are faded by mixing them into the list's colour, which over the row still
+    // fading there (its highlight, its words) showed as a headline at full strength.
+    let empty_la = la * clamp01(l.empty_a.value);
+    if l.rows.is_empty() && empty_la > 0.003 {
+        let la = empty_la;
         let (headline, sub) = if !l.query.is_empty() {
             (t!("empty_search_title", l.query), t!("empty_search_body").to_string())
         } else if l.mode == 1 {
@@ -222,8 +225,15 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         if y + lay.row_h <= top || y >= bottom {
             continue;
         }
-        // A row that just came fades in as the rows below make room for it.
-        let la = la * l.arriving.get(&r.id).map_or(1.0, |(_, sp)| clamp01(sp.value));
+        // A row that just came fades in as the rows below make room for it. The selected one
+        // (back on Undo) comes into the highlight as the row that was there goes out of it,
+        // its words as strong as that row is gone: the highlight held neither for 100 ms,
+        // empty between the row that left it and the one fading in after a wait.
+        let came = l.arriving.get(&r.id).map(|(_, sp)| {
+            let cleared = (Some(r.id) == primary).then(|| l.rows.get(i + 1).and_then(|n| l.offs.get(&n.id))).flatten().map_or(0.0, |sp| clamp01(1.0 - sp.value.abs() / lay.row_h));
+            clamp01(sp.value).max(cleared)
+        });
+        let la = la * came.unwrap_or(1.0);
         if Some(i) == lifted {
             // Above everything drawn so far, text included: flush, lift, then draw it.
             c.flush();
@@ -489,6 +499,10 @@ pub(super) fn draw_detail(l: &Lib, lay: &Layout, c: &mut Canvas, p: &Pal, dark: 
     let sw = swatch_rects(lay, s);
     let rule_y = sw[0].top as f32 - 18.0 * s;
     let editing_inline = l.editor_id == r.id && !l.editor.is_null();
+    if let Some((er, px)) = l.editor_first.as_ref().filter(|_| editing_inline) {
+        // The editor, just made, as it will show once it's shown (see `sync_editor`).
+        c.copy_in(*er, px);
+    }
     if !editing_inline {
         // Static preview while the inline editor is being made: its lines where the
         // editor will set them (`editor_pace`), in its ink, so it takes over in place.

@@ -41,7 +41,12 @@ pub(super) fn rebuild(l: &mut Lib) {
     let before: std::collections::HashMap<u64, usize> = l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
     let same_list = l.listed == (mode, l.query.clone()) && l.drag.is_none();
     l.listed = (mode, l.query.clone());
-    let prev: std::collections::HashMap<u64, usize> = if editor_focused(l) { l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect() } else { Default::default() };
+    // While a note is typed in, the rows stay where they are (its row doesn't jump to the
+    // top with each pause); only in the same list, though: Show Archive from the note being
+    // edited sorted the Archive by the Notes list it came from, every row new to it, so it
+    // came up in the order the notes were made rather than the order they were archived.
+    let keep = same_list && editor_focused(l);
+    let prev: std::collections::HashMap<u64, usize> = if keep { l.rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect() } else { Default::default() };
     // The last list's titles and previews, taken again for the notes they're still right
     // for: a search keystroke made every row anew (a preview is most of a row's cost).
     let mut last: std::collections::HashMap<u64, Row> = std::mem::take(&mut l.rows).into_iter().map(|r| (r.id, r)).collect();
@@ -57,13 +62,13 @@ pub(super) fn rebuild(l: &mut Lib) {
             .collect()
     });
     // What's left of the last list is the rows that have gone from it.
-    if searching && !editor_focused(l) {
+    if searching && !keep {
         // Best matches first; among equals, the most recently edited.
         rows.sort_by(|a, b| b.score.cmp(&a.score).then(b.updated.cmp(&a.updated)));
     } else if mode == 0 {
         // Notes: the deck's own order, which you arrange by dragging rows here.
         rows.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
-    } else if editor_focused(l) {
+    } else if keep {
         rows.sort_by_key(|r| prev.get(&r.id).copied().unwrap_or(0));
     } else if mode == 1 {
         // The Archive: the note archived last first (one archived before that was kept,
@@ -391,8 +396,9 @@ pub(super) fn click(l: &mut Lib, hit: Hit) -> Action {
         // The selected notes, in the list's order.
         Hit::Share => Action::Share(l.rows.iter().filter(|r| sel.contains(&r.id)).map(|r| r.id).collect()),
         // Into its text while its editor is still to come (the card cross-fading in), as
-        // a click on the editor would; otherwise the note opens in its own window.
-        Hit::Card if l.editor.is_null() && wanted_editor(l).is_some() => Action::Edit,
+        // a click on the editor would (or while it's made but not yet shown, behind its
+        // picture); otherwise the note opens in its own window.
+        Hit::Card if (l.editor.is_null() || l.editor_first.is_some()) && wanted_editor(l).is_some() => Action::Edit,
         Hit::Card => open_selected(l),
         Hit::OpenHere => in_window(l).map_or(Action::None, Action::OpenHere),
         Hit::Archive => {

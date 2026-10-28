@@ -106,6 +106,7 @@ pub(super) fn focus_to(hwnd: HWND, f: Focus) {
                 SendMessageW(search, EM_SETSEL, 0, -1);
             }
             Focus::Editor => {
+                reveal_editor();
                 SetFocus(editor);
             }
             _ if GetFocus() != hwnd => {
