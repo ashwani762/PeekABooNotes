@@ -313,12 +313,16 @@ pub fn is_quiet(h: HWND) -> bool {
 /// A change `still` made: the editor, its text before and after, and the selection before.
 type Group = (isize, Vec<u16>, Vec<u16>, (i32, i32));
 
+/// A group taken back by `undo_group`: the group, how many of RichEdit's steps it was, and
+/// the selection it was taken back from.
+type Undone = (Group, u32, (i32, i32));
+
 thread_local! {
     static LAST_GROUP: std::cell::RefCell<Option<Group>> = const { std::cell::RefCell::new(None) };
     /// The group `undo_group` took back last, for `redo_group`, how many of RichEdit's
     /// steps that was (a format step doesn't change the text, so the text alone can't tell
     /// redo when to stop), and the selection it was taken back from.
-    static UNDONE_GROUP: std::cell::RefCell<Option<(Group, u32, (i32, i32))>> = const { std::cell::RefCell::new(None) };
+    static UNDONE_GROUP: std::cell::RefCell<Option<Undone>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A change that leaves the text as it was (a picture's new size) came after the last

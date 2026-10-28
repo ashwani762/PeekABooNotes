@@ -313,7 +313,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         save_held: None,
         canvas: None,
     });
-    let h = unsafe {
+    unsafe {
         CreateWindowExW(
             0,
             wide(CLASS).as_ptr(),
@@ -328,8 +328,7 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
             app::hinst(),
             Box::into_raw(st) as _,
         )
-    };
-    h
+    }
 }
 
 /// Inline editor `h` comes into sight (made now, or shown after the card's fade to its
