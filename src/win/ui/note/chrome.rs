@@ -26,8 +26,10 @@ pub(super) fn tip_for(h: HWND, b: Btn) {
         tooltip::leave(h);
         return;
     }
-    let pinned = app::store(|s| s.note(st.id).map(|n| n.pinned)).unwrap_or(false);
+    let (pinned, archived) = app::store(|s| s.note(st.id).map(|n| (n.pinned, n.archived))).unwrap_or_default();
     let (label, k) = match b {
+        // An archived note's button takes it out of the Archive again, as its menu says.
+        Btn::Done if archived => (t!("menu_restore"), String::new()),
         Btn::Done => (t!("action_archive"), keys(&["ctrl", "shift", "A"])),
         Btn::Delete => (t!("menu_delete"), keys(&["ctrl", "shift", "del"])),
         Btn::Pin => (if pinned { t!("tip_unpin") } else { t!("menu_keep_on_top") }, keys(&["ctrl", "shift", "P"])),
@@ -218,8 +220,11 @@ pub(super) fn hide_later(h: HWND, to: HWND) {
     // clicked never covers it, even for the frame or two before this. Not when the
     // foreground went to one of ours (another note opening, the deck, a menu): kept up
     // then, it came up over the deck card flying open, and for a few frames the peek
-    // seemed to blink off; nor while the pointer is on it.
-    if pointer_on(h) || ours(to) {
+    // seemed to blink off; nor while the pointer is on it. All Notes and Settings are
+    // clicked away to as another app's window is: lowered behind one, the note was covered
+    // by it for the frames until the button came up, then came back over it to fly home.
+    let page = !to.is_null() && (to == crate::win::ui::allnotes::hwnd() || to == crate::win::ui::settings::hwnd());
+    if pointer_on(h) || (ours(to) && !page) {
         lower_behind(h, to);
     }
     // A click away: it goes as the button comes up, told so at once (`watch_release`).

@@ -74,6 +74,7 @@ fn probe_open_costs() {
                 bar_seen: None,
                 glide: scrollbar::Glide::new(),
                 save_held: None,
+                sizing: None,
                 canvas: None,
             });
             let h = unsafe {

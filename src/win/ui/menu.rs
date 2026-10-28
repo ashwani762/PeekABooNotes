@@ -829,6 +829,13 @@ fn new_sub(parent: &Menu, row: usize, items: Vec<Item>) -> Menu {
     let hwnd = create(x - margin, y - margin, w + 2 * margin, h + 2 * margin, true);
     let mut fade = Spring::fade(0.0, (1.0, 0.12));
     fade.to(1.0);
+    // A submenu with no icon or tick in it (Previous Versions: its times, or "No earlier
+    // versions") has its labels at the text column's start, not after an empty one.
+    let has_icons = items.iter().any(|it| match it {
+        Item::Action { icon, checked, .. } => !icon.is_empty() || *checked,
+        Item::Submenu { icon, .. } => !icon.is_empty(),
+        _ => false,
+    });
     Menu {
         hwnd,
         items,
@@ -842,7 +849,7 @@ fn new_sub(parent: &Menu, row: usize, items: Vec<Item>) -> Menu {
         hot: Target::None,
         fade,
         canvas: None,
-        has_icons: true,
+        has_icons,
         leftward: flipped,
         parent_row: row,
     }

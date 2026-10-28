@@ -346,10 +346,11 @@ pub(super) fn set_color(id: u64, c: u8) {
             n.color = c % theme::COLORS.len() as u8;
         }
     });
-    save();
+    // The window first, as soon as the choice is made: the file can wait the few ms.
     if let Some(h) = note_hwnd(id) {
         note::retheme(h);
     }
+    save();
     allnotes::recolor(id);
     refresh();
 }
