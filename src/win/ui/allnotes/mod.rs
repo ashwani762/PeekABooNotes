@@ -320,6 +320,9 @@ struct Lib {
     /// taken as it closed, for that.
     old_detail: Option<(RECT, Vec<u32>)>,
     editor_pic: Option<(RECT, crate::win::render::gfx::Image)>,
+    /// The inline editor, just made and still hidden, drawn as it will show (where, and its
+    /// pixels): the card cross-fades from the preview to it, and then the editor is shown.
+    editor_first: Option<(RECT, Vec<u32>)>,
     /// Rows or the card just changed: the next frame steps one refresh, however long the
     /// work that changed them (a delete, an undo) kept the frames waiting.
     fresh: bool,
@@ -375,7 +378,12 @@ fn with<R>(f: impl FnOnce(&mut Lib) -> R) -> Option<R> {
 
 /// The inline editor, when it's showing note `id`.
 pub fn editor_for(id: u64) -> Option<HWND> {
-    with(|l| (l.editor_id == id && !l.editor.is_null()).then_some(l.editor)).flatten()
+    let h = with(|l| (l.editor_id == id && !l.editor.is_null()).then_some(l.editor)).flatten();
+    // What's done to it shows (still behind its picture, it would change unseen).
+    if h.is_some() {
+        reveal_editor();
+    }
+    h
 }
 
 pub fn hwnd() -> HWND {
@@ -579,6 +587,7 @@ fn new_here() {
     });
     app::refresh();
     if let Some(e) = with(|l| l.editor).filter(|e| !e.is_null()) {
+        reveal_editor();
         unsafe { SetFocus(e) };
     }
 }
@@ -598,6 +607,8 @@ pub fn retheme_editor() {
 /// The note's paper changed (its colour, or the theme): restyle the inline editor, if
 /// there is one, and redraw the card. No fonts are made for it.
 fn restyle_editor() {
+    // Its picture is out of date now.
+    reveal_editor();
     if let Some(e) = with(|l| l.editor)
         && !e.is_null() {
             crate::win::ui::note::retheme(e);
@@ -662,6 +673,21 @@ fn swap_detail(l: &mut Lib) {
     l.fresh = true;
 }
 
+/// The card as it shows now (its note's preview) cross-fades to the inline editor's picture
+/// (`editor_first`), the editor itself shown when it's over. False when there's no card on
+/// screen to fade from.
+fn fade_to_editor(l: &mut Lib) -> bool {
+    let lay = layout(l);
+    let Some(c) = l.canvas.as_mut().filter(|_| lay.wide) else { return false };
+    let r = rect(lay.list_w as i32 + 1, 0, c.w - lay.list_w as i32 - 1, c.h);
+    l.old_detail = Some((r, c.copy_out(r)));
+    l.detail_a.snap(0.0);
+    l.detail_a.launch(1.0);
+    l.fresh = true;
+    anim::wake(Client::List);
+    true
+}
+
 /// The selection's colour as it shows now, for the note at row `i`.
 fn sel_color(l: &Lib, i: usize, dark: bool) -> u32 {
     let now = theme::paper(l.rows[i].color, dark);
@@ -718,7 +744,8 @@ pub fn frame(dt: f32) -> bool {
         if l.list_a.value >= 0.999 {
             l.old_list = None;
         }
-        // The card's cross-fade over, its note's editor comes (it waited: see `sync_editor`).
+        // The card's cross-fade over, its note's editor comes (it waited: see `sync_editor`),
+        // or shows (it came in behind its picture).
         let faded = l.old_detail.is_some() && l.detail_a.value >= 0.999;
         if l.detail_a.value >= 0.999 {
             l.old_detail = None;
@@ -742,6 +769,9 @@ pub fn frame(dt: f32) -> bool {
     match r {
         Some((moving, h, faded)) => {
             if faded {
+                // On to its editor's picture, the editor coming behind it; or, that over, the
+                // editor shown.
+                reveal_editor();
                 sync_editor();
             }
             paint_now(h);
@@ -1058,6 +1088,7 @@ fn on_create(hwnd: HWND) {
         sel_last: None,
         old_detail: None,
         editor_pic: None,
+        editor_first: None,
         fresh: false,
         old_list: None,
     };

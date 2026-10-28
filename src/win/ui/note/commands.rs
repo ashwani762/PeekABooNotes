@@ -213,6 +213,7 @@ pub(super) fn paste(h: HWND) {
         if super::attach::add(e, a, &files) > 0 {
             mark_dirty(h);
         }
+        super::scrollbar::keep_caret_in_view(e);
         return;
     }
     let clip = crate::win::util::clipboard_text();
@@ -235,6 +236,10 @@ pub(super) fn paste(h: HWND) {
         }
         rich::link_addresses(e, a.max(0) as usize, end.max(0) as usize);
     }
+    // What came in ends where the caret is: in view, as typing keeps it. A paste is put in
+    // with the view held still (`rich::still`), so lines pasted at the bottom of the note
+    // (All Notes' card most of all, a few lines tall) went on out of sight below it.
+    super::scrollbar::keep_caret_in_view(e);
     mark_dirty(h);
 }
 

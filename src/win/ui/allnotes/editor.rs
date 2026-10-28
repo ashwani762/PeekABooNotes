@@ -101,13 +101,23 @@ pub(super) fn sync_editor() {
     if let Some((hwnd, want, have)) = with(|l| (l.hwnd, wanted_editor(l), (l.editor, l.editor_id))) {
         match want {
             Some((id, r)) if have.1 == id && !have.0.is_null() => unsafe {
+                // Still behind its picture: shown now if the keys go into it, or if it moves
+                // (the picture stays where it was).
+                let (mut was, mut now): (RECT, RECT) = (std::mem::zeroed(), std::mem::zeroed());
+                GetWindowRect(have.0, &mut was);
                 MoveWindow(have.0, r.left, r.top, r.right - r.left, r.bottom - r.top, 1);
+                GetWindowRect(have.0, &mut now);
+                let moved = (was.left, was.top, was.right, was.bottom) != (now.left, now.top, now.right, now.bottom);
+                if FORCE.with(|f| f.get()) || moved {
+                    reveal_editor();
+                }
             },
             _ => {
                 if !have.0.is_null() {
                     with(|l| {
                         l.editor = null_mut();
                         l.editor_id = 0;
+                        l.editor_first = None;
                     });
                     unsafe { DestroyWindow(have.0) }; // flushes its edits first
                 }
@@ -131,12 +141,26 @@ pub(super) fn sync_editor() {
                         unsafe { SetTimer(hwnd, T_SYNC, 320, None) };
                     } else {
                         let h = crate::win::ui::note::create_embedded(id, hwnd, r);
+                        // Unless the keys go into it now, it comes in unseen, behind a picture
+                        // of it that the card cross-fades to from the preview, and shows once
+                        // that's done (`frame`), on the same pixels. Shown at once, it took
+                        // over from the preview with every glyph's edges changing: the
+                        // preview is set by DirectWrite, the editor by RichEdit, a change all
+                        // over the text half a second after the card had settled.
+                        let first = if force { None } else { first_picture(h) };
                         with(|l| {
                             l.editor = h;
                             l.editor_id = id;
                             // A picture of an editor closed before is out of date now.
                             l.editor_pic = None;
+                            l.editor_first = first;
+                            if l.editor_first.is_some() && !fade_to_editor(l) {
+                                l.editor_first = None;
+                            }
                         });
+                        if with(|l| l.editor_first.is_none()).unwrap_or(true) {
+                            unsafe { ShowWindow(h, SW_SHOWNA) };
+                        }
                     }
                 }
             }
@@ -145,8 +169,46 @@ pub(super) fn sync_editor() {
     SYNCING.with(|s| s.set(false));
 }
 
+/// Inline editor `h`, just made, hidden and drawn: its text where it sits in the window and
+/// its pixels, as it will paint them once shown. None when it can't be drawn so (it's then
+/// shown at once).
+fn first_picture(h: HWND) -> Option<(RECT, Vec<u32>)> {
+    use crate::win::editor::view;
+    unsafe {
+        ShowWindow(h, SW_HIDE);
+        let edit = GetWindow(h, GW_CHILD);
+        if edit.is_null() {
+            return None;
+        }
+        let mut r: RECT = std::mem::zeroed();
+        GetWindowRect(edit, &mut r);
+        windows_sys::Win32::Graphics::Gdi::MapWindowPoints(null_mut(), GetParent(h), &mut r as *mut RECT as *mut _, 2);
+        let (w, ht) = (r.right - r.left, r.bottom - r.top);
+        if w <= 0 || ht <= 0 {
+            return None;
+        }
+        let mut c = Canvas::new(w, ht);
+        view::compose(edit, &mut c, 0, w, ht, view::Parts::All).then(|| (r, c.copy_out(rect(0, 0, w, ht))))
+    }
+}
+
+/// Show the inline editor that came in behind its picture (see `sync_editor`), if it's
+/// still hidden: its picture's cross-fade is over, or the keys go into it, or what it shows
+/// changed.
+pub(super) fn reveal_editor() {
+    if let Some(h) = with(|l| l.editor_first.take().map(|_| l.editor)).flatten()
+        && !h.is_null()
+    {
+        unsafe { ShowWindow(h, SW_SHOWNA) };
+    }
+}
+
 /// Inline editor `h` as it is on screen, and where in the window.
 pub(super) fn editor_picture(h: HWND) -> Option<(RECT, crate::win::render::gfx::Image)> {
+    // Hidden behind its picture, which the window's canvas holds already.
+    if unsafe { IsWindowVisible(h) } == 0 {
+        return None;
+    }
     crate::win::render::gfx::capture_now(h).map(|img| {
         let mut r: RECT = unsafe { std::mem::zeroed() };
         unsafe {
@@ -163,6 +225,7 @@ pub(super) fn close_editor() {
         let h = l.editor;
         l.editor = null_mut();
         l.editor_id = 0;
+        l.editor_first = None;
         h
     })
         && !h.is_null() {
