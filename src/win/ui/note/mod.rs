@@ -375,6 +375,12 @@ fn reveal_as(h: HWND, activate: bool) {
             // black wherever it hasn't painted yet (the footer, if only the text had).
             RedrawWindow(h, std::ptr::null(), null_mut(), RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
             GdiFlush();
+            // The card it opened into puts up its last frame, without its shadow, just before
+            // the window shows with its own (Windows'): in the same frame, nothing between.
+            // Put up before this paint, the card's shadow went a frame before Windows' came.
+            // (The window has the foreground already, since it was made: its shadow is an
+            // active window's from the start, as the card's is.)
+            crate::win::ui::ghost::landed(h);
             if cloaked {
                 cloak(0);
             }
@@ -554,28 +560,37 @@ fn fly_home(h: HWND) {
         return;
     }
     let Some((r, color, content)) = snapshot(h) else { return };
+    let active = frame_active(h);
     if content.title == t!("note_untitled") && content.body.is_empty() {
         // Nothing to take home: it fades where it is, as an archived note does, rather
         // than vanishing in a frame.
-        sink(r, color, content, st.s);
+        sink(r, color, content, st.s, active);
         return;
     }
     let home = crate::win::ui::deck::home_rect(id);
-    crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Close, (r, 8.0 * st.s), home, color, content, None);
+    crate::win::ui::ghost::fly_from(crate::win::ui::ghost::Kind::Close, (r, 8.0 * st.s), home, color, content, active);
+}
+
+/// Whether Windows draws window `h` as the active one, and so gives it the bigger shadow
+/// an active window has: the card that takes its place sets off with the same one.
+fn frame_active(h: HWND) -> bool {
+    let mut wi: WINDOWINFO = unsafe { std::mem::zeroed() };
+    wi.cbSize = size_of::<WINDOWINFO>() as u32;
+    unsafe { GetWindowInfo(h, &mut wi) != 0 && wi.dwWindowStatus & WS_ACTIVECAPTION != 0 }
 }
 
 /// Sink and dissolve in place (archive / delete).
 pub fn dissolve(h: HWND) {
     let Some(st) = state(h) else { return };
     let Some((r, color, content)) = snapshot(h) else { return };
-    sink(r, color, content, st.s);
+    sink(r, color, content, st.s, frame_active(h));
 }
 
-/// A card that sinks and fades where a window at `r` (at scale `s`) was.
-fn sink(r: RECT, color: u8, content: crate::win::ui::ghost::Content, s: f32) {
+/// A card that sinks and fades where a window at `r` (at scale `s`, `active` or not) was.
+fn sink(r: RECT, color: u8, content: crate::win::ui::ghost::Content, s: f32, active: bool) {
     let (w, hh) = (r.right - r.left, r.bottom - r.top);
     let to = RECT { left: r.left + w / 20, top: r.top + hh / 12, right: r.right - w / 20, bottom: r.bottom - hh / 40 };
-    crate::win::ui::ghost::fly(crate::win::ui::ghost::Kind::Dissolve, (r, 8.0 * s), (to, 8.0 * s), color, content, None);
+    crate::win::ui::ghost::fly_from(crate::win::ui::ghost::Kind::Dissolve, (r, 8.0 * s), (to, 8.0 * s), color, content, active);
 }
 
 thread_local! {
