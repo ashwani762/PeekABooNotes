@@ -13,6 +13,9 @@ pub(super) fn set_mode(l: &mut Lib, mode: usize) {
         }
         l.mode = mode;
         l.seg_x.to(mode as f32);
+        // On its way in the frame drawn now: the work of the switch (the new rows, the
+        // note's editor going) held the pill on the old tab a frame or two, its label bold.
+        l.seg_x.step(anim::period());
         // The list as it shows now cross-fades into the new one, which settles into place.
         let lay = layout(l);
         l.old_list = l.canvas.as_mut().map(|c| {
@@ -62,6 +65,10 @@ pub(super) fn rebuild(l: &mut Lib) {
         rows.sort_by(|a, b| a.order.cmp(&b.order).then(b.created.cmp(&a.created)));
     } else if editor_focused(l) {
         rows.sort_by_key(|r| prev.get(&r.id).copied().unwrap_or(0));
+    } else if mode == 1 {
+        // The Archive: the note archived last first (one archived before that was kept,
+        // by its last edit).
+        rows.sort_by_key(|r| std::cmp::Reverse((r.archived_at.unwrap_or(r.updated), r.updated)));
     } else {
         rows.sort_by_key(|r| std::cmp::Reverse(r.updated));
     }
@@ -86,6 +93,9 @@ pub(super) fn rebuild(l: &mut Lib) {
             l.anchor = Some(r.id);
             // The selection stays where it was (the row below closes up into it) and turns
             // its colour; the card cross-fades.
+            swap_detail(l);
+        } else if was_id.is_some() {
+            // The last row left: its card fades out, rather than going in a frame.
             swap_detail(l);
         }
     }
@@ -124,6 +134,11 @@ fn close_gaps(l: &mut Lib, before: &std::collections::HashMap<u64, usize>, gone:
         l.offs.remove(&id);
         l.leaving.push(Leaving { row, at, fade: FadeOut::new(1.0, LEAVE_S), selected: was == Some(id) });
         l.hold = LEAVE_S;
+    }
+    // The last row left: what the empty list says waits for it to fade, then fades in
+    // (it showed whole at once, over the row still fading).
+    if l.rows.is_empty() && !l.leaving.is_empty() {
+        l.empty_a.snap(0.0);
     }
     l.fresh = true;
     anim::wake(Client::List);
@@ -184,6 +199,7 @@ pub(super) fn row_again(n: &Note, q: &crate::common::search::Query, searching: b
         updated: n.updated,
         color: n.color,
         archived: n.archived,
+        archived_at: n.archived_at,
         score: m.0,
         hits: m.1,
         snippet: m.2,
@@ -374,6 +390,9 @@ pub(super) fn click(l: &mut Lib, hit: Hit) -> Action {
         Hit::Settings => Action::Settings,
         // The selected notes, in the list's order.
         Hit::Share => Action::Share(l.rows.iter().filter(|r| sel.contains(&r.id)).map(|r| r.id).collect()),
+        // Into its text while its editor is still to come (the card cross-fading in), as
+        // a click on the editor would; otherwise the note opens in its own window.
+        Hit::Card if l.editor.is_null() && wanted_editor(l).is_some() => Action::Edit,
         Hit::Card => open_selected(l),
         Hit::OpenHere => in_window(l).map_or(Action::None, Action::OpenHere),
         Hit::Archive => {

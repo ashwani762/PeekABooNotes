@@ -26,6 +26,7 @@ pub(super) fn render(dc: HDC) {
         c.make_opaque();
         c.blit(dc, 0, 0);
         l.canvas = Some(c);
+        l.card_was = card_now(l);
     });
 }
 
@@ -79,13 +80,17 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // Search field (with focus ring) — the EDIT control sits on top of it.
     let sf = lay.search;
     c.shape(&sf, p.field.0, p.field.1, 1.0, 0.0);
-    if l.focus_search {
+    // Whether it has the keys, from the system: a flag its focus notifications kept missed
+    // those that came while the window was busy (a click on a row moving the keys), and
+    // the ring stayed on a field that had lost them.
+    let focus_search = unsafe { GetFocus() } == l.search;
+    if focus_search {
         let ring = Shape::new(sf.x - 3.0 * s, sf.y - 3.0 * s, sf.w + 6.0 * s, sf.h + 6.0 * s, sf.r + 3.0 * s);
         c.shape(&ring, p.focus, 0.6, 1.0, 3.0 * s);
     }
     let field_rgb = mix(p.list, p.field.0, p.field.1);
     icon(c, "\u{E721}", &f.chrome, rect((sf.x + 10.0 * s) as i32, sf.y as i32, px(20.0), sf.h as i32), mix(field_rgb, p.sub, 0.9));
-    if !l.focus_search && l.query.is_empty() {
+    if !focus_search && l.query.is_empty() {
         let base = (sf.y + sf.h / 2.0) as i32 + f.count.cap / 2;
         c.line_ct(&crate::common::i18n::keys(&["ctrl", "F"]), &f.count, (sf.x + sf.w) as i32 - px(80.0), base, px(68.0), None, p.ter, DT_RIGHT);
     }
@@ -99,12 +104,16 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     let seg_base = (sg.y + sg.h / 2.0) as i32 + f.seg.cap / 2;
     for (i, name) in segments().iter().enumerate() {
         let x = (sg.x + i as f32 * seg_w) as i32;
-        let on = i == l.mode;
-        if !on && l.hover == Hit::Segment(i) {
+        if i != l.mode && l.hover == Hit::Segment(i) {
             let sh = Shape::new(x as f32 + 3.0 * s, sg.y + 3.0 * s, seg_w - 6.0 * s, sg.h - 6.0 * s, sg.r - 3.0 * s);
             c.shape(&sh, p.hover.0, p.hover.1, 1.0, 0.0);
         }
-        c.line_ct(name, if on { &f.seg_on } else { &f.seg }, x, seg_base, seg_w as i32, None, if on { p.text } else { p.sub }, DT_CENTER);
+        // A label takes the pill's look as the pill comes over it, and loses it as it
+        // leaves: its ink with the pill's nearness, bold while it's mostly under it (it went
+        // bold at once, the pill still on the tab before).
+        let near = (l.seg_x.value - i as f32).abs();
+        let on = near < 0.5;
+        c.line_ct(name, if on { &f.seg_on } else { &f.seg }, x, seg_base, seg_w as i32, None, mix(p.sub, p.text, clamp01(1.0 - near)), DT_CENTER);
     }
     if ring == Some(Focus::Segments) {
         focus::ring(c, &sg, p.focus, 1.0, s);
@@ -115,12 +124,15 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
     // (gliding, closing a gap) the text, put down on whole pixels, keeps to its row.
     let top = lay.list_top;
     let bottom = lay.h as f32;
-    // Switching lists, the new one is drawn whole and cross-fades with the one before
-    // (below); opening, it fades in from the window's colour.
-    let la = if l.old_list.is_some() { 1.0 } else { clamp01(l.list_a.value) };
+    // Switching lists, the one before fades out (below) and then the new one fades in,
+    // rather than the two cross-fading, every row's words doubled over another's for a
+    // few frames; opening, it fades in from the window's colour.
+    let la = if l.old_list.is_some() { clamp01(2.0 * l.list_a.value - 1.0) } else { clamp01(l.list_a.value) };
     let slide = if anim::reduced() || l.old_list.is_some() { 0.0 } else { ((1.0 - l.list_a.value) * 10.0 * s).round() };
     let clip = Some(rect(0, top as i32, lay.list_w as i32, lay.h - top as i32));
     if l.rows.is_empty() {
+        // After the last row that left has faded (see `frame`).
+        let la = la * clamp01(l.empty_a.value);
         let (headline, sub) = if !l.query.is_empty() {
             (t!("empty_search_title", l.query), t!("empty_search_body").to_string())
         } else if l.mode == 1 {
@@ -191,18 +203,15 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         if y + lay.row_h <= top || y >= bottom || k <= 0.003 {
             continue;
         }
-        let tx = (row_x + 30.0 * s) as i32;
-        let right = (row_x + row_w - 14.0 * s) as i32;
-        let tb = (y + ROW_TITLE_BASE * s) as i32;
-        let mb = (y + ROW_META_BASE * s) as i32;
-        let d = 8.0 * s;
-        let dcy = tb as f32 - f.row_title.cap as f32 / 2.0;
-        if dcy - d / 2.0 > top {
-            c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(g.row.color).accent, k, 1.0, 0.0);
+        // The last row, selected, has no selection left to fade over: its highlight fades
+        // with it (it went in a frame, the row's dark words left on the list).
+        let paper = theme::paper(g.row.color, dark);
+        if g.selected && primary.is_none() {
+            c.shape(&row_shape(y), paper, k, 1.0, 0.0);
         }
-        let (ink, sub) = if g.selected { (theme::PAPER_TEXT, theme::paper_subtext(g.row.color, dark)) } else { (p.text, p.sub) };
-        c.line(&g.row.title, &f.row_title, tx, tb, right - tx, clip, ink, k, DT_LEFT);
-        c.line(&t!("note_edited", g.row.time), &f.row_time, tx, mb, right - tx, clip, sub, k, DT_LEFT);
+        let (ink, bg) = if g.selected { ((theme::PAPER_TEXT, theme::paper_subtext(g.row.color, dark)), paper) } else { ((p.text, p.sub), p.list) };
+        // All of it as it was drawn, the second line whole (its preview went a frame early).
+        row_words(c, l, lay, &g.row, y, clip, ink, bg, g.selected, k, dark);
     }
     let sel_idx: Vec<usize> = range.clone().filter(|i| l.sel.contains(&l.rows[*i].id)).collect();
     let lifted = l.drag.as_ref().filter(|dr| dr.active).map(|dr| dr.from);
@@ -234,61 +243,10 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         };
         let paper = if Some(r.id) == primary { primary_index(l).map_or(theme::paper(r.color, dark), |pi| sel_color(l, pi, dark)) } else { theme::paper(r.color, dark) };
         let bg = mix(p.list, paper, under);
-        // Faded as it comes in by its own opacity, not toward a colour it may not be on.
-        let fade = |rgb: u32| rgb;
         let (tc, mc) = (mix(p.text, theme::PAPER_TEXT, under), mix(p.sub, theme::paper_subtext(r.color, dark), under));
+        row_words(c, l, lay, r, y, clip, (tc, mc), bg, selected, la, dark);
         let tx = (row_x + 30.0 * s) as i32;
         let right = (row_x + row_w - 14.0 * s) as i32;
-        let tb = (y + ROW_TITLE_BASE * s) as i32;
-        let mb = (y + ROW_META_BASE * s) as i32;
-        // Colour dot, centred on the title's cap height.
-        let d = 8.0 * s;
-        let dcy = tb as f32 - f.row_title.cap as f32 / 2.0;
-        if dcy - d / 2.0 > top {
-            c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(r.color).accent, la, 1.0, 0.0);
-        }
-        // Search matches, marked like a highlighter pen: in the title, and in the line
-        // from the body when that's where they are.
-        let mark = if selected { (theme::PAPER_TEXT, 0.14) } else if dark { (0xFFD60A, 0.32) } else { (0xFFCC00, 0.42) };
-        let marks = |c: &mut Canvas, text: &str, hits: &[(usize, usize)], font: &Font, base: i32| {
-            let byte = |ci: usize| text.char_indices().nth(ci).map_or(text.len(), |(b, _)| b);
-            let (asc, desc) = (font.ascent as f32, font.descent as f32);
-            for &(a, b) in hits {
-                let x0 = tx + font.measure(&text[..byte(a)]).0;
-                let x1 = (x0 + font.measure(&text[byte(a)..byte(b)]).0).min(right);
-                if x0 < x1 {
-                    let pad = 1.5 * s;
-                    let hl = Shape::new(x0 as f32 - pad, base as f32 - asc + 1.0 * s, (x1 - x0) as f32 + 2.0 * pad, asc + desc - 1.0 * s, 4.0 * s);
-                    c.shape(&hl, mark.0, mark.1 * la, 1.0, 0.0);
-                }
-            }
-        };
-        marks(c, &r.title, &r.hits, &f.row_title, tb);
-        c.line(&r.title, &f.row_title, tx, tb, right - tx, clip, fade(tc), la, DT_LEFT);
-        // Second line: where the search matched, when the title doesn't show it;
-        // otherwise when it was edited (and where it lives, when that isn't the deck).
-        // "Edited Yesterday", then the start of the note in a lighter shade.
-        let (meta, preview) = if let Some(snip) = r.snippet.as_ref().filter(|_| !l.query.trim().is_empty()) {
-            marks(c, snip, &r.snippet_hits, &f.row_time, mb);
-            (snip.clone(), None)
-        } else {
-            let edited = t!("note_edited", r.time);
-            let meta = if r.archived && l.mode == 2 {
-                t!("row_archived", edited)
-            } else if r.off_deck && !r.archived {
-                t!("row_off_deck", edited)
-            } else {
-                edited
-            };
-            (meta, r.body.lines().map(crate::common::store::summary_line).find(|l| !l.is_empty()))
-        };
-        let mw = c.line(&meta, &f.row_time, tx, mb, right - tx, clip, fade(mc), la, DT_LEFT);
-        if let Some(pv) = preview {
-            let px0 = tx + mw;
-            if right - px0 > (24.0 * s) as i32 {
-                c.line(&format!(" · {pv}"), &f.row_time, px0, mb, right - px0, clip, fade(mix(bg, mc, 0.7)), la, DT_LEFT);
-            }
-        }
         // Inset hairline separator, hidden next to highlighted rows.
         let next_selected = sel_idx.contains(&(i + 1));
         if !selected && !next_selected && i + 1 < l.rows.len() && lifted.is_none() {
@@ -298,9 +256,11 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             }
         }
     }
-    if let Some((r, px)) = l.old_list.as_ref() {
+    // The list before, fading out over the first half of the switch, onto the new list
+    // not yet showing (`la`).
+    if let Some((r, px)) = l.old_list.as_ref().filter(|_| l.list_a.value < 0.5) {
         c.flush();
-        c.mix_in(*r, px, clamp01(l.list_a.value));
+        c.mix_in(*r, px, clamp01(2.0 * l.list_a.value));
         c.begin_batch();
     }
     // Overlay scrollbar, shown while scrolling.
@@ -342,6 +302,71 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
         icon(c, glyph, &f.chrome, r, ink);
     }
     c.flush();
+}
+
+/// A row's dot and words at `y`, at opacity `la`: its title and second line (where a search
+/// matched, when the title doesn't show it; otherwise when it was edited, then how it
+/// starts), with a search's marks, in `ink` (title, second line) on `bg`.
+#[allow(clippy::too_many_arguments)]
+fn row_words(c: &mut Canvas, l: &Lib, lay: &Layout, r: &Row, y: f32, clip: Option<RECT>, ink: (u32, u32), bg: u32, selected: bool, la: f32, dark: bool) {
+    let s = l.s;
+    let f = &l.fonts;
+    let top = lay.list_top;
+    let (tc, mc) = ink;
+    let row_x = 10.0 * s;
+    let row_w = lay.list_w - 20.0 * s;
+    let tx = (row_x + 30.0 * s) as i32;
+    let right = (row_x + row_w - 14.0 * s) as i32;
+    let tb = (y + ROW_TITLE_BASE * s) as i32;
+    let mb = (y + ROW_META_BASE * s) as i32;
+    // Colour dot, centred on the title's cap height.
+    let d = 8.0 * s;
+    let dcy = tb as f32 - f.row_title.cap as f32 / 2.0;
+    if dcy - d / 2.0 > top {
+        c.shape(&Shape::new(row_x + 13.0 * s, dcy - d / 2.0, d, d, d / 2.0), theme::color(r.color).accent, la, 1.0, 0.0);
+    }
+    // Search matches, marked like a highlighter pen: in the title, and in the line
+    // from the body when that's where they are.
+    let mark = if selected { (theme::PAPER_TEXT, 0.14) } else if dark { (0xFFD60A, 0.32) } else { (0xFFCC00, 0.42) };
+    let marks = |c: &mut Canvas, text: &str, hits: &[(usize, usize)], font: &Font, base: i32| {
+        let byte = |ci: usize| text.char_indices().nth(ci).map_or(text.len(), |(b, _)| b);
+        let (asc, desc) = (font.ascent as f32, font.descent as f32);
+        for &(a, b) in hits {
+            let x0 = tx + font.measure(&text[..byte(a)]).0;
+            let x1 = (x0 + font.measure(&text[byte(a)..byte(b)]).0).min(right);
+            if x0 < x1 {
+                let pad = 1.5 * s;
+                let hl = Shape::new(x0 as f32 - pad, base as f32 - asc + 1.0 * s, (x1 - x0) as f32 + 2.0 * pad, asc + desc - 1.0 * s, 4.0 * s);
+                c.shape(&hl, mark.0, mark.1 * la, 1.0, 0.0);
+            }
+        }
+    };
+    marks(c, &r.title, &r.hits, &f.row_title, tb);
+    c.line(&r.title, &f.row_title, tx, tb, right - tx, clip, tc, la, DT_LEFT);
+    // Second line: where the search matched, when the title doesn't show it;
+    // otherwise when it was edited (and where it lives, when that isn't the deck).
+    // "Edited Yesterday", then the start of the note in a lighter shade.
+    let (meta, preview) = if let Some(snip) = r.snippet.as_ref().filter(|_| !l.query.trim().is_empty()) {
+        marks(c, snip, &r.snippet_hits, &f.row_time, mb);
+        (snip.clone(), None)
+    } else {
+        let edited = t!("note_edited", r.time);
+        let meta = if r.archived && l.mode == 2 {
+            t!("row_archived", edited)
+        } else if r.off_deck && !r.archived {
+            t!("row_off_deck", edited)
+        } else {
+            edited
+        };
+        (meta, r.body.lines().map(crate::common::store::summary_line).find(|l| !l.is_empty()))
+    };
+    let mw = c.line(&meta, &f.row_time, tx, mb, right - tx, clip, mc, la, DT_LEFT);
+    if let Some(pv) = preview {
+        let px0 = tx + mw;
+        if right - px0 > (24.0 * s) as i32 {
+            c.line(&format!(" · {pv}"), &f.row_time, px0, mb, right - px0, clip, mix(bg, mc, 0.7), la, DT_LEFT);
+        }
+    }
 }
 
 /// Clip a row highlight so it never draws over the header above the list.
