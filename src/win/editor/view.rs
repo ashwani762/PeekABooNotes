@@ -568,6 +568,19 @@ fn frame(e: HWND, c: &mut Canvas, w: i32, h: i32) -> bool {
     true
 }
 
+/// Editor `e`'s caret onto `c` (its text `compose`d, `w` x `h`) if the screen shows it now,
+/// leaving its blink be: for a picture of the window, a closing note's card, which lost it
+/// in its first frame.
+pub fn caret_onto(e: HWND, c: &mut Canvas, w: i32, h: i32) {
+    let shown = CARET.with(|k| {
+        let k = k.borrow();
+        k.e == e as isize && k.on
+    });
+    if let Some(r) = caret_rect(e, w, h).filter(|_| shown) {
+        c.fill_raw(r.left, r.top, r.right, r.bottom, CARET_ARGB);
+    }
+}
+
 /// Editor `e`'s caret onto its frame `c`, if it has the focus: shown, or (in the hidden
 /// half of a blink) not, and the pixels under it kept for the blink. One that moved shows
 /// at once, and blinks from then.

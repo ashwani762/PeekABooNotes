@@ -148,6 +148,22 @@ thread_local! {
     static GHOSTS: RefCell<Vec<Ghost>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The room around a card at scale `s` for its shadow, which is a window's (Windows' own,
+/// reaching about 70 px below it) where the card is the window (`shadow_of`).
+fn pad_of(s: f32) -> i32 {
+    (72.0 * s) as i32
+}
+
+/// A card's shadow, `at_window` (0 to 1) of the way to being the window's: its size (a
+/// factor on its scale) and strength. Opening, the card lands with the shadow Windows gives
+/// the window revealed under it, and closing it sets off with it: a card's own, much
+/// smaller (about 18 px below it, 9 at its sides, where Windows' reaches 70 and 40), the
+/// shadow shrank or grew by tens of px in the one frame the two handed over in.
+fn shadow_of(at_window: f32) -> (f32, f32) {
+    let w = ease(at_window, 0.5, 1.0);
+    (1.0 + 2.8 * w, 1.6 - 0.15 * w)
+}
+
 fn union(a: &RECT, b: &RECT, pad: i32) -> RECT {
     RECT { left: a.left.min(b.left) - pad, top: a.top.min(b.top) - pad, right: a.right.max(b.right) + pad, bottom: a.bottom.max(b.bottom) + pad }
 }
@@ -190,7 +206,7 @@ fn set_off(kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: C
     // window is on (it may not be the deck's): where it opens, or where it closes from.
     let window = if kind == Kind::Open { &to.0 } else { &from.0 };
     let (_, s) = crate::win::ui::screen::of_rect(window);
-    let pad = (48.0 * s) as i32;
+    let pad = pad_of(s);
     let (ww, wh) = window_size(&from.0, &to.0, pad);
     app::register_class(CLASS, Some(wndproc), IDC_ARROW);
     let hwnd = unsafe {
@@ -286,7 +302,7 @@ fn received(g: &mut Ghost, picture: Option<crate::win::render::gfx::Image>) {
 
 /// The card flying from `from` to `to` at scale `s`, drawn in `hwnd`.
 fn card(hwnd: HWND, kind: Kind, from: (RECT, f32), to: (RECT, f32), color: u8, content: Content, s: f32) -> Ghost {
-    let pad = (48.0 * s) as i32;
+    let pad = pad_of(s);
     let b = union(&from.0, &to.0, pad);
     let (ww, wh) = window_size(&from.0, &to.0, pad);
     let centre = |r: &RECT| ((r.left + r.right) as f32 / 2.0, (r.top + r.bottom) as f32 / 2.0);
@@ -407,11 +423,14 @@ fn look(g: &Ghost) -> Look {
         // Fading in where the window comes up: the window's picture, as one.
         (Kind::Open, _) if g.appear => card,
         // From the deck card into the window: the window's picture comes in over the deck
-        // card's, which stays whole under it until it's covered, over a stretch of the
-        // flight, never a frame or two. The words are as strong as the two together all the
-        // way; the deck card's fading out before the window's came in, for some frames
-        // neither showed strongly, the card's content washed out.
-        (Kind::Open, true) if g.button.is_none() => card * ease(p, 0.3, 0.65),
+        // card's, which stays whole under it until it's covered. The words are as strong as
+        // the two together all the way; the deck card's fading out before the window's came
+        // in, for some frames neither showed strongly, the card's content washed out. Quickly,
+        // in a frame or two of its fastest stretch: the two are laid out differently (the
+        // deck card's title beside its label, the window's under its header), and over a
+        // longer stretch (from 30% to 65% of the way) both showed half through each other,
+        // the title and the list doubled, for four frames.
+        (Kind::Open, true) if g.button.is_none() => card * ease(p, 0.38, 0.54),
         (Kind::Open, true) => card * ease(p, 0.35, 0.9),
         (Kind::Open, false) => card * ease(p, 0.25, 0.85),
         // Archived or deleted, the note fades as one, words and all: never an empty card.
@@ -468,6 +487,9 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32, f32) {
     let on_card = |v: f32| if alpha > 0.002 { (v / alpha).min(1.0) } else { 0.0 };
     let (from_a, content) = (on_card(from), on_card(content));
     let gone = button_gone(g);
+    // Its shadow: on the way a card's; where it's the window, Windows' (`shadow_of`).
+    let p = progress(g);
+    let (grow, shadow) = shadow_of(if g.kind == Kind::Open { p } else { 1.0 - p });
     let c = &mut g.canvas;
     c.clear(0);
     // The window sits on whole pixels where the card is; the card keeps its fraction of one
@@ -478,8 +500,8 @@ fn paint(g: &mut Ghost, dark: bool) -> (i32, i32, f32) {
     let sh = Shape::new(pad + g.x.value - wx, pad + g.y.value - wy, g.w.value.clamp(1.0, cw), g.h.value.clamp(1.0, ch), g.r.value.max(0.0));
     // Opening, its shadow goes as the window it reveals comes up with its own (Windows'),
     // rather than the two lying one over the other, darker, for the frames it stays whole.
-    let shadow = if g.kind == Kind::Open && g.arrived { 0.0 } else { 1.6 };
-    c.card(&sh, theme::paper(g.color, dark), 1.0, 0x000000, 0.06, shadow, s);
+    let shadow = if g.kind == Kind::Open && g.arrived { 0.0 } else { shadow };
+    c.card(&sh, theme::paper(g.color, dark), 1.0, 0x000000, 0.06, shadow, s * grow);
     c.begin_batch();
     // The deck card it opens from, then the window's picture, both anchored at the card's
     // top-left, as the window lays itself out.
@@ -938,6 +960,31 @@ mod tests {
         }
     }
 
+    /// Where a card is the window (landing, or setting off home), its shadow is Windows'
+    /// own for the window, as measured on screen (a note on mid grey, 112): as dark at its
+    /// edge and reaching as far, within a few levels and px; on the way it's a card's.
+    #[test]
+    fn a_card_has_the_windows_shadow_where_it_is_the_window() {
+        let profile = |at: f32| {
+            let mut c = Canvas::new(500, 500);
+            c.clear(0xFF70_7070);
+            let (grow, shadow) = shadow_of(at);
+            c.card(&Shape::new(100.0, 100.0, 300.0, 300.0, 0.0), 0xC0D0A0, 1.0, 0, 0.06, shadow, grow);
+            let px = c.copy_out(RECT { left: 0, top: 0, right: 500, bottom: 500 });
+            let grey = |x: i32, y: i32| ((px[(y * 500 + x) as usize] >> 16) & 0xFF) as i32;
+            let below: Vec<i32> = (400..490).map(|y| grey(250, y)).collect();
+            let side: Vec<i32> = (10..100).rev().map(|x| grey(x, 250)).collect();
+            (below, side)
+        };
+        let reach = |v: &[i32]| v.iter().position(|&g| g >= 112).unwrap_or(v.len());
+        let (below, side) = profile(1.0);
+        // Windows': 79 at its edge below, 106 at 48 px, gone by about 70; 91 beside, gone by 38.
+        assert!((below[0] - 79).abs() <= 4 && (below[48] - 106).abs() <= 3 && (55..=72).contains(&reach(&below)), "{below:?}");
+        assert!((side[0] - 91).abs() <= 4 && (30..=42).contains(&reach(&side)), "{side:?}");
+        let (below, side) = profile(0.0);
+        assert!(reach(&below) <= 20 && reach(&side) <= 12, "a card's own: {below:?} {side:?}");
+    }
+
     #[test]
     fn opening_from_a_deck_card_the_window_comes_in_over_it_never_washing_out() {
         for hz in [60.0, 99.0] {
@@ -952,8 +999,9 @@ mod tests {
                     mixing += 1;
                 }
             }
-            // Over a stretch of the flight, not a frame or two.
-            assert!(mixing >= 4, "{hz} Hz: {mixing} frames");
+            // Quickly, but not a cut: for 30 ms or so, not four frames at 60 Hz of both laid
+            // half through each other.
+            assert!(mixing >= 1 && mixing as f64 / hz < 0.035, "{hz} Hz: {mixing} frames");
         }
     }
 
