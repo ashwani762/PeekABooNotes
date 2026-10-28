@@ -663,6 +663,10 @@ fn stop_recording() {
     let was = with(|w| {
         let was = w.edit.rec.take();
         if was.is_some() {
+            // Why keys pressed while it waited wouldn't do goes with the wait.
+            if w.edit.say.as_ref().is_some_and(|(j, _)| Some(*j) == was) {
+                w.edit.say = None;
+            }
             // The modifiers still held are let go of here, not in the window menu.
             w.eat_keys = held_mods() != 0;
             rebuild(w);

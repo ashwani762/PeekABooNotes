@@ -134,8 +134,6 @@ struct NoteWin {
     glide: scrollbar::Glide,
     /// Since when a save has waited for the note's own animations to settle (`T_SAVE`).
     save_held: Option<std::time::Instant>,
-    /// A drag on its edge or corner: the window's rect and the pointer where it began.
-    sizing: Option<(RECT, POINT)>,
     /// The chrome's canvas, kept across paints (made again when the window's size changes).
     canvas: Option<Canvas>,
 }
@@ -227,7 +225,6 @@ pub fn create(id: u64, r: RECT, show: Show) -> HWND {
         bar_seen: None,
         glide: scrollbar::Glide::new(),
         save_held: None,
-        sizing: None,
         canvas: None,
     });
     // Windows are created layered at alpha 0, so they can take focus now (while we still
@@ -314,7 +311,6 @@ pub fn create_embedded(id: u64, parent: HWND, r: RECT) -> HWND {
         bar_seen: None,
         glide: scrollbar::Glide::new(),
         save_held: None,
-        sizing: None,
         canvas: None,
     });
     let h = unsafe {
@@ -813,25 +809,6 @@ fn save_rect(h: HWND) {
     app::save();
 }
 
-/// Window rect `r` with the edges of Windows' sizing `edge` (`WMSZ_*`) moved by the
-/// pointer's `dx`, `dy`, no smaller than `min` (the opposite edges stay where they are).
-fn sized(r: RECT, dx: i32, dy: i32, edge: u32, min: (i32, i32)) -> RECT {
-    let mut n = r;
-    if matches!(edge, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT) {
-        n.left = (r.left + dx).min(r.right - min.0);
-    }
-    if matches!(edge, WMSZ_RIGHT | WMSZ_TOPRIGHT | WMSZ_BOTTOMRIGHT) {
-        n.right = (r.right + dx).max(r.left + min.0);
-    }
-    if matches!(edge, WMSZ_TOP | WMSZ_TOPLEFT | WMSZ_TOPRIGHT) {
-        n.top = (r.top + dy).min(r.bottom - min.1);
-    }
-    if matches!(edge, WMSZ_BOTTOM | WMSZ_BOTTOMLEFT | WMSZ_BOTTOMRIGHT) {
-        n.bottom = (r.bottom + dy).max(r.top + min.1);
-    }
-    n
-}
-
 /// Close without saving (the note is being deleted or archived by the caller).
 pub fn discard(h: HWND) {
     if let Some(st) = state(h) {
@@ -1320,36 +1297,7 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 return 0;
             }
-            // A drag on an edge or corner sizes the window to its rect at the press plus how
-            // far the pointer has gone since, whatever Windows' own sizing made of it: small
-            // fast moves (4 px every 16 ms) grew it by more at each step than the pointer
-            // had moved in all, the corner running off the screen.
-            WM_ENTERSIZEMOVE => {
-                if let Some(st) = state(h) {
-                    st.sizing = None;
-                    if key_down(VK_LBUTTON) {
-                        let mut r: RECT = std::mem::zeroed();
-                        GetWindowRect(h, &mut r);
-                        // Where the press was: the message that began the drag.
-                        let at = GetMessagePos();
-                        st.sizing = Some((r, POINT { x: (at & 0xFFFF) as i16 as i32, y: (at >> 16) as i16 as i32 }));
-                    }
-                }
-            }
-            WM_SIZING => {
-                if let Some((r0, p0)) = state(h).and_then(|st| st.sizing) {
-                    let s = state(h).map_or(1.0, |st| st.s);
-                    let mut p = POINT { x: 0, y: 0 };
-                    GetCursorPos(&mut p);
-                    let r = &mut *(lp as *mut RECT);
-                    *r = sized(r0, p.x - p0.x, p.y - p0.y, wp as u32, ((220.0 * s) as i32, (150.0 * s) as i32));
-                    return 1;
-                }
-            }
             WM_EXITSIZEMOVE => {
-                if let Some(st) = state(h) {
-                    st.sizing = None;
-                }
                 KillTimer(h, T_RECT);
                 save_rect(h);
                 return 0;
@@ -1406,28 +1354,5 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             _ => {}
         }
         DefWindowProcW(h, msg, wp, lp)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A corner dragged in small steps ends where the pointer is, however many steps it
-    /// took; the far edges stay, and the note keeps its smallest size.
-    #[test]
-    fn a_drag_sizes_by_the_pointer() {
-        let r = RECT { left: 100, top: 50, right: 400, bottom: 350 };
-        let mut last = r;
-        for i in 1..=20 {
-            last = sized(r, 4 * i, 6 * i, WMSZ_BOTTOMRIGHT, (220, 150));
-        }
-        assert_eq!((last.left, last.top, last.right, last.bottom), (100, 50, 480, 470));
-        let left = sized(r, 30, -10, WMSZ_TOPLEFT, (220, 150));
-        assert_eq!((left.left, left.top, left.right, left.bottom), (130, 40, 400, 350));
-        let small = sized(r, -500, -500, WMSZ_BOTTOMRIGHT, (220, 150));
-        assert_eq!((small.right, small.bottom), (320, 200));
-        let small = sized(r, 500, 0, WMSZ_LEFT, (220, 150));
-        assert_eq!((small.left, small.right, small.top), (180, 400, 50));
     }
 }
