@@ -327,8 +327,61 @@ impl Canvas {
         let straight_row = |ly: f32| [ly, ly - amb_dy, ly - key_dy].iter().all(|&y| (y - cy).abs() <= hy - r - 3.0);
         let mid = (cx - (hx - r - margin), cx + (hx - r - margin));
         let mut by_col: Vec<(f32, f32)> = Vec::new();
+        // One pixel worked out (its distance and shadow given, or found here): its distance.
+        let pixel = |px: &mut [u32], row: usize, col: i32, py: i32, known: Option<(f32, f32)>| -> f32 {
+            let (d, sa) = known.unwrap_or_else(|| {
+                let (mut lx, mut ly) = (col as f32 + 0.5, py as f32 + 0.5);
+                if rotated {
+                    let (dx, dy) = (lx - s.px, ly - s.py);
+                    lx = s.px + dx * cos - dy * sin;
+                    ly = s.py + dx * sin + dy * cos;
+                }
+                at(lx, ly)
+            });
+            let p = &mut px[row + col as usize];
+            if d < -1.5 && solid {
+                *p = opaque; // deep inside: no shadow, no edge, no blending
+                return d;
+            }
+            if sa > 0.002 {
+                Self::blend(p, 0x000000, sa);
+            }
+            let cov = (0.5 - d).clamp(0.0, 1.0);
+            if cov > 0.0 {
+                Self::blend(p, fill, fill_a * cov);
+                if edge_a > 0.0 {
+                    let e = cov * (d + 1.5).clamp(0.0, 1.0);
+                    if e > 0.0 {
+                        Self::blend(p, edge, edge_a * e);
+                    }
+                }
+            }
+            d
+        };
         let px = self.px();
         for py in y0..y1 {
+            // Turned (a leaning card in the deck), a row's deep inside is one run, the card
+            // being convex: worked out from each end in to where it starts, then filled, not
+            // a distance for every pixel across a card hundreds wide.
+            if rotated && solid && !every_pixel() {
+                let row = (py * cw) as usize;
+                let mut l = x0;
+                let mut inside = false;
+                while l < x1 && !inside {
+                    inside = pixel(px, row, l, py, None) < -1.5;
+                    l += 1;
+                }
+                if inside {
+                    let mut r = x1 - 1;
+                    while r >= l && pixel(px, row, r, py, None) >= -1.5 {
+                        r -= 1;
+                    }
+                    if r > l {
+                        px[row + l as usize..row + r as usize].fill(opaque);
+                    }
+                }
+                continue;
+            }
             let row = (py * cw) as usize;
             // Fast path: on rows clear of the rounded corners, the solid interior is a
             // plain span fill; only the edges and shadow band need per-pixel work.
@@ -355,35 +408,14 @@ impl Canvas {
                     }
                 let col = pxx;
                 pxx += 1;
-                let (mut lx, mut ly) = (col as f32 + 0.5, py as f32 + 0.5);
-                if rotated {
-                    let (dx, dy) = (lx - s.px, ly - s.py);
-                    lx = s.px + dx * cos - dy * sin;
-                    ly = s.py + dx * sin + dy * cos;
-                }
-                let (d, sa) = match by_row {
-                    _ if side => by_col[(col - x0) as usize],
-                    Some(v) if lx > mid.0 && lx < mid.1 => v,
-                    _ => at(lx, ly),
+                // (Only an unturned card has these: its pixel's place is its own.)
+                let lx = col as f32 + 0.5;
+                let known = match by_row {
+                    _ if side => Some(by_col[(col - x0) as usize]),
+                    Some(v) if lx > mid.0 && lx < mid.1 => Some(v),
+                    _ => None,
                 };
-                let p = &mut px[row + col as usize];
-                if d < -1.5 && solid {
-                    *p = opaque; // deep inside: no shadow, no edge, no blending
-                    continue;
-                }
-                if sa > 0.002 {
-                    Self::blend(p, 0x000000, sa);
-                }
-                let cov = (0.5 - d).clamp(0.0, 1.0);
-                if cov > 0.0 {
-                    Self::blend(p, fill, fill_a * cov);
-                    if edge_a > 0.0 {
-                        let e = cov * (d + 1.5).clamp(0.0, 1.0);
-                        if e > 0.0 {
-                            Self::blend(p, edge, edge_a * e);
-                        }
-                    }
-                }
+                pixel(px, row, col, py, known);
             }
         }
     }
@@ -1080,6 +1112,10 @@ mod tests {
             (Shape::new(10.0, 10.0, 304.0, 160.0, 14.0), 1.0, 0.0, 1.5),
             (Shape::new(52.2, 41.9, 200.0, 90.0, 6.0), 0.6, 1.0, 1.0),
             (Shape::new(70.0, 50.0, 300.0, 400.0, 12.0).rotated(0.05, 220.0, 250.0), 1.0, 1.3, 1.0),
+            // Leaning as a deck's cards do, one running off the canvas, one faded.
+            (Shape::new(54.3, 14.6, 304.0, 119.0, 14.0).rotated(-0.022, 358.3, 74.0), 1.0, 1.0, 1.0),
+            (Shape::new(500.2, 600.0, 304.0, 178.5, 21.0).rotated(-0.022, 804.2, 690.0), 1.0, 1.8, 1.5),
+            (Shape::new(20.0, 300.0, 120.0, 40.0, 20.0).rotated(-0.3, 80.0, 320.0), 0.7, 1.0, 1.0),
         ];
         for (sh, fill_a, shadow, scale) in shapes {
             let draw = |every: bool| {

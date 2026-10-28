@@ -65,17 +65,127 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
     let mat = theme::chrome(dark);
     let ring = ring_hit(d);
     let mut c = d.canvas.take().unwrap();
+    let pill_zone = {
+        let (zx, zw) = span(&g, ww, 0.0, (PILL_INSET + PILL_W + 3.0) * s);
+        let top = g.pill_top() - wy as f32 - 3.0 * s;
+        rect(zx.floor() as i32, top.floor() as i32, zw.ceil() as i32, (g.pill_h() + 6.0 * s).ceil() as i32)
+    };
+    // Cards: tucked ones first, then the pulled-out / dragged one on top.
+    let mut order: Vec<usize> = (0..d.tabs.len()).collect();
+    let drag_idx = d.drag.as_ref().filter(|dr| dr.active).map(|dr| dr.idx);
+    order.sort_by(|&a, &b| {
+        let ka = (Some(a) == drag_idx, d.tabs[a].pull.value);
+        let kb = (Some(b) == drag_idx, d.tabs[b].pull.value);
+        ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    // What lies under the first card that moves, when it's all at rest (a card coming out,
+    // the one pointed at lifting), is the picture the frame that drew it kept: only what
+    // moves is drawn again, not every card in the deck each frame.
+    let (still, key) = still_part(d, &order, (wy, wh), dark, ring);
+    let kept = still > 0 && d.under.as_ref().is_some_and(|(k, _, _)| *k == key);
+    match d.under.as_ref() {
+        Some((_, w0, px)) if kept => {
+            // Kept at another width (the window grows as a card comes out, away from the
+            // screen's edge): what's at rest is all within the narrowest window of the
+            // edge, which it keeps to.
+            let (w0, dx) = (*w0, if g.left { 0 } else { ww - *w0 });
+            if ww > w0 {
+                c.clear(0);
+            }
+            let (a, b) = (dx.max(0), (dx + w0).min(ww));
+            for y in 0..wh {
+                let row = (y * w0) as usize;
+                c.copy_in(rect(a, y, b - a, 1), &px[row + (a - dx) as usize..row + (b - dx) as usize]);
+            }
+        }
+        _ => draw_under(d, &mut c, (wy, ww, wh), pill_zone, ring, dark),
+    }
+    if !d.wide {
+        d.under = None;
+    }
+    for (n, &i) in order.iter().enumerate() {
+        if kept && n < still {
+            continue;
+        }
+        draw_card(d, &mut c, i, ww, wy as f32, dark);
+        if !kept && n + 1 == still {
+            d.under = Some((key, ww, c.copy_out(rect(0, 0, ww, wh))));
+        }
+    }
+    // The focus ring, over the cards so the one shingled below never covers its edge. It
+    // comes in with the card's spine as the deck fans out.
+    if let Some(Hit::Tab(i)) = ring {
+        let cp = pose(d, i, ww, wy as f32);
+        focus::ring_haloed(&mut c, &cp.shape, theme::FOCUS, mat.fill, clamp01((cp.reveal - 0.55) / 0.45), s);
+    }
+
+    if !d.wide {
+        // Nothing outside the pill's zone is left hit-testable, not even a shadow's edge.
+        let z = pill_zone;
+        c.fill_raw(0, 0, ww, z.top, 0);
+        c.fill_raw(0, z.bottom, ww, wh, 0);
+        c.fill_raw(0, z.top, z.left, z.bottom, 0);
+        c.fill_raw(z.right, z.top, ww, z.bottom, 0);
+    }
+    d.canvas = Some(c);
+    (wx, wy)
+}
+
+/// How many of the cards in drawing `order` at the start are at rest, with all that's
+/// drawn under them (the pill, the "+N" tile and the plus button), and a key to what they
+/// all look like: the picture of them kept (`Deck::under`) stands for drawing them while
+/// the key is the same. None (0) while any of what's under them moves, or a card is
+/// dragged. The key has everything their drawing reads, but the window's width: they're
+/// drawn from the screen's edge, and none reaches past the narrowest window.
+fn still_part(d: &Deck, order: &[usize], (wy, wh): (i32, i32), dark: bool, ring: Option<Hit>) -> (usize, u64) {
+    use std::hash::{Hash, Hasher};
+    let base = [&d.pill, &d.caps, &d.extras, &d.plus_hot, &d.more_hot, &d.plus_back];
+    if !d.wide || d.drag.is_some() || d.pulse.is_some() || d.extras_delay > 0.0 || d.plus_wait > 0.0 || !base.iter().all(|sp| sp.settled()) {
+        return (0, 0);
+    }
+    // Not the card pointed at (it's lit, and its label may scroll), nor one that's out.
+    let still = order
+        .iter()
+        .take_while(|&&i| {
+            let t = &d.tabs[i];
+            t.delay <= 0.0 && t.pull.value == 0.0 && d.hover != Hit::Tab(i) && [&t.reveal, &t.bulge, &t.lean, &t.y, &t.press, &t.pull, &t.cap, &t.born].iter().all(|sp| sp.settled())
+        })
+        .count();
+    if still == 0 {
+        return (0, 0);
+    }
+    let g = d.geo;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (wy, wh, dark, g.left, g.centre, g.ey, g.eh).hash(&mut h);
+    (g.n, g.more, g.caps, d.tabs.len(), crate::win::editor::rich::font_index(), format!("{ring:?} {:?} {:?}", d.pressed, d.hover)).hash(&mut h);
+    for v in [g.s, g.tab_h, g.step, g.top, g.tail, d.pill.value, d.pill.target, d.caps.value, d.extras.value, d.plus_hot.value, d.more_hot.value, d.plus_back.value, d.font_scale, extras_drop(d, g.ew)] {
+        v.to_bits().hash(&mut h);
+    }
+    if g.more > 0 {
+        t!("deck_more", g.more).hash(&mut h);
+    }
+    for &i in &order[..still] {
+        let t = &d.tabs[i];
+        (i, t.id, t.color, t.open, t.pinned, &t.label).hash(&mut h);
+        for sp in [&t.reveal, &t.bulge, &t.lean, &t.y, &t.press, &t.pull, &t.cap, &t.born] {
+            sp.value.to_bits().hash(&mut h);
+        }
+    }
+    (still, h.finish())
+}
+
+/// What's drawn under the cards: the window's hit-testable zone, the pill, and the "+N"
+/// tile and plus button.
+fn draw_under(d: &mut Deck, c: &mut Canvas, (wy, ww, wh): (i32, i32, i32), pill_zone: RECT, ring: Option<Hit>, dark: bool) {
+    let g = d.geo;
+    let s = g.s;
+    let mat = theme::chrome(dark);
     c.clear(0);
     // Keep the tab column hoverable (alpha 1 is invisible but hit-testable). Folded, only
     // the pill catches the pointer, with the sliver between it and the screen edge (where a
     // pointer thrown at the edge lands): the rest of the small window lets it through, to
     // the scroll bar of a maximized window, say.
     let col = ((TAB_W + BULGE + 10.0) * s) as i32;
-    let pill_zone = {
-        let (zx, zw) = span(&g, ww, 0.0, (PILL_INSET + PILL_W + 3.0) * s);
-        let top = g.pill_top() - wy as f32 - 3.0 * s;
-        rect(zx.floor() as i32, top.floor() as i32, zw.ceil() as i32, (g.pill_h() + 6.0 * s).ceil() as i32)
-    };
     if d.wide {
         let (x0, x1) = if g.left { (0, col) } else { (ww - col, ww) };
         c.fill_raw(x0, 0, x1, wh, 0x0100_0000);
@@ -130,42 +240,13 @@ pub(super) fn paint(d: &mut Deck, dark: bool) -> (i32, i32) {
             }
             c.over(&Image::from_pixels(w, h, v), x0, y0);
         } else {
-            pill(&mut c, px, pt, pa);
+            pill(c, px, pt, pa);
         }
     }
 
     // The "+N" tile and the plus button come out from under the last card, so they're
     // drawn before the cards.
-    draw_extras(d, &mut c, ww, ring, dark);
-
-    // Cards: tucked ones first, then the pulled-out / dragged one on top.
-    let mut order: Vec<usize> = (0..d.tabs.len()).collect();
-    let drag_idx = d.drag.as_ref().filter(|dr| dr.active).map(|dr| dr.idx);
-    order.sort_by(|&a, &b| {
-        let ka = (Some(a) == drag_idx, d.tabs[a].pull.value);
-        let kb = (Some(b) == drag_idx, d.tabs[b].pull.value);
-        ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for i in order {
-        draw_card(d, &mut c, i, ww, wy as f32, dark);
-    }
-    // The focus ring, over the cards so the one shingled below never covers its edge. It
-    // comes in with the card's spine as the deck fans out.
-    if let Some(Hit::Tab(i)) = ring {
-        let cp = pose(d, i, ww, wy as f32);
-        focus::ring_haloed(&mut c, &cp.shape, theme::FOCUS, mat.fill, clamp01((cp.reveal - 0.55) / 0.45), s);
-    }
-
-    if !d.wide {
-        // Nothing outside the pill's zone is left hit-testable, not even a shadow's edge.
-        let z = pill_zone;
-        c.fill_raw(0, 0, ww, z.top, 0);
-        c.fill_raw(0, z.bottom, ww, wh, 0);
-        c.fill_raw(0, z.top, z.left, z.bottom, 0);
-        c.fill_raw(z.right, z.top, ww, z.bottom, 0);
-    }
-    d.canvas = Some(c);
-    (wx, wy)
+    draw_extras(d, c, ww, ring, dark);
 }
 
 /// How much of a row `y` of the pill (0 at its top, 1 at its foot) is left as it dissolves
@@ -178,6 +259,22 @@ fn sweep(pa: f32, y: f32) -> f32 {
 
 /// The "+N" tile and the plus button, which slide down out from under the last card as
 /// the deck fans out, and back under it as it folds.
+/// How far below their place the "+N" tile and the plus button are: from the foot of the
+/// stack (its last card's bottom) to the plus button's. They keep below the foot as it
+/// moves (the stack folding up into the pill, its last card still on its way down),
+/// rather than waiting where they go.
+fn extras_drop(d: &Deck, ww: i32) -> f32 {
+    let g = d.geo;
+    let rest = g.slot_y(g.n) + 6.0 * g.s;
+    let tuck = (g.plus_cy() + 17.0 * g.s - rest).max(0.0);
+    let foot = (0..d.tabs.len()).filter(|&i| !d.tabs[i].open).map(|i| {
+        let sh = pose(d, i, ww, g.ey as f32).shape;
+        sh.y + sh.h
+    });
+    let follow = foot.reduce(f32::max).map_or(0.0, |f| (f - rest).min(0.0));
+    footer_drop(d) + follow - (1.0 - d.extras.value) * tuck
+}
+
 fn draw_extras(d: &mut Deck, c: &mut Canvas, ww: i32, ring: Option<Hit>, dark: bool) {
     let g = d.geo;
     let s = g.s;
@@ -186,17 +283,7 @@ fn draw_extras(d: &mut Deck, c: &mut Canvas, ww: i32, ring: Option<Hit>, dark: b
     if ea > 0.01 && d.wide {
         let centre_near = (TAB_W / 2.0 + 2.0) * s;
         let (cx, _) = span(&g, ww, centre_near, centre_near);
-        // From the foot of the stack (its last card's bottom) to the plus button's. They
-        // keep below the foot as it moves (the stack folding up into the pill, its last
-        // card still on its way down), rather than waiting where they go.
-        let rest = g.slot_y(g.n) + 6.0 * s;
-        let tuck = (g.plus_cy() + 17.0 * s - rest).max(0.0);
-        let foot = (0..d.tabs.len()).filter(|&i| !d.tabs[i].open).map(|i| {
-            let sh = pose(d, i, ww, g.ey as f32).shape;
-            sh.y + sh.h
-        });
-        let follow = foot.reduce(f32::max).map_or(0.0, |f| (f - rest).min(0.0));
-        let drop = footer_drop(d) + follow - (1.0 - d.extras.value) * tuck;
+        let drop = extras_drop(d, ww);
         if g.more > 0 {
             // Swelling too when a note came back among those it counts.
             let k = swell(d.pulse);

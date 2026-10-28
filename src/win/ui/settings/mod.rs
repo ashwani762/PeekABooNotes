@@ -700,8 +700,8 @@ fn held_mods() -> u8 {
 
 /// Key `vk` went down while shortcut `i` waits for keys: Esc cancels, Backspace or Delete
 /// turns the shortcut off, a modifier shows; anything else, with the modifiers held, is
-/// the new keys if they will do. Keys that aren't a shortcut's form are said and waited
-/// past; keys a shortcut, the keyboard or another app has end the wait, the old ones kept.
+/// the new keys if they will do. Keys that won't (not a shortcut's form, or keys a
+/// shortcut, the keyboard or another app has) are said and waited past, the old ones kept.
 fn recorded_key(hwnd: HWND, i: usize, vk: u16) {
     let mods = held_mods();
     match vk {
@@ -724,11 +724,9 @@ fn recorded_key(hwnd: HWND, i: usize, vk: u16) {
                 });
                 stop_recording();
             }
-            Err(r @ (hotkey::Refusal::Modifiers | hotkey::Refusal::Key)) => say(hwnd, i, refusal_text(r)),
-            Err(r) => {
-                stop_recording();
-                say(hwnd, i, refusal_text(r));
-            }
+            // The row keeps waiting, so the next keys pressed go to it: Esc then cancels,
+            // where ending the wait here left Esc to close Settings while the row said why.
+            Err(r) => say(hwnd, i, refusal_text(r)),
         },
     }
 }

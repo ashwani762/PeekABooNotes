@@ -223,7 +223,7 @@ pub(super) fn paste(h: HWND) {
         rich::set_link(e, a, b, url);
         let end = link_end(e, a, b);
         rich::set_sel(e, end, end);
-    } else if clip.as_deref().is_some_and(|c| paste_into_checklist(e, c)) {
+    } else if clip.as_deref().is_some_and(|c| paste_into_checklist(e, c) || rich::paste_markdown(e, c)) {
         let (end, _) = rich::sel(e);
         rich::link_addresses(e, a.max(0) as usize, end.max(0) as usize);
     } else {

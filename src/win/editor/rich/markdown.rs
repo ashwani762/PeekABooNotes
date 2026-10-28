@@ -626,6 +626,49 @@ pub(super) fn close_marks(out: &mut String, cur: Marks, next: Marks) {
     }
 }
 
+/// Text pasted into `h` that reads as a Markdown list (two lines or more with list or
+/// checklist markers: `- `, `1. `, `- [ ] `) comes in as typing those markers makes it and
+/// as an imported file does: lists, checklist items, nesting and inline marks, rather than
+/// the markers as text. Only onto an empty line of plain text below the title, outside
+/// any block, and only lists, plain lines and inline marks (a quote, code or a table in
+/// it leaves all of it plain). False, with nothing done, when it isn't one of those.
+pub fn paste_markdown(h: HWND, clip: &str) -> bool {
+    let norm = clip.replace("\r\n", "\n").replace('\r', "\n");
+    let src: Vec<&str> = norm.trim_end().split('\n').collect();
+    let listed = src.iter().filter(|l| !matches!(parse_line(l.trim_end()).kind, Kind::Plain)).count();
+    if src.len() < 2 || listed < 2 {
+        return false;
+    }
+    let body = parse_body(&src);
+    let joined = body.joined();
+    let (a, b) = sel(h);
+    let (a, b) = (a.min(b).max(0), a.max(b).max(0));
+    let t = text(h);
+    let ps = para_start(&t, a);
+    let lone = ps > 0 && a == ps && para_end(&t, b) == b && !t[a as usize..b as usize].contains(&CR);
+    let room = length_limit(&t) as i64 - (t.len() as i64 - (b - a) as i64);
+    if !body.fills.is_empty() || !lone || (joined.encode_utf16().count() as i64) > room || cell_at(h, &t, a).is_some() || t[a as usize..b as usize].iter().any(|&c| is_task(c)) {
+        return false;
+    }
+    let mut pf = ParaFormat2::new();
+    send(h, EM_GETPARAFORMAT, 0, &mut pf as *mut _ as isize);
+    if pf.numbering != 0 || pf.start_indent != 0 {
+        return false;
+    }
+    still(h, || {
+        insert_text(h, &joined);
+        let (end, _) = sel(h);
+        set_sel(h, a, end);
+        set_effect(h, CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT, false);
+        put_body(h, a, &body);
+        // After what came in, links' hidden instructions with it.
+        let end = (text(h).len() - (t.len() - b as usize)) as i32;
+        set_sel(h, end, end);
+        style_boxes_in(h, a, end);
+    });
+    true
+}
+
 /// Load plain text / light Markdown into `h`, turning list markers into real formatting.
 pub fn load_markdown(h: HWND, md: &str) {
     bulk(h, || load_markdown_now(h, md));
@@ -1253,6 +1296,34 @@ mod tests {
         let h3 = editor();
         load_markdown(h3, want);
         assert_eq!(to_markdown(h3, true), format!("# {want}"), "again: {want}");
+    }
+
+    /// Markdown lists pasted onto an empty line come in as lists, as typing them makes
+    /// them; text that isn't a list, or a paste anywhere else, is left to the plain paste.
+    #[test]
+    fn pasted_markdown_lists_are_lists() {
+        let clip = "Groceries\r\n- milk\r\n- **fresh** bread\r\n  - rye\r\n- [ ] eggs\r\n- [x] tea\r\n1. one\r\n2. two\r\n";
+        let h = editor();
+        load_markdown(h, "T\nbefore\n\nafter");
+        let at = text(h).iter().enumerate().filter(|&(_, &c)| c == CR).nth(1).unwrap().0 as i32 + 1;
+        set_sel(h, at, at);
+        assert!(paste_markdown(h, clip));
+        assert_eq!(
+            to_markdown(h, true).replace("  \n", "\n"),
+            "# T\nbefore\nGroceries\n- milk\n- **fresh** bread\n  - rye\n- [ ] eggs\n- [x] tea\n1. one\n2. two\nafter"
+        );
+        // The caret after what came in.
+        assert_eq!(sel(h).0, text(h).iter().rposition(|&c| c == CR).unwrap() as i32);
+        // Not a list (one marker), on the title, mid-line, in a list item: nothing done.
+        let h = editor();
+        load_markdown(h, "T\nsome text\n\n- item");
+        let t = text(h);
+        let empty = t.iter().enumerate().filter(|&(_, &c)| c == CR).nth(1).unwrap().0 as i32 + 1;
+        for (at, clip) in [(empty, "a line\n- one marker\nanother"), (0, "- a\n- b"), (4, "- a\n- b"), (t.len() as i32, "- a\n- b"), (empty, "- a\n```\ncode\n```\n- b")] {
+            set_sel(h, at, at);
+            assert!(!paste_markdown(h, clip), "{at} {clip:?}");
+            assert_eq!(text(h), t);
+        }
     }
 
     /// What assistants write: `*italic*`, `__bold__`, `***both***` (written back the way
