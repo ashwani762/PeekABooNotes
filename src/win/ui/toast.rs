@@ -86,6 +86,9 @@ struct Stacked {
 enum Part {
     Undo,
     Close,
+    /// Elsewhere on the top card: the pointer there holds the clock, but a click does
+    /// nothing (it undid, a click meant for the window under the toast taking a note back).
+    Card,
 }
 
 struct Toast {
@@ -149,9 +152,10 @@ struct Toast {
     s: f32,
     /// The top card (or the notice) as last drawn, in the window, where it's going: only
     /// it takes the pointer, not the cards behind or the shadow around it. And its ×
-    /// (empty for a notice).
+    /// and its Undo pill (empty for a notice).
     capsule: RECT,
     close: RECT,
+    pill: RECT,
     body: Font,
     bold: Font,
     tiny: Font,
@@ -294,6 +298,7 @@ fn with_toast(at: Option<(RECT, f32)>, f: impl FnOnce(&mut Toast)) {
                 s,
                 capsule: RECT { left: 0, top: 0, right: 0, bottom: 0 },
                 close: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+                pill: RECT { left: 0, top: 0, right: 0, bottom: 0 },
                 body,
                 bold,
                 tiny,
@@ -529,8 +534,10 @@ fn part_in(t: &Toast, x: i32, y: i32) -> Option<Part> {
         None
     } else if pt_in(&t.close, x, y) {
         Some(Part::Close)
-    } else {
+    } else if pt_in(&t.pill, x, y) {
         Some(Part::Undo)
+    } else {
+        Some(Part::Card)
     }
 }
 
@@ -630,6 +637,7 @@ fn render(t: &mut Toast) {
         c.flush();
         t.capsule = rect(x as i32, y as i32, w, h);
         t.close = rect(0, 0, 0, 0);
+        t.pill = rect(0, 0, 0, 0);
     } else {
         // The cards from the back to the front: those behind, the top, then one coming in
         // or going out in front of it.
@@ -661,9 +669,10 @@ fn render(t: &mut Toast) {
         // The top card where it's going takes the pointer.
         let w = t.width.target().round();
         let x = (mid - w / 2.0).round();
-        let (_, close) = parts(x, y, w, hf, t.cards.iter().find(|c| !c.gone && c.place.target() == 0.0).map_or(0.0, |c| c.size.1), s);
+        let (button, close) = parts(x, y, w, hf, t.cards.iter().find(|c| !c.gone && c.place.target() == 0.0).map_or(0.0, |c| c.size.1), s);
         t.capsule = rect(x as i32, y as i32, w as i32, h);
         t.close = rect(close.x as i32, close.y as i32, close.w.ceil() as i32, close.h.ceil() as i32);
+        t.pill = rect(button.x as i32, button.y as i32, button.w.ceil() as i32, button.h.ceil() as i32);
     }
     t.canvas = Some(c);
     present(t, wide, ch);
@@ -816,13 +825,19 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 anim::wake(Client::Toast);
                 return 0;
             }
-            // A hand on the capsule, the usual arrow on the shadow around it.
+            // A hand on what a click does something on (the Undo pill, the ×, a notice),
+            // the usual arrow elsewhere.
             WM_SETCURSOR => {
                 let mut p = POINT { x: 0, y: 0 };
                 let mut r: RECT = std::mem::zeroed();
                 GetCursorPos(&mut p);
                 GetWindowRect(h, &mut r);
-                SetCursor(LoadCursorW(null_mut(), if part_at(p.x - r.left, p.y - r.top).is_some() { IDC_HAND } else { IDC_ARROW }));
+                let notice = TOAST.with(|t| t.borrow().as_ref().is_some_and(|t| t.notice.is_some()));
+                let hand = match part_at(p.x - r.left, p.y - r.top) {
+                    Some(Part::Card) => notice,
+                    part => part.is_some(),
+                };
+                SetCursor(LoadCursorW(null_mut(), if hand { IDC_HAND } else { IDC_ARROW }));
                 return 1;
             }
             // Shown on the press, done on the release, on the capsule only.
@@ -848,10 +863,10 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     // A notice has nothing to undo: a click just dismisses it (and shows
                     // what can still be undone, if anything).
                     Some(_) if notice => with_toast(None, |t| t.notice = None),
-                    // The × makes the top one final, pressed and let go on it; the rest of
-                    // the card undoes, unless the press began on the ×.
+                    // The × makes the top one final and the Undo pill takes it back, each
+                    // pressed and let go on it; the rest of the card does nothing.
                     Some(Part::Close) if pressed == Some(Part::Close) => app::dismiss_undo(),
-                    Some(Part::Undo) if pressed != Some(Part::Close) => app::undo(),
+                    Some(Part::Undo) if pressed == Some(Part::Undo) => app::undo(),
                     Some(_) => {}
                 }
                 return 0;
