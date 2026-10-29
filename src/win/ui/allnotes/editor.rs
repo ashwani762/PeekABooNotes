@@ -143,9 +143,12 @@ pub(super) fn sync_editor() {
                     // and the card fades straight to that. Made after the fade, the card
                     // faded to the note's plain preview first (its picture smaller, its links
                     // plain), and half a second on to the editor's picture over it: two
-                    // changes, the second with both pictures showing.
+                    // changes, the second with both pictures showing. So too while rows close
+                    // a gap, as a note comes back with Undo: made before the rows' first
+                    // frame, the editor only holds their start a little, where made after
+                    // them the card faded twice, the second time with both layouts showing.
                     let joins = !force && fading && with(|l| l.detail_a.value <= 0.0).unwrap_or(false);
-                    if !force && ((fading && !joins) || with(|l| super::list::gaps_moving(l)).unwrap_or(false)) {
+                    if !force && !joins && (fading || with(|l| super::list::gaps_moving(l)).unwrap_or(false)) {
                         unsafe { SetTimer(hwnd, T_SYNC, 320, None) };
                     } else {
                         let h = crate::win::ui::note::create_embedded(id, hwnd, r);
