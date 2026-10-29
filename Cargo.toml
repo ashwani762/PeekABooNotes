@@ -1,6 +1,6 @@
 [package]
 name = "peekaboo-notes"
-version = "0.6.91"
+version = "0.6.92"
 edition = "2024"
 description = "Edge-docked sticky notes for Windows with a tiny memory footprint"
 authors = ["Ashwani Kumar"]
