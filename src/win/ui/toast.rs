@@ -6,8 +6,8 @@
 //! stack of cards: the newest on top, the ones before it peeking out above it, each a
 //! little narrower and dimmer. A click takes the top one back and its × makes it final
 //! now; either way it drops out in front and the one under it comes up into its place,
-//! with the time it has left. The countdown waits while the pointer is on the toast, so
-//! reaching for Undo never races the clock. A notice (notes can't be saved) shows over it
+//! with the time it has left. The countdown runs on while the pointer is on the toast: held
+//! there, it stopped, and the toast stayed for as long as the pointer rested on it. A notice (notes can't be saved) shows over it
 //! for a while, with nothing to undo.
 //!
 //! While only the clock runs, the ring sweeps on at the display's rate: each frame puts
@@ -86,8 +86,8 @@ struct Stacked {
 enum Part {
     Undo,
     Close,
-    /// Elsewhere on the top card: the pointer there holds the clock, but a click does
-    /// nothing (it undid, a click meant for the window under the toast taking a note back).
+    /// Elsewhere on the top card: a click there does nothing (it undid, a click meant for
+    /// the window under the toast taking a note back).
     Card,
 }
 
@@ -112,7 +112,7 @@ struct Toast {
     /// What it said last, and whether that was a notice: it goes on showing it as it
     /// sinks away.
     said: (String, bool),
-    /// When the clock last ran; None while the pointer holds it.
+    /// When the clock last ran; None once the toast is going.
     clock_at: Option<Instant>,
     rise: Ease,
     /// How much of it shows: as it rises and sinks, and with Reduce Motion, where it fades
@@ -393,10 +393,9 @@ fn step(dt: f32) -> bool {
     let Some((part, clock)) = TOAST.with(|c| {
         c.borrow_mut().as_mut().map(|t| {
             let part = pointed(t);
-            let over = part.is_some();
             let now = Instant::now();
-            let clock = if over { 0.0 } else { t.clock_at.map_or(0.0, |at| now.duration_since(at).as_secs_f32()) };
-            t.clock_at = (!over && t.alive).then_some(now);
+            let clock = t.clock_at.map_or(0.0, |at| now.duration_since(at).as_secs_f32());
+            t.clock_at = t.alive.then_some(now);
             (part, clock)
         })
     }) else {
@@ -464,9 +463,8 @@ fn step(dt: f32) -> bool {
         } else {
             sweep(t);
         }
-        // Held under the pointer, with nothing moving, the clock stops: the pointer moving
-        // off it (WM_MOUSEMOVE, WM_MOUSELEAVE) starts it again.
-        !still || !over
+        // The clock always runs on, the ring with it.
+        true
     })
 }
 
@@ -811,8 +809,8 @@ unsafe extern "system" fn wndproc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
     unsafe {
         match msg {
             WM_MOUSEACTIVATE => return MA_NOACTIVATE as LRESULT,
-            // The countdown waits while the pointer is on the capsule: going on, off, or
-            // away, it looks again.
+            // The pointer going on, off or away: the buttons light or go dark, the × shows
+            // its tip.
             WM_MOUSEMOVE => {
                 let mut tme = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
                 TrackMouseEvent(&mut tme);

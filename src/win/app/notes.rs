@@ -675,7 +675,7 @@ pub fn dismiss_undo() {
     make_final(a);
 }
 
-/// The toast's clock ran `dt` seconds (0 while the pointer holds it): every action whose
+/// The toast's clock ran `dt` seconds: every action whose
 /// own time ran out is made final, and the toast shows what's left. The seconds each card
 /// the toast stacks has left, newest first, by id.
 pub fn undo_clock(dt: f32) -> Vec<(u64, f32)> {

@@ -9,8 +9,7 @@
 //! time short: each becomes final (a deleted note gone for good) only when its own ten
 //! seconds have run out, or it's dismissed.
 
-/// How long an action can be taken back, in seconds of the toast's clock (which waits
-/// while the pointer is on the toast).
+/// How long an action can be taken back, in seconds of the toast's clock.
 pub const SECONDS: f32 = 10.0;
 
 /// One action, which card it is on the toast, and the seconds it has left.
