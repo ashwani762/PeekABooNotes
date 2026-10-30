@@ -119,7 +119,7 @@ fn place_to<'a>(w: &Win, groups: &'a [Group]) -> (Vec<Item<'a>>, f32) {
 
 pub(super) fn seg_metrics(w: &Win, labels: &[&str], r: &RECT) -> (Shape, f32) {
     let s = w.s;
-    let widest = labels.iter().map(|l| w.fonts.seg_on.measure(l).0).max().unwrap_or(0) as f32;
+    let widest = labels.iter().map(|l| w.fonts.seg.measure(l).0).max().unwrap_or(0) as f32;
     let item = seg_item(widest, labels.len(), (r.right - r.left) as f32, s);
     let (sw, sh) = (item * labels.len() as f32 + 4.0 * s, 28.0 * s);
     let x = r.right as f32 - INSET * s - sw;
@@ -161,7 +161,7 @@ pub(super) fn button_shape(w: &Win, label: &str, r: &RECT) -> Shape {
 /// Setting `k`'s pop-up button: its current choice, a gap and a chevron.
 pub(super) fn choice_shape(w: &Win, k: Key, r: &RECT) -> Shape {
     let s = w.s;
-    let bw = w.fonts.button.measure(&choice_label(k)).0 as f32 + 44.0 * s;
+    let bw = w.fonts.seg.measure(&choice_label(k)).0 as f32 + 44.0 * s;
     let bh = 28.0 * s;
     Shape::new(r.right as f32 - INSET * s - bw, (r.top + r.bottom) as f32 / 2.0 - bh / 2.0, bw, bh, 8.0 * s)
 }
@@ -298,7 +298,7 @@ mod tests {
         for lang in i18n::languages() {
             i18n::init(&lang.tag);
             for s in [1.0f32, 1.25, 1.5, 2.0] {
-                let seg = Font::new(12.5 * s, FW_SEMIBOLD, theme::FACE_TEXT);
+                let seg = Font::new(12.5 * s, FW_NORMAL, theme::FACE_TEXT);
                 let label = Font::new(13.5 * s, FW_NORMAL, theme::FACE_TEXT);
                 let names = [t!("font_system"), t!("font_serif"), t!("font_mono"), t!("font_hand")];
                 let widest = names.iter().map(|n| seg.measure(n).0).max().unwrap() as f32;

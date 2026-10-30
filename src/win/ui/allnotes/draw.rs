@@ -109,11 +109,10 @@ pub(super) fn draw(l: &Lib, lay: &Layout, c: &mut Canvas) {
             c.shape(&sh, p.hover.0, p.hover.1, 1.0, 0.0);
         }
         // A label takes the pill's look as the pill comes over it, and loses it as it
-        // leaves: its ink with the pill's nearness, bold while it's mostly under it (it went
-        // bold at once, the pill still on the tab before).
+        // leaves: its ink with the pill's nearness, in one weight (bold, the chosen tab's
+        // label changed width as the pill came).
         let near = (l.seg_x.value - i as f32).abs();
-        let on = near < 0.5;
-        c.line_ct(name, if on { &f.seg_on } else { &f.seg }, x, seg_base, seg_w as i32, None, mix(p.sub, p.text, clamp01(1.0 - near)), DT_CENTER);
+        c.line_ct(name, &f.seg, x, seg_base, seg_w as i32, None, mix(p.sub, p.text, clamp01(1.0 - near)), DT_CENTER);
     }
     if ring == Some(Focus::Segments) {
         focus::ring(c, &sg, p.focus, 1.0, s);

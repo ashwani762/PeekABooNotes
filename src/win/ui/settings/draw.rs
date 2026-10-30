@@ -278,9 +278,10 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             let on = row.key.map(|k| value(w, k)).unwrap_or(0);
             for (i, l) in labels.iter().enumerate() {
                 let x = (sh.x + 2.0 * s + i as f32 * item) as i32;
-                let font = if i == on { &f.seg_on } else { &f.seg };
+                // The chosen one is told by the pill and its ink, in the same weight as the
+                // rest: bold, a label changed width as it was chosen.
                 let ink = if i == on || hovered(i) { p.text } else { mix(p.group, p.text, 0.78) };
-                c.line_ct(l, font, x, mid + font.cap / 2, item as i32, None, dim(ink), DT_CENTER);
+                c.line_ct(l, &f.seg, x, mid + f.seg.cap / 2, item as i32, None, dim(ink), DT_CENTER);
             }
         }
         Ctl::Swatches => {
@@ -381,7 +382,7 @@ fn draw_ctl(w: &Win, c: &mut Canvas, p: &Pal, pl: &Placed, r: &RECT, mid: i32) {
             let label = choice_label(key);
             // A chosen display that isn't connected reads as out of reach.
             let ink = if key == Key::DeckDisplay && display_away() { p.sub } else { p.text };
-            c.line_ct(&label, &f.button, (sh.x + 12.0 * s) as i32, mid + f.button.cap / 2, (sh.w - 36.0 * s) as i32, None, dim(ink), DT_LEFT);
+            c.line_ct(&label, &f.seg, (sh.x + 12.0 * s) as i32, mid + f.seg.cap / 2, (sh.w - 36.0 * s) as i32, None, dim(ink), DT_LEFT);
             let chev = rect((sh.x + sh.w - 26.0 * s) as i32, sh.y as i32, (16.0 * s) as i32, sh.h as i32);
             c.text_ct("\u{E70D}", &f.chrome, chev, None, dim(p.sub), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
